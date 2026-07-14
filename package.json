@@ -1,0 +1,16 @@
+{
+  "name": "clipme-workspace",
+  "private": true,
+  "version": "0.1.9",
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/desktop run dev",
+    "build": "npm --workspace apps/desktop run build",
+    "dist": "npm --workspace apps/desktop run dist",
+    "check": "npm --workspace apps/desktop run check",
+    "smoke": "npm --workspace apps/desktop run smoke",
+    "typecheck": "npm --workspace apps/desktop run typecheck"
+  }
+}

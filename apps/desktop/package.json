@@ -1,0 +1,101 @@
+{
+  "name": "clipme-desktop",
+  "productName": "ClipMe",
+  "version": "0.1.9",
+  "description": "AI clipper desktop app for turning long videos into short vertical clips.",
+  "author": "ClipMe",
+  "copyright": "Copyright © 2026 ClipMe",
+  "main": "dist/main/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && node scripts/run-electron.cjs\"",
+    "build": "npm run typecheck && vite build && tsc -p tsconfig.main.json",
+    "dist": "npm run build && electron-builder --win",
+    "predist": "node scripts/copy-runtime-binaries.cjs",
+    "check": "npm run typecheck",
+    "smoke": "npm run build && node --test scripts/smoke.test.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
+    "start": "node scripts/run-electron.cjs"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0",
+    "react": "^19.0.0",
+    "@sentry/electron": "^3.13.0",
+    "electron-updater": "^5.4.1",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.2.0",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2",
+    "electron-builder": "^24.6.0"
+  },
+  "build": {
+    "appId": "com.clipme.desktop",
+    "productName": "ClipMe",
+    "copyright": "Copyright © 2026 ClipMe",
+    "icon": "build/icon.ico",
+    "electronVersion": "34.2.0",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "shortcutName": "ClipMe",
+      "include": "build/installer.nsh"
+    },
+    "files": [
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "dist/shared/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/yt-dlp",
+        "to": "yt-dlp",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "resources/launcher",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  }
+}

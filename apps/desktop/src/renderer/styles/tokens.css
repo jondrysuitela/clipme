@@ -1,0 +1,26 @@
+:root {
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
+  /* Radii */
+  --radius-small: 6px;
+  --radius-medium: 8px;
+  --radius-large: 12px;
+
+  /* Brand */
+  --brand-primary: #6c2cff;
+  --brand-secondary: #1594ff;
+  --brand-accent: #f85a8b;
+
+  /* Surface */
+  --bg-default: #0f1216;
+  --panel: #171c25;
+  --panel-strong: #1d2430;
+
+  /* Text */
+  --text-default: #f5f7fb;
+  --text-muted: #9aa4b2;
+}
