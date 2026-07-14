@@ -1,10 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const https = require("node:https");
 const { spawn } = require("node:child_process");
 
-const WHISPER_VERSION = "v1.7.4";
-const BINARY_URL = `https://github.com/ggerganov/whisper.cpp/releases/download/${WHISPER_VERSION}/whisper-binx64.zip`;
+const WHISPER_VERSION = "v1.9.1";
+const BINARY_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/${WHISPER_VERSION}/whisper-bin-x64.zip`;
 const MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin";
 const MODEL_NAME = "ggml-tiny.bin";
 
@@ -12,39 +11,54 @@ const resourcesDir = path.join(__dirname, "..", "resources", "whisper");
 const binaryPath = path.join(resourcesDir, "whisper.exe");
 const modelPath = path.join(resourcesDir, MODEL_NAME);
 
-async function download(url, dest) {
+function downloadWithPowerShell(url, dest) {
   if (fs.existsSync(dest)) {
     console.log(`Already exists: ${dest}`);
-    return;
+    return Promise.resolve();
   }
-  console.log(`Downloading ${url}...`);
+  console.log(`Downloading ${path.basename(dest)} from ${url}...`);
   const temp = dest + ".tmp";
-  const file = fs.createWriteStream(temp);
-  await new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+  return new Promise((resolve, reject) => {
+    const ps = spawn("powershell", [
+      "-NoProfile", "-Command",
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri "${url}" -OutFile "${temp}" -UseBasicParsing`
+    ], { stdio: "inherit" });
+    ps.on("close", (code) => {
+      if (code !== 0) {
+        if (fs.existsSync(temp)) fs.unlinkSync(temp);
+        reject(new Error(`PowerShell download failed with code ${code}`));
         return;
       }
-      res.pipe(file);
-      file.on("finish", () => {
-        file.close();
-        fs.renameSync(temp, dest);
-        resolve();
-      });
-    }).on("error", (err) => {
-      fs.unlinkSync(temp);
-      reject(err);
+      fs.renameSync(temp, dest);
+      console.log(`Downloaded: ${path.basename(dest)} (${(fs.statSync(dest).size / 1024 / 1024).toFixed(1)} MB)`);
+      resolve();
     });
+    ps.on("error", reject);
   });
-  console.log(`Downloaded: ${path.basename(dest)}`);
 }
 
-async function extractZip(zipPath, destDir) {
-  const AdmZip = (await import("adm-zip")).default;
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(destDir, true);
-  console.log(`Extracted to: ${destDir}`);
+function extractWithPowerShell(zipPath, destDir) {
+  console.log(`Extracting ${path.basename(zipPath)}...`);
+  return new Promise((resolve, reject) => {
+    const ps = spawn("powershell", [
+      "-NoProfile", "-Command",
+      `Expand-Archive -Path "${zipPath}" -DestinationPath "${destDir}" -Force`
+    ], { stdio: "inherit" });
+    ps.on("close", (code) => code === 0 ? resolve() : reject(new Error(`Extract failed with code ${code}`)));
+    ps.on("error", reject);
+  });
+}
+
+function findExe(dir) {
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (entry.endsWith(".exe") && entry.toLowerCase().includes("whisper")) return full;
+    if (fs.statSync(full).isDirectory()) {
+      const found = findExe(full);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 async function main() {
@@ -52,46 +66,32 @@ async function main() {
 
   if (!fs.existsSync(binaryPath)) {
     const zipPath = path.join(resourcesDir, "whisper-binx64.zip");
-    await download(BINARY_URL, zipPath);
-    // Extract the zip - try using PowerShell if adm-zip is not available
-    try {
-      await extractZip(zipPath, resourcesDir);
-    } catch {
-      console.log("Extracting with PowerShell...");
-      await new Promise((resolve, reject) => {
-        const proc = spawn("powershell", [
-          "-Command",
-          `Expand-Archive -Path "${zipPath}" -DestinationPath "${resourcesDir}" -Force`
-        ], { stdio: "inherit" });
-        proc.on("close", (code) => code === 0 ? resolve() : reject(new Error(`Extract failed with code ${code}`)));
-      });
-    }
+    await downloadWithPowerShell(BINARY_URL, zipPath);
+    await extractWithPowerShell(zipPath, resourcesDir);
     fs.unlinkSync(zipPath);
-    // The zip extracts to a folder named after the version; move the exe up
-    const subdirs = fs.readdirSync(resourcesDir).filter((f) => f !== "whisper-binx64.zip" && f.endsWith(".exe"));
-    if (!subdirs.length) {
-      // Find the exe in subdirectories
-      const findExe = (dir) => {
-        for (const entry of fs.readdirSync(dir)) {
-          const full = path.join(dir, entry);
-          if (entry.endsWith(".exe")) return full;
-          if (fs.statSync(full).isDirectory()) {
-            const found = findExe(full);
-            if (found) return found;
-          }
-        }
-        return null;
-      };
-      const exePath = findExe(resourcesDir);
-      if (exePath && exePath !== binaryPath) {
-        fs.copyFileSync(exePath, binaryPath);
-        console.log(`Moved whisper.exe to ${binaryPath}`);
+
+    const exePath = findExe(resourcesDir);
+    if (exePath && exePath !== binaryPath) {
+      fs.copyFileSync(exePath, binaryPath);
+      fs.chmodSync(binaryPath, 0o755);
+      console.log(`Moved whisper.exe to ${binaryPath}`);
+    }
+
+    // Cleanup extracted subfolders
+    for (const entry of fs.readdirSync(resourcesDir)) {
+      const full = path.join(resourcesDir, entry);
+      if (fs.statSync(full).isDirectory() && !entry.includes("whisper")) {
+        fs.rmSync(full, { recursive: true, force: true });
       }
     }
+  } else {
+    console.log(`whisper.exe already exists: ${binaryPath}`);
   }
 
-  await download(MODEL_URL, modelPath);
-  console.log("Whisper setup complete!");
+  await downloadWithPowerShell(MODEL_URL, modelPath);
+  console.log("\nWhisper setup complete!");
+  console.log(`Binary: ${binaryPath}`);
+  console.log(`Model:  ${modelPath}`);
 }
 
 main().catch((err) => {

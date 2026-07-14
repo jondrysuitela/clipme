@@ -11,6 +11,7 @@
     "dist": "npm --workspace apps/desktop run dist",
     "check": "npm --workspace apps/desktop run check",
     "smoke": "npm --workspace apps/desktop run smoke",
-    "typecheck": "npm --workspace apps/desktop run typecheck"
+    "typecheck": "npm --workspace apps/desktop run typecheck",
+    "setup-whisper": "npm --workspace apps/desktop run setup-whisper"
   }
 }
