@@ -15,12 +15,13 @@
     "check": "npm run typecheck",
     "smoke": "npm run build && node --test scripts/smoke.test.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
-    "start": "node scripts/run-electron.cjs"
+    "start": "node scripts/run-electron.cjs",
+    "setup-whisper": "node scripts/setup-whisper.cjs"
   },
   "dependencies": {
     "sql.js": "^1.12.0",
     "react": "^19.0.0",
-    "@sentry/electron": "^3.13.0",
+    "@sentry/electron": "^4.0.0",
     "electron-updater": "^5.4.1",
     "react-dom": "^19.0.0"
   },
@@ -83,9 +84,12 @@
       {
         "from": "resources/yt-dlp",
         "to": "yt-dlp",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*"]
+      },
+      {
+        "from": "resources/whisper",
+        "to": "whisper",
+        "filter": ["**/*"]
       }
     ],
     "extraFiles": [

@@ -17,7 +17,7 @@ function defaults(): AppSettings {
     subtitlePosition: "bottom",
     maxConcurrentJobs: 1,
     theme: "dark",
-    transcriptionProvider: "whisper-cli",
+    transcriptionProvider: "whisper-cpp",
     transcriptionProviderInitialized: true,
     whisperCommand: "whisper",
     whisperModel: "tiny",
@@ -39,7 +39,7 @@ export function getSettings(): AppSettings {
   const merged = { ...defaults(), ...stored };
   if (merged.whisperCommand === "faster-whisper-xxl") merged.whisperCommand = "whisper";
   if (!stored.transcriptionProviderInitialized) {
-    merged.transcriptionProvider = "whisper-cli";
+    merged.transcriptionProvider = "whisper-cpp";
     merged.transcriptionProviderInitialized = true;
   }
   if (Object.keys(defaults()).some((key) => !(key in stored)) || merged.whisperCommand !== stored.whisperCommand) {

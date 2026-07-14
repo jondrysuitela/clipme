@@ -1050,15 +1050,16 @@ export default function App() {
                 <label>
                   Transcriber
                   <select
-                    value={settings?.transcriptionProvider ?? "mock"}
+                    value={settings?.transcriptionProvider ?? "whisper-cpp"}
                     onChange={(event) => {
-                      const transcriptionProvider = event.target.value as "mock" | "whisper-cli";
+                      const transcriptionProvider = event.target.value as "mock" | "whisper-cli" | "whisper-cpp";
                       setSettings((current) => current && { ...current, transcriptionProvider, transcriptionProviderInitialized: true });
                       void window.clipme.updateSettings({ transcriptionProvider, transcriptionProviderInitialized: true }).then(() => refresh());
                     }}
                   >
-                    <option value="mock">Mock</option>
-                    <option value="whisper-cli">Whisper CLI</option>
+                    <option value="whisper-cpp">Whisper Bundled</option>
+                    <option value="mock">Mock (Testing)</option>
+                    <option value="whisper-cli">Whisper CLI External</option>
                   </select>
                 </label>
                 <label>

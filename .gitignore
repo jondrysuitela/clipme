@@ -14,3 +14,6 @@ whisper-smoke-output/
 .env
 .env.*
 !.env.example
+
+# whisper model (downloaded via setup-whisper)
+apps/desktop/resources/whisper/ggml-*.bin
