@@ -549,12 +549,15 @@ function quoteArg(arg: string) {
 }
 
 function escapeSubtitlePath(subtitlePath: string) {
-  return subtitlePath
-    .replace(/\\/g, "/")
+  const normalized = subtitlePath.replace(/\\/g, "/");
+  const driveLetter = normalized.match(/^([a-zA-Z]):\/)/);
+  const rest = driveLetter ? normalized.slice(2) : normalized;
+  const escaped = rest
     .replace(/:/g, "\\:")
     .replace(/'/g, "\\'")
     .replace(/\[/g, "\\[")
     .replace(/\]/g, "\\]");
+  return driveLetter ? `${driveLetter[1]}:${escaped}` : escaped;
 }
 
 function inferReason(stderr: string) {

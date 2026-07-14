@@ -72,10 +72,18 @@ export function getProject(projectId: string): Project {
 
 export async function deleteProject(projectId: string) {
   const project = getProject(projectId);
-  getDb().prepare("DELETE FROM jobs WHERE project_id = ?").run(projectId);
-  getDb().prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
-  getDb().prepare("DELETE FROM videos WHERE project_id = ?").run(projectId);
-  getDb().prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+  const db = getDb();
+  db.beginTransaction();
+  try {
+    db.prepare("DELETE FROM jobs WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM videos WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    db.commit();
+  } catch (err) {
+    db.rollback();
+    throw err;
+  }
   await removeProjectFolder(project.rootPath);
 }
 
@@ -136,9 +144,17 @@ export function resetProjectDerivedData(projectId: string) {
     }
     fs.mkdirSync(dir, { recursive: true });
   }
-  getDb().prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
-  getDb().prepare("DELETE FROM videos WHERE project_id = ?").run(projectId);
-  getDb().prepare("DELETE FROM jobs WHERE project_id = ? AND status IN ('completed', 'failed', 'canceled')").run(projectId);
+  const db = getDb();
+  db.beginTransaction();
+  try {
+    db.prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM videos WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM jobs WHERE project_id = ? AND status IN ('completed', 'failed', 'canceled')").run(projectId);
+    db.commit();
+  } catch (err) {
+    db.rollback();
+    throw err;
+  }
 }
 
 export function writeManifest(project: Project) {

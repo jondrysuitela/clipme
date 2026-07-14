@@ -11,17 +11,24 @@ function now() {
 
 export function replaceClips(projectId: string, clips: ClipCandidate[]) {
   const db = getDb();
-  db.prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
-  for (const clip of clips) {
-    db.prepare(
-      `INSERT INTO clips (
-        id, project_id, title, start_time, end_time, duration, hook_score, reason,
-        suggested_caption, hashtags_json, reframe_anchors_json, assets_json, curation_status, preview_path, export_path, selected, created_at, updated_at
-      ) VALUES (
-        @id, @projectId, @title, @startTime, @endTime, @duration, @hookScore, @reason,
-        @suggestedCaption, @hashtagsJson, @reframeAnchorsJson, @assetsJson, @curationStatus, @previewPath, @exportPath, @selectedInt, @createdAt, @updatedAt
-      )`
+  db.beginTransaction();
+  try {
+    db.prepare("DELETE FROM clips WHERE project_id = ?").run(projectId);
+    for (const clip of clips) {
+      db.prepare(
+        `INSERT INTO clips (
+          id, project_id, title, start_time, end_time, duration, hook_score, reason,
+          suggested_caption, hashtags_json, reframe_anchors_json, assets_json, curation_status, preview_path, export_path, selected, created_at, updated_at
+        ) VALUES (
+          @id, @projectId, @title, @startTime, @endTime, @duration, @hookScore, @reason,
+          @suggestedCaption, @hashtagsJson, @reframeAnchorsJson, @assetsJson, @curationStatus, @previewPath, @exportPath, @selectedInt, @createdAt, @updatedAt
+        )`
     ).run(toRow({ ...clip, id: clip.id || createId(10), projectId }));
+    }
+    db.commit();
+  } catch (err) {
+    db.rollback();
+    throw err;
   }
 }
 

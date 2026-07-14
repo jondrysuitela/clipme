@@ -679,7 +679,9 @@ function rowToJob(row: any): Job {
 function removeMatchingFiles(directory: string, prefixes: string[]) {
   if (!fs.existsSync(directory)) return;
   for (const entry of fs.readdirSync(directory)) {
-    if (!prefixes.some((prefix) => entry === prefix || entry.startsWith(`${prefix}.`) || entry.startsWith(`${prefix}-`))) continue;
+    const ext = path.extname(entry);
+    const base = ext ? entry.slice(0, -ext.length) : entry;
+    if (!prefixes.some((prefix) => entry === prefix || base === prefix)) continue;
     fs.rmSync(path.join(directory, entry), { force: true });
   }
 }

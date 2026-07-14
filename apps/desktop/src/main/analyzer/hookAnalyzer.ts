@@ -77,7 +77,7 @@ export function generateTimedHookCandidates(projectId: string, durationSeconds: 
     return Math.round((maxStart * index) / (count - 1));
   });
 
-  return starts.map((startTime, index) => {
+  const clips = starts.map((startTime, index) => {
     const clipDuration = durations[index % durations.length];
     const endTime = Math.min(duration, startTime + clipDuration + bufferForDuration(clipDuration));
     const clipLength = endTime - startTime;
@@ -95,10 +95,8 @@ export function generateTimedHookCandidates(projectId: string, durationSeconds: 
       suggestedCaption: makeTimedCaption(profile, index, count, startTime, duration, context),
       hashtags: profile.hashtags
     };
-  }).map((clip, index, clips) => {
-    const unique = finalizeCandidates(clips);
-    return unique[index];
   });
+  return finalizeCandidates(clips);
 }
 
 function buildWindow(segments: TranscriptSegment[], startIndex: number) {

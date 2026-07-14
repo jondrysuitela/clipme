@@ -81,7 +81,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [zoomEnabled, setZoomEnabled] = useState(true);
   const [jobsPanelOpen, setJobsPanelOpen] = useState(false);
-  const [exportJobs, setExportJobs] = useState<Job[]>([]);
+  const exportJobs = useMemo(() => jobs.filter((j) => j.type === "EXPORT_FINAL"), [jobs]);
   const [generatingAssetsId, setGeneratingAssetsId] = useState<string | undefined>();
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [trimmingClipId, setTrimmingClipId] = useState<string | undefined>();
@@ -141,6 +141,7 @@ export default function App() {
     const preset = PLATFORM_PRESETS[platform];
     if (preset) {
       setExportResolution(preset.resolution);
+      setZoomEnabled(preset.verticalMode !== "center-crop");
       addToast(`${platform} preset selected`, "info");
     }
   }
@@ -160,16 +161,15 @@ export default function App() {
   const hasAudioExtracted = activeJobs.some((job) => job.type === "EXTRACT_AUDIO" && job.status === "completed");
   const hasTranscribed = activeJobs.some((job) => job.type === "TRANSCRIBE_AUDIO" && job.status === "completed");
   const hasAnalyzed = activeJobs.some((job) => job.type === "ANALYZE_HOOKS" && job.status === "completed") || clips.length > 0;
-  const runningJob = activeJobs.find((job) => job.status === "running");
-  const waitingJob = activeJobs.find((job) => job.status === "waiting");
-  const failedJob = activeJobs.find(
+  const allRunningOrWaiting = visibleJobs.filter((job) => job.status === "running" || job.status === "waiting");
+  const failedJob = visibleJobs.find(
     (job) =>
       job.status === "failed" &&
       job.updatedAt >= sessionStartedAtRef.current &&
       job.error?.message !== "Job interrupted because the app was restarted." &&
       !dismissedFailedJobIds.has(job.id)
   );
-  const statusJob = runningJob ?? waitingJob ?? failedJob;
+  const statusJob = allRunningOrWaiting[0] ?? failedJob;
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? clips.find((clip) => clip.previewPath) ?? clips[0];
   const previewSource = selectedClip?.previewPath ?? activeProject?.originalVideoPath;
   const visibleClips = useMemo(() => {
@@ -179,6 +179,7 @@ export default function App() {
       if (clipFilter === "not-exported") return !clip.exportPath;
       if (clipFilter === "keep") return clip.curationStatus === "keep";
       if (clipFilter === "skip") return clip.curationStatus === "skip";
+      if (scoreThreshold > 0) return clip.hookScore >= scoreThreshold;
       return true;
     });
     return [...filtered].sort((a, b) => {
@@ -186,7 +187,7 @@ export default function App() {
       if (clipSort === "duration") return b.duration - a.duration || b.hookScore - a.hookScore;
       return b.hookScore - a.hookScore || a.startTime - b.startTime;
     });
-  }, [clips, clipFilter, clipSort]);
+  }, [clips, clipFilter, clipSort, scoreThreshold]);
   const exportedCount = clips.filter((clip) => clip.exportPath).length;
   const highScoreCount = clips.filter((clip) => clip.hookScore >= 75).length;
   const keepCount = clips.filter((clip) => clip.curationStatus === "keep").length;
@@ -522,7 +523,7 @@ export default function App() {
     setDismissedFailedJobIds(new Set());
     const verticalMode = selectedPlatform && PLATFORM_PRESETS[selectedPlatform] ? PLATFORM_PRESETS[selectedPlatform].verticalMode : SMART_EXPORT_MODE;
     const job = await window.clipme.exportFinal(activeProject.id, clipId, {
-      subtitleOn: false,
+      subtitleOn: subtitleVisible,
       verticalMode,
       resolution: exportResolution,
       zoomEnabled
@@ -557,17 +558,17 @@ export default function App() {
     setBusy(true);
     setDismissedFailedJobIds(new Set());
     try {
-      const createdJobs: Job[] = [];
-      for (const clip of targetClips) {
-        const job = await window.clipme.exportFinal(activeProject.id, clip.id, {
-          subtitleOn: false,
-          verticalMode: SMART_EXPORT_MODE,
-          resolution: exportResolution,
-          zoomEnabled
-        });
-        createdJobs.push(job);
-      }
-      setJobs((current) => [...createdJobs, ...current]);
+      const jobs = await Promise.all(
+        targetClips.map((clip) =>
+          window.clipme.exportFinal(activeProject.id, clip.id, {
+            subtitleOn: subtitleVisible,
+            verticalMode: SMART_EXPORT_MODE,
+            resolution: exportResolution,
+            zoomEnabled
+          })
+        )
+      );
+      setJobs((current) => [...jobs, ...current]);
     } finally {
       setBusy(false);
     }
@@ -1286,7 +1287,7 @@ export default function App() {
           </div>
         </section>
       </section>
-      {statusJob && (activeQueue.length > 0 || statusJob.status === "failed") && (
+      {statusJob && (allRunningOrWaiting.length > 0 || statusJob.status === "failed") && (
         <footer className={statusJob.status === "failed" ? "status-bar failed" : "status-bar"}>
           <div className="status-main">
             <strong>{statusJob ? statusJob.type.replace(/_/g, " ") : "Working"}</strong>
@@ -1298,7 +1299,7 @@ export default function App() {
           </div>
           <progress value={statusJob?.progress ?? 0} max="100" />
           <div className="status-meta">
-            {activeQueue.slice(0, 3).map((job) => (
+            {allRunningOrWaiting.slice(0, 3).map((job) => (
               <button key={job.id} className="ghost-button" onClick={() => window.clipme.cancelJob(job.id)}>
                 {job.type.replace(/_/g, " ")} · {job.progress}%
               </button>
@@ -1379,6 +1380,7 @@ export default function App() {
                 <div><dt>Database</dt><dd>{diagnostics.databasePath}</dd></div>
                 <div><dt>FFmpeg</dt><dd>{diagnostics.ffmpegPath}</dd></div>
                 <div><dt>ffprobe</dt><dd>{diagnostics.ffprobePath}</dd></div>
+                <div><dt>Encoders</dt><dd>{ffmpeg?.encoders?.join(", ") || "unknown"}</dd></div>
                 <div><dt>yt-dlp</dt><dd>{diagnostics.ytDlpPath}</dd></div>
                 <div><dt>yt-dlp ver.</dt><dd>{diagnostics.ytDlpVersion}</dd></div>
               </dl>

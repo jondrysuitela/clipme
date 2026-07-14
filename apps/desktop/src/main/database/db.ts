@@ -93,6 +93,10 @@ export function getDb() {
 }
 
 class SqliteFileDatabase {
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private savePromise: Promise<void> | null = null;
+  private pendingSave = false;
+
   constructor(
     private database: SqlJsDatabase,
     private dbPath: string
@@ -100,39 +104,67 @@ class SqliteFileDatabase {
 
   exec(sql: string) {
     this.database.exec(sql);
-    this.save();
+    this.scheduleSave();
   }
 
   prepare(sql: string) {
-    return new SqliteStatement(this.database.prepare(sql), () => this.save());
+    return new SqliteStatement(this.database.prepare(sql), () => this.scheduleSave());
   }
 
-  save() {
+  beginTransaction() {
+    this.database.exec("BEGIN TRANSACTION");
+  }
+
+  commit() {
+    this.database.exec("COMMIT");
+    this.scheduleSave();
+  }
+
+  rollback() {
+    this.database.exec("ROLLBACK");
+  }
+
+  private scheduleSave() {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.flushSave();
+    }, 100);
+  }
+
+  private flushSave() {
+    if (this.savePromise) {
+      this.pendingSave = true;
+      return;
+    }
+    this.pendingSave = false;
+    this.savePromise = this.performSave().finally(() => {
+      this.savePromise = null;
+      if (this.pendingSave) this.flushSave();
+    });
+  }
+
+  private async performSave() {
     const tempPath = `${this.dbPath}.tmp`;
     const backupPath = `${this.dbPath}.bak`;
     const data = Buffer.from(this.database.export());
-    fs.writeFileSync(tempPath, data);
-    // Keep a backup of the previous db before overwriting
+    await fs.promises.writeFile(tempPath, data);
     if (fs.existsSync(this.dbPath)) {
-      try { fs.copyFileSync(this.dbPath, backupPath); } catch { /* backup best-effort */ }
+      try { await fs.promises.copyFile(this.dbPath, backupPath); } catch { /* backup best-effort */ }
     }
-    // On Windows, rename over existing file can fail with EPERM.
-    // Unlink (delete) the target first, then rename.
     try {
-      fs.unlinkSync(this.dbPath);
+      await fs.promises.unlink(this.dbPath);
     } catch {
-      // File may not exist yet, that is fine
+      // File may not exist yet
     }
     try {
-      fs.renameSync(tempPath, this.dbPath);
-    } catch (renameErr) {
-      // If rename still fails (e.g. anti-virus holding a handle), fall back to copy
+      await fs.promises.rename(tempPath, this.dbPath);
+    } catch {
       try {
-        fs.copyFileSync(tempPath, this.dbPath);
-        fs.unlinkSync(tempPath);
+        await fs.promises.copyFile(tempPath, this.dbPath);
+        await fs.promises.unlink(tempPath);
       } catch (copyErr) {
         console.error("Database save failed (rename + copy fallback):", copyErr);
-        throw renameErr;
       }
     }
   }

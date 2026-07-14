@@ -41,17 +41,6 @@ export async function detectSceneChanges(
   );
 
   try {
-    await runProcess(ffmpeg, [
-      "-y",
-      "-ss", String(startTime),
-      "-i", inputPath,
-      "-t", String(duration),
-      "-vf", `select='gt(scene,${threshold})',showinfo`,
-      "-f", "null",
-      "-"
-    ]);
-
-    // Re-run with metadata output to capture scene timestamps
     const { stderr } = await runProcess(ffmpeg, [
       "-y",
       "-ss", String(startTime),
