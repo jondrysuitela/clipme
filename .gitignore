@@ -1,6 +1,12 @@
 node_modules/
 apps/*/node_modules/
 
+# npm workspace artifacts
+clipme-desktop@*
+clipme-workspace@*
+node
+npm
+
 dist/
 apps/*/dist/
 
@@ -15,5 +21,7 @@ whisper-smoke-output/
 .env.*
 !.env.example
 
-# whisper model (downloaded via setup-whisper)
-apps/desktop/resources/whisper/ggml-*.bin
+# whisper runtime (downloaded via setup-whisper)
+apps/desktop/resources/whisper/*.bin
+apps/desktop/resources/whisper/*.exe
+apps/desktop/resources/whisper/*.dll

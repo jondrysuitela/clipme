@@ -67,23 +67,27 @@ async function main() {
   if (!fs.existsSync(binaryPath)) {
     const zipPath = path.join(resourcesDir, "whisper-binx64.zip");
     await downloadWithPowerShell(BINARY_URL, zipPath);
-    await extractWithPowerShell(zipPath, resourcesDir);
-    fs.unlinkSync(zipPath);
 
-    const exePath = findExe(resourcesDir);
-    if (exePath && exePath !== binaryPath) {
-      fs.copyFileSync(exePath, binaryPath);
-      fs.chmodSync(binaryPath, 0o755);
-      console.log(`Moved whisper.exe to ${binaryPath}`);
-    }
+    const tmpDir = path.join(resourcesDir, "_release_tmp");
+    await extractWithPowerShell(zipPath, tmpDir);
 
-    // Cleanup extracted subfolders
-    for (const entry of fs.readdirSync(resourcesDir)) {
-      const full = path.join(resourcesDir, entry);
-      if (fs.statSync(full).isDirectory() && !entry.includes("whisper")) {
-        fs.rmSync(full, { recursive: true, force: true });
+    const releaseDir = path.join(tmpDir, "Release");
+    const cliExe = findExe(tmpDir) || path.join(releaseDir, "whisper-cli.exe");
+    fs.copyFileSync(cliExe, binaryPath);
+    fs.chmodSync(binaryPath, 0o755);
+    console.log(`Copied whisper.exe from ${cliExe}`);
+
+    if (fs.existsSync(releaseDir)) {
+      for (const f of fs.readdirSync(releaseDir)) {
+        if (f.endsWith(".dll")) {
+          fs.copyFileSync(path.join(releaseDir, f), path.join(resourcesDir, f));
+          console.log(`Copied DLL: ${f}`);
+        }
       }
     }
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.unlinkSync(zipPath);
   } else {
     console.log(`whisper.exe already exists: ${binaryPath}`);
   }

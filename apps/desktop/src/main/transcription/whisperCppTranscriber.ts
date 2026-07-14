@@ -102,12 +102,13 @@ function runWhisperCpp(binary: string, args: string[], signal?: AbortSignal) {
 }
 
 function normalizeSegments(raw: any): TranscriptSegment[] {
-  const source = Array.isArray(raw?.segments) ? raw.segments : [];
+  const source = Array.isArray(raw?.transcription) ? raw.transcription
+    : Array.isArray(raw?.segments) ? raw.segments : [];
   return source
-    .map((seg: any) => ({
-      start: Number(seg.start ?? 0),
-      end: Number(seg.end ?? 0),
-      text: String(seg.text ?? "").trim()
-    }))
+    .map((seg: any) => {
+      const start = Number(seg.start ?? seg.offsets?.from ?? 0) / 1000;
+      const end = Number(seg.end ?? seg.offsets?.to ?? 0) / 1000;
+      return { start, end, text: String(seg.text ?? "").trim() };
+    })
     .filter((seg: TranscriptSegment) => seg.end > seg.start && seg.text.length > 0);
 }
