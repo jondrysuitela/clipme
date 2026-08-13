@@ -60,14 +60,14 @@ function get(port, pathname) {
 const durationCases = [
   ["valid 45", "45", 45],
   ["valid decimal 30.5", "30.5", 30.5],
-  ["missing undefined", undefined, 45],
-  ["empty string", "", 45],
-  ["zero", "0", 45],
-  ["invalid abc", "abc", 45],
+  ["missing undefined", undefined, 90],
+  ["empty string", "", 90],
+  ["zero", "0", 90],
+  ["invalid abc", "abc", 90],
   ["negative -10 -> min clamp", "-10", 15],
   ["extremely large", "999999", 90],
   ["tiny 5", "5", 15],
-  ["null", null, 45]
+  ["null", null, 90]
 ];
 
 for (const [label, input, expected] of durationCases) {

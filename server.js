@@ -645,7 +645,7 @@ async function probeVideo(filePath) {
 
 function targetClipLength(value) {
   const num = Number(value);
-  return Math.max(15, Math.min(90, num || 45));
+  return Math.max(15, Math.min(90, num || 90));
 }
 
 // ============================================================================
@@ -1243,7 +1243,7 @@ function clippedForField(value, max) {
   return String(value || "").length > max ? `${String(value).slice(0, max - 1)}…` : String(value || "");
 }
 
-function analyzeTranscriptToClips(transcript, duration, targetLength = 45, language = "Indonesia") {
+function analyzeTranscriptToClips(transcript, duration, targetLength = 90, language = "Indonesia") {
   const length = targetClipLength(targetLength);
   const lang = clipmeLangTag(language);
   const sentencesIndexed = transcript
@@ -1313,7 +1313,7 @@ const CLIPME_TITLES = [
   "Story beat", "Useful framework", "Audience trigger", "Closing punch"
 ];
 
-function buildClips(duration, targetLength = 45) {
+function buildClips(duration, targetLength = 90) {
   const length = targetClipLength(targetLength);
   const count = Math.min(8, Math.max(1, Math.floor(duration / Math.max(length, 20))));
   const spacing = duration / (count + 1);
@@ -1438,7 +1438,7 @@ function clipHook(caption, index) {
   return first ? `${first.slice(0, 58)}${first.length > 58 ? "..." : ""}` : `Highlight ${index + 1}`;
 }
 
-function buildTranscriptClips(transcript, duration, targetLength = 45, language = "Indonesia") {
+function buildTranscriptClips(transcript, duration, targetLength = 90, language = "Indonesia") {
   if (!transcript.length) return buildClips(duration, targetLength);
   return analyzeTranscriptToClips(transcript, duration, targetLength, language);
 }
