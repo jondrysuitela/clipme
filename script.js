@@ -61,6 +61,22 @@ const captionEditInput = $("#captionEditInput");
 const captionEditIndex = $("#captionEditIndex");
 const captionEditTime = $("#captionEditTime");
 
+const CAPTION_FONT_RATIO = 0.07;
+const CAPTION_FONT_BASE = 23;
+
+function captionPreviewFontPx() {
+  const frameW = previewFrame.clientWidth || 330;
+  return Math.max(8, Math.round(frameW * CAPTION_FONT_RATIO * (Number(captionSize.value || CAPTION_FONT_BASE) / CAPTION_FONT_BASE)));
+}
+
+function renderStaticCaption() {
+  const style = $("#captionStyleSelect").value;
+  captionBox.style.fontSize = `${captionPreviewFontPx()}px`;
+  captionBox.className = "caption-box" + (style !== "off" ? ` lc-${style}` : "");
+  const hasText = captionBox.textContent && captionBox.textContent.replace(/"/g, "").trim();
+  captionBox.style.display = style !== "off" && hasText ? "block" : "none";
+}
+
 function formatTime(totalSeconds) {
   const seconds = Math.max(0, Math.floor(totalSeconds || 0));
   const hours = Math.floor(seconds / 3600);
@@ -183,6 +199,7 @@ function selectClip(clip) {
   liveCaption.style.display = "none";
   previewTitle.textContent = `Clip ${String(clip.id).padStart(2, "0")} - ${clip.title}`;
   captionBox.textContent = `"${clip.caption}"`;
+  renderStaticCaption();
   hookInput.value = clip.hook;
   captionInput.value = clip.caption;
   clipTime.textContent = clipRange(clip);
@@ -538,6 +555,7 @@ async function loadPreviewClip() {
     if (data.transcript?.caption) {
       captionInput.value = data.transcript.caption;
       captionBox.textContent = `"${data.transcript.caption}"`;
+      renderStaticCaption();
       state.activeClip.caption = data.transcript.caption;
       if (data.transcript.hook) {
         hookInput.value = data.transcript.hook;
@@ -806,11 +824,12 @@ function updateLiveCaption() {
   if (!seg) {
     liveCaption.innerHTML = "";
     liveCaption.style.display = "none";
+    if (previewVideo.paused) renderStaticCaption();
     return;
   }
   const cap = document.createElement("div");
   const style = $("#captionStyleSelect").value;
-  liveCaption.style.fontSize = `${captionSize.value}px`;
+  liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
   liveCaption.className = "live-caption" + (style !== "off" ? ` lc-${style}` : "");
   if (style === "karaoke" && seg.words && seg.words.length) {
     seg.words.forEach((w) => {
@@ -828,6 +847,7 @@ function updateLiveCaption() {
   liveCaption.innerHTML = "";
   liveCaption.appendChild(cap);
   liveCaption.style.display = "block";
+  captionBox.style.display = "none";
 }
 
 function captionTimelineKey() {
@@ -1329,6 +1349,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
       if (data.caption) {
         $("#captionInput").value = data.caption;
         captionBox.textContent = `"${data.caption}"`;
+        renderStaticCaption();
         if (state.activeClip) state.activeClip.caption = data.caption;
       }
       renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
@@ -1359,6 +1380,7 @@ $("#sortClips").addEventListener("click", () => {
 captionInput.addEventListener("input", () => {
   if (!state.activeClip) return;
   captionBox.textContent = `"${captionInput.value}"`;
+  renderStaticCaption();
   state.activeClip.caption = captionInput.value;
 });
 
@@ -1369,15 +1391,16 @@ hookInput.addEventListener("input", () => {
 });
 
 captionSize.addEventListener("input", () => {
-  captionBox.style.fontSize = `${captionSize.value}px`;
+  renderStaticCaption();
   if (state.liveActive) {
-    liveCaption.style.fontSize = `${captionSize.value}px`;
+    liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
     updateLiveCaption();
   }
 });
 
 $("#captionStyleSelect").addEventListener("change", () => {
   const style = $("#captionStyleSelect").value;
+  renderStaticCaption();
   if (!state.projectId || !state.activeClip || !state.liveSegments.length) return;
   state.liveActive = style !== "off";
   if (state.liveActive) {
@@ -1428,6 +1451,7 @@ $("#intelApplyCaption").addEventListener("click", () => {
     captionInput.value = best;
     state.activeClip.caption = best;
     captionBox.textContent = `"${best}"`;
+    renderStaticCaption();
     showToast(`Caption ${meta ? meta.bestCaption : "A"} diterapkan.`);
   }
 });

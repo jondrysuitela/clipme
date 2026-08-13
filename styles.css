@@ -640,6 +640,33 @@ textarea:focus {
   -webkit-text-stroke: 1.5px #000000;
 }
 
+.caption-box.lc-bold {
+  -webkit-text-stroke: 2px #000000;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.caption-box.lc-minimal {
+  -webkit-text-stroke: 0;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.55);
+}
+
+.caption-box.lc-pop {
+  color: #FFFF00;
+  -webkit-text-stroke: 1.5px #000000;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
+}
+
+.caption-box.lc-glow {
+  color: #00CCFF;
+  -webkit-text-stroke: 0;
+  text-shadow: 0 0 8px rgba(0, 102, 255, 0.95), 2px 2px 0 rgba(0, 0, 0, 0.7);
+}
+
+.caption-box.lc-karaoke {
+  color: #ffffff;
+  -webkit-text-stroke: 1.5px #000000;
+}
+
 .timeline {
   display: flex;
   align-items: center;

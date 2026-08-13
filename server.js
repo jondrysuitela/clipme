@@ -1574,6 +1574,9 @@ function buildVideoFilter({ ratio }) {
   return { scale, crop, size, ratio: requested };
 }
 
+const CAPTION_FONT_RATIO = 0.07;
+const CAPTION_FONT_BASE = 23;
+
 const CAPTION_STYLES = {
   bold: { fontColor: "white", borderw: 3, bordercolor: "black", shadowx: 2, shadowy: 2, shadowcolor: "black@0.6", bgBox: false, bgColor: "" },
   minimal: { fontColor: "white", borderw: 0, bordercolor: "", shadowx: 0, shadowy: 0, shadowcolor: "", bgBox: false, bgColor: "" },
@@ -1635,7 +1638,7 @@ function escDrawtext(value) {
 function generateTimedDrawtextFilters(segments, opts) {
   const { width, height, style = "bold", startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1 } = opts;
   const preset = CAPTION_STYLES[style] || CAPTION_STYLES.bold;
-  const fontSize = Math.round(width * 0.054 * Number(fontSizeRatio) || 1);
+  const fontSize = Math.round(width * CAPTION_FONT_RATIO * Number(fontSizeRatio) || 1);
   const lineHeight = Math.round(fontSize * 1.25);
   const baseY = Math.round(height * Math.max(0.3, Math.min(0.95, Number(captionPosition))));
   const bgX = Math.round(width * 0.07);
@@ -1688,7 +1691,7 @@ function generateTimedDrawtextFilters(segments, opts) {
 // filter, so there is no Windows command-line length limit.
 function generateKaraokeFilters(segments, opts) {
   const { width, height, startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1 } = opts;
-  const fontSize = Math.round(width * 0.054 * (Number(fontSizeRatio) || 1));
+  const fontSize = Math.round(width * CAPTION_FONT_RATIO * (Number(fontSizeRatio) || 1));
   const lineHeight = Math.round(fontSize * 1.3);
   const baseY = Math.round(height * Math.max(0.3, Math.min(0.95, Number(captionPosition))));
   const fontName = fontFamily && FONT_MAP[fontFamily] ? fontFamily : "Arial";
@@ -1747,7 +1750,7 @@ function generateKaraokeFilters(segments, opts) {
   lines.push("");
   lines.push("[V4+ Styles]");
   lines.push("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-  lines.push(`Style: Karaoke,${fontName},${fontSize},&H0000FFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,10,10,120,1`);
+  lines.push(`Style: Karaoke,${fontName},${fontSize},&H00FFFF00,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,10,10,120,1`);
   lines.push("");
   lines.push("[Events]");
   lines.push("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
@@ -2460,7 +2463,7 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     ? buildFilterChain(filterParts, timedFilters)
     : [
         filterParts.scale, filterParts.crop,
-        `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * 0.054 * (Number(payload.captionSize) / 23 || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
+        `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
       ].join(",");
 
   await run(FFMPEG, buildFilterCommandArgs({

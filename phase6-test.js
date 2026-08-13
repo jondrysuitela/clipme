@@ -262,6 +262,27 @@ const srvResolveExport = new Function(
       const fallback = () => [{ start: 30, end: 40, text: "server" }];
       const resolved = srvResolveExport(payload, fallback);
       if (!resolved.length || resolved[0].text !== "server") throw new Error("server fallback used for invalid");
+    }],
+    ["P6 shared caption font ratio is 0.07", () => {
+      const c = scriptSrc.match(/CAPTION_FONT_RATIO\s*=\s*([0-9.]+)/);
+      const s = serverSrc.match(/CAPTION_FONT_RATIO\s*=\s*([0-9.]+)/);
+      if (!c || !s) throw new Error("ratios missing");
+      if (Number(c[1]) !== 0.07 || Number(s[1]) !== 0.07) throw new Error("client/server ratio must be 0.07");
+      if (Number(c[1]) !== Number(s[1])) throw new Error("client/server ratio mismatch");
+    }],
+    ["P6 shared caption font base is 23", () => {
+      const c = scriptSrc.match(/CAPTION_FONT_BASE\s*=\s*(\d+)/);
+      const s = serverSrc.match(/CAPTION_FONT_BASE\s*=\s*(\d+)/);
+      if (!c || !s) throw new Error("bases missing");
+      if (Number(c[1]) !== 23 || Number(s[1]) !== 23) throw new Error("base must be 23");
+    }],
+    ["P6 karaoke ASS uses cyan primary colour", () => {
+      const styleLine = serverSrc.split("\n").find((l) => l.includes("Style: Karaoke"));
+      if (!styleLine) throw new Error("ASS style line not found");
+      if (!styleLine.includes("&H00FFFF00")) throw new Error("primary colour must be cyan &H00FFFF00 (found " + (styleLine.match(/&H[0-9A-F]{8}/) || [])[0] + ")");
+    }],
+    ["P6 caption font ratio no stale 0.054", () => {
+      if (serverSrc.includes("width * 0.054")) throw new Error("stale 0.054 font ratio in server");
     }]
   ];
   await Promise.all(cases.map(([name, fn]) => t(name, fn)));
