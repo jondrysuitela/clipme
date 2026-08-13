@@ -25,20 +25,24 @@ http://localhost:4173
 - Buat kandidat clip dari transcript, durasi, dan heatmap retention.
 - Auto caption dari teks transcript di rentang clip.
 - Viral score sederhana berbasis kata kunci, pertanyaan, kepadatan ucapan, dan heatmap.
+- **ClipMe Intelligence Engine**: analisis clip multi-kriteria (hook strength, retention, value, story completeness, context independence, emotional impact, shareability, comment, quotability, rewatch) dengan score 0-100 + hard caps, 16 hook types, original vs recommended source hook (reorder aman), 3 caption variants, CTA, discussion question, hashtags, source evidence, dan quality gate. Tampil di tab **Intel** pada inspector.
+- **Mode LLM**: jika `OPENAI_API_KEY` tersedia, analisis Intel diproses model AI dengan system prompt `clipme-prompt.js`. Tanpa API key, otomatis fallback ke engine heuristic lokal.
 - Preview clip langsung di aplikasi dengan cached YouTube section resolusi ringan.
 - Thumbnail clip menampilkan status `Needs preview`, `Loading`, atau `Ready`.
-- Edit caption dan brand label.
+- Edit caption clip.
 - Pilih rasio export: 9:16, 16:9, atau 1:1.
 - Saat export, hanya section clip terpilih yang diambil lalu diproses dengan `ffmpeg`.
-- Caption dan brand overlay ikut masuk ke file MP4.
+- Caption overlay ikut masuk ke file MP4.
 - Export berjalan sebagai job queue dengan status progress.
-- Library, Brand Kit, dan Exports punya view tersendiri.
+- Library dan Exports punya view tersendiri.
 - Export bisa memakai section preview yang sudah dicache agar lebih cepat.
 - STT tidak lagi dijalankan untuk seluruh video di awal.
 - Analyze URL default memakai metadata ringan agar jauh lebih cepat.
 - Default terbaru memakai fast mode: paste URL langsung generate clip tanpa menunggu `yt-dlp`.
 - Jika caption belum tersedia, STT berjalan on-demand hanya untuk clip yang dipreview/export.
 - Queue membatasi pekerjaan berat agar tidak saling menabrak.
+- **Timeline caption editor**: blok caption bisa digeser (drag) dan di-resize dari kiri/kanan, zoom dengan Ctrl+scroll, geser timeline dengan scroll, klik area kosong untuk seek, Space untuk play/pause.
+- **Export SRT**: tombol `Export SRT` pada panel Caption Timeline menghasilkan file `.srt` untuk clip aktif.
 
 ## Catatan
 
@@ -60,13 +64,27 @@ $env:OPENAI_TRANSCRIBE_MODEL="gpt-4o-transcribe"
 node server.js
 ```
 
-Local faster-whisper:
+Model analisis ClipMe Intel default: `gpt-4o-mini`. Bisa diganti:
 
 ```powershell
-cd "C:\Users\HP\Documents\New project"
+$env:CLIPME_ANALYZE_MODEL="gpt-4o"
+node server.js
+```
+
+Local faster-whisper (buat venv di folder proyek ini):
+
+```powershell
+cd "D:\PROJEK CODING\clipme"
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install faster-whisper
+node server.js
+```
+
+Atau jika venv di lokasi lain, set env var:
+
+```powershell
+$env:CLIPFORGE_VENV_PYTHON="C:\path\ke\.venv\Scripts\python.exe"
 node server.js
 ```
 

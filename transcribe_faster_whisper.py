@@ -1,47 +1,51 @@
-import argparse
-import json
-from pathlib import Path
+#!/usr/bin/env python3
+"""
+transcribe_faster_whisper.py — Legacy entry point for backward compatibility.
+Delegates to stt-engine.py with proper argument mapping.
 
-from faster_whisper import WhisperModel
+Old format:
+    python transcribe_faster_whisper.py <audio_path> --model <model> --output <path>
+
+New format:
+    python stt-engine.py transcribe --audio <audio_path> --model <model> --output <path>
+"""
+
+import sys
+import subprocess
+import json
+
+STT_ENGINE = __file__.replace("transcribe_faster_whisper.py", "stt-engine.py")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Transcribe audio with faster-whisper.")
-    parser.add_argument("audio_path")
-    parser.add_argument("--model", default="small")
-    parser.add_argument("--language", default="")
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--compute-type", default="int8")
-    parser.add_argument("--output", default="")
-    args = parser.parse_args()
+    args = sys.argv[1:]
+    if not args:
+        print("Usage: transcribe_faster_whisper.py <audio_path> [options]", file=sys.stderr)
+        sys.exit(1)
 
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
-    transcribe_kwargs = {"beam_size": 5}
-    if args.language:
-        transcribe_kwargs["language"] = args.language
+    cmd = [sys.executable, STT_ENGINE, "transcribe"]
 
-    segments, info = model.transcribe(args.audio_path, **transcribe_kwargs)
-    items = [
-        {
-            "start": segment.start,
-            "end": segment.end,
-            "text": segment.text.strip(),
-        }
-        for segment in segments
-        if segment.text.strip()
-    ]
-    text = " ".join(item["text"] for item in items).strip()
-    payload = {
-        "language": getattr(info, "language", ""),
-        "duration": getattr(info, "duration", 0),
-        "text": text,
-        "segments": items,
-    }
+    # First positional arg is the audio path — map to --audio
+    cmd.append("--audio")
+    cmd.append(args[0])
 
-    if args.output:
-        Path(args.output).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        print(json.dumps(payload, ensure_ascii=False))
+    # Remaining args pass through
+    i = 1
+    while i < len(args):
+        cmd.append(args[i])
+        i += 1
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        sys.exit(result.returncode)
+
+    # Forward stdout
+    try:
+        parsed = json.loads(result.stdout)
+        print(json.dumps(parsed, indent=2))
+    except json.JSONDecodeError:
+        print(result.stdout)
 
 
 if __name__ == "__main__":

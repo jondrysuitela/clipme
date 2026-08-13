@@ -22,14 +22,36 @@
       "styles.css",
       "script.js",
       "server.js",
+      "clipme-prompt.js",
+      "clipme-caption-engine.js",
+      "clipme-caption-prompt.js",
       "transcribe_faster_whisper.py",
+      "stt-engine.py",
+      "stt/**/*.py",
       "electron/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "stt/**/*.py",
+      "stt-engine.py",
+      "transcribe_faster_whisper.py"
     ],
     "extraResources": [
       {
         "from": "bin",
         "to": "bin"
+      },
+      {
+        "from": ".venv",
+        "to": ".venv"
+      },
+      {
+        "from": "models--Systran--faster-whisper-small",
+        "to": "models--Systran--faster-whisper-small"
+      },
+      {
+        "from": "models--Systran--faster-whisper-tiny",
+        "to": "models--Systran--faster-whisper-tiny"
       }
     ],
     "win": {

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clipmee Studio</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">CC</div>
+      <div>
+        <strong>Clipmee</strong>
+        <span>Clip studio</span>
+      </div>
+    </div>
+    <nav class="nav-list">
+      <button class="nav-item active" data-view="studio" type="button">
+        <span class="nav-icon">S</span> Studio
+      </button>
+      <button class="nav-item" data-view="library" type="button">
+        <span class="nav-icon">L</span> Library
+      </button>
+      <button class="nav-item" data-view="exports" type="button">
+        <span class="nav-icon">E</span> Exports
+      </button>
+    </nav>
+    <div class="usage">
+      <div class="usage-row"><span>Storage</span><strong id="storageUsed">0 MB</strong></div>
+      <div class="meter"><span id="storageMeter" style="width:0%"></span></div>
+      <small>Local clips &amp; exports</small>
+    </div>
+  </aside>
+  <main class="workspace">
+    <div class="topbar">
+      <div>
+        <p class="eyebrow" id="uploadStatus">Idle</p>
+        <h1 id="fileTitle">Clipmee Studio</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="secondary-button compact" id="processTop" type="button" disabled>Process URL</button>
+        <button class="ghost-button compact" id="loadDemo" type="button">Demo</button>
+      </div>
+    </div>
+
+    <!-- STUDIO VIEW -->
+    <div class="app-view page-view active" data-view-panel="studio">
+      <div class="studio-grid">        <!-- Upload Panel -->
+        <div class="upload-panel panel">
+          <div class="panel-heading">
+            <h2>Source</h2>
+            <span class="status-pill" id="fileMeta">Ready</span>
+          </div>
+          <div class="dropzone" id="dropzone">
+            <input type="file" accept="video/*" id="videoInput">
+            <div class="drop-icon">+</div>
+            <span>Drop video or click to upload</span>
+            <span>MP4, MOV, MKV, WebM</span>
+          </div>
+          <div class="url-row">
+            <input type="text" id="videoUrl" placeholder="Paste YouTube URL">
+            <button class="primary-button" id="attachUrl" type="button">Analyze</button>
+          </div>
+          <div class="process-steps" id="processSteps">
+            <span data-step="metadata">Metadata</span>
+            <span data-step="clips">Clips</span>
+            <span data-step="preview">Preview</span>
+            <span data-step="export">Export</span>
+          </div>
+          <div class="settings-grid">
+            <label>Clip length
+              <select id="durationSelect">
+                <option value="15">15s</option>
+                <option value="30">30s</option>
+                <option value="45" selected>45s</option>
+                <option value="60">60s</option>
+                <option value="90">90s</option>
+              </select>
+            </label>
+            <label>Language
+              <select id="languageSelect">
+                <option value="Indonesia" selected>Indonesia</option>
+                <option value="English">English</option>
+                <option value="Mixed">Mixed</option>
+              </select>
+            </label>
+          </div>
+          <button class="wide-button" id="generateButton" type="button" disabled>Generate clips</button>
+        </div>
+
+        <!-- Preview Panel -->
+        <div class="preview-panel panel">
+          <div class="panel-heading">
+            <h2 id="previewTitle">Clip 01 - Select a clip</h2>
+            <div class="segmented">
+              <button class="active" data-ratio="portrait" type="button">9:16</button>
+              <button data-ratio="wide" type="button">16:9</button>
+              <button data-ratio="four5" type="button">4:5</button>
+            </div>
+          </div>
+          <div class="video-stage">
+            <div class="phone-frame portrait" id="previewFrame">
+              <video class="preview-video" id="previewVideo" playsinline muted></video>
+              <div class="caption-box" id="captionBox" style="display:none"></div>
+              <div class="live-caption" id="liveCaption"></div>
+            </div>
+          </div>
+          <div class="timeline">
+            <span id="clipTime" class="tl-label">00:00 - 00:00</span>
+            <div class="timeline-track" id="progressTrack">
+              <span id="progressBar" class="progress-fill" style="width:0%"></span>
+            </div>
+            <span id="progressText" class="tl-label tl-status">Ready</span>
+          </div>
+          <div class="transport-row">
+            <span id="clipRange">00:00 - 00:45</span>
+            <div class="transport-controls">
+            <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
+              <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
+              <span id="captionStatus" class="caption-status"></span>
+              <button class="primary-button compact" id="exportButton" type="button">Export selected clip</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clips Panel -->
+        <div class="clips-panel panel">
+          <div class="panel-heading">
+            <h2>Clips</h2>
+            <div>
+              <button class="ghost-button compact" id="sortClips" type="button">Sort by score</button>
+              <button class="ghost-button compact" id="selectAllClips" type="button">Select all</button>
+              <button class="primary-button compact" id="exportAllBtn" type="button">Export all</button>
+            </div>
+          </div>
+          <div class="clip-list" id="clipList"></div>
+        </div>
+
+        <!-- Inspector Panel -->
+        <div class="inspector-panel panel">
+          <div class="tabs">
+            <button class="active" data-tab="clip" type="button">Clip</button>
+            <button data-tab="intel" type="button">Intel</button>
+            <button data-tab="settings" type="button">Settings</button>
+          </div>
+          <div class="tab-panel active" id="clipTab">
+            <div class="clip-info">
+              <span class="clip-info-label">Score</span>
+              <span class="clip-info-value" id="clipScore">--</span>
+              <span class="clip-info-label">Duration</span>
+              <span class="clip-info-value" id="clipDuration">--</span>
+            </div>
+            <div class="field-label">Hook</div>
+            <input class="inspector-input" id="hookInput" type="text" placeholder="Hook text">
+            <div class="field-label">Caption</div>
+            <input class="inspector-input" id="captionInput" type="text" placeholder="Caption text">
+          </div>
+          <div class="tab-panel" id="intelTab">
+            <div class="intel-actions">
+              <button class="primary-button compact" id="analyzeIntelBtn" type="button">Analyze clip</button>
+              <span class="caption-status" id="intelStatus"></span>
+            </div>
+            <div class="intel-meta" id="intelMeta">
+              <div class="clip-info">
+                <span class="clip-info-label">Score</span>
+                <span class="clip-info-value" id="intelScore">--</span>
+                <span class="clip-info-label">Confidence</span>
+                <span class="clip-info-value" id="intelConfidence">--</span>
+                <span class="clip-info-label">Hook</span>
+                <span class="clip-info-value" id="intelHookType">--</span>
+              </div>
+              <label class="field-label">Original hook</label>
+              <div class="intel-block" id="intelOriginalHook">--</div>
+              <label class="field-label">Recommended hook</label>
+              <div class="intel-block" id="intelRecommendedHook">--</div>
+              <label class="field-label">Key message</label>
+              <div class="intel-block" id="intelKeyMessage">--</div>
+              <label class="field-label">Payoff</label>
+              <div class="intel-block" id="intelPayoff">--</div>
+              <label class="field-label">Story structure</label>
+              <div class="intel-block" id="intelStory">--</div>
+              <label class="field-label">Context warning</label>
+              <div class="intel-block" id="intelContext">--</div>
+              <label class="field-label">Best quote</label>
+              <div class="intel-block" id="intelQuote">--</div>
+              <button class="ghost-button compact" id="intelApplyHook" type="button">Gunakan recommended hook</button>
+              <button class="ghost-button compact" id="intelApplyCaption" type="button">Gunakan caption terbaik</button>
+            </div>
+            <label class="field-label">Caption A - Curiosity</label>
+            <div class="intel-block" id="intelCaptionA">--</div>
+            <label class="field-label">Caption B - Emotional/Relatable</label>
+            <div class="intel-block" id="intelCaptionB">--</div>
+            <label class="field-label">Caption C - Discussion</label>
+            <div class="intel-block" id="intelCaptionC">--</div>
+            <div class="intel-meta">
+              <label class="field-label">CTA</label>
+              <div class="intel-block" id="intelCta">--</div>
+              <label class="field-label">Discussion question</label>
+              <div class="intel-block" id="intelQuestion">--</div>
+              <label class="field-label">Hashtags</label>
+              <div class="intel-block" id="intelHashtags">--</div>
+              <label class="field-label">Quality gate</label>
+              <div class="intel-block" id="intelQuality">--</div>
+            </div>
+          </div>
+          <div class="tab-panel" id="settingsTab">
+            <div class="field-label">Caption size</div>
+            <input type="range" id="captionSize" min="14" max="40" value="23" style="width:100%">
+            <div class="field-label">Caption style</div>
+            <select id="captionStyleSelect" class="inspector-input">
+              <option value="karaoke">Karaoke (CapCut)</option>
+              <option value="bold">Bold</option>
+              <option value="minimal">Minimal</option>
+              <option value="pop">Pop</option>
+              <option value="glow">Glow</option>
+              <option value="off">Off</option>
+            </select>
+            <div class="field-label">Layout</div>
+            <select id="layoutSelect" class="inspector-input">
+              <option value="portrait">Portrait 9:16</option>
+              <option value="wide">Wide 16:9</option>
+              <option value="four5">4:5</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Caption Timeline Panel -->
+      <div class="caption-timeline-panel panel" id="captionTimelinePanel" style="display:none">
+        <div class="panel-heading">
+          <h2>Caption Timeline</h2>
+          <div class="caption-tl-actions">
+            <button class="ghost-button compact" id="refreshTimeline" type="button">Refresh</button>
+            <button class="ghost-button compact" id="exportSrt" type="button">Export SRT</button>
+            <button class="primary-button compact" id="saveTimeline" type="button">Simpan Perubahan</button>
+          </div>
+        </div>
+        <div class="caption-track-wrap">
+          <div class="caption-tl-scroll" id="captionTlScroll">
+            <div class="caption-tl-inner" id="captionTlInner">
+              <div class="caption-ruler" id="captionRuler"></div>
+              <div class="caption-track" id="captionTrack">
+                <div class="caption-playhead" id="captionPlayhead"></div>
+              </div>
+            </div>
+          </div>
+          <div class="caption-tl-zoom">
+            <span class="caption-tl-zoom-hint">Scroll = geser timeline &middot; Ctrl+Scroll = zoom &middot; Space = play/pause</span>
+            <span class="caption-tl-zoom-value" id="captionZoomValue">100%</span>
+          </div>
+        </div>
+        <div class="caption-edit-row">
+          <div class="caption-edit-time">
+            <span id="captionEditIndex">--</span>
+            <span id="captionEditTime">00:00 - 00:00</span>
+          </div>
+          <input class="caption-edit-input" id="captionEditInput" type="text" placeholder="Teks caption (klik blok di timeline untuk edit)">
+        </div>
+        <div class="caption-hint">Klik blok pada timeline untuk memilih &amp; mengedit teks caption. Simpan Perubahan agar dipakai saat export. Gunakan tombol play/space untuk preview.</div>
+      </div>
+    </div>
+    <div class="app-view page-view" data-view-panel="library">
+      <div class="page-panel panel">
+        <div class="panel-heading">
+          <h2>Library</h2>
+          <button class="ghost-button compact" id="clearLibrary" type="button">Clear</button>
+        </div>
+        <div class="table-list" id="libraryList">
+          <div class="empty-state">Belum ada project. Paste URL YouTube di Studio untuk mulai.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORTS VIEW -->
+    <div class="app-view page-view" data-view-panel="exports">
+      <div class="page-panel panel">
+        <div class="panel-heading">
+          <h2>Exports</h2>
+          <button class="ghost-button compact" id="clearExports" type="button">Clear</button>
+        </div>
+        <div class="table-list" id="exportsList">
+          <div class="empty-state">Belum ada export. Export clip dari Studio akan muncul di sini.</div>
+        </div>
+        <div class="panel-heading" style="margin-top:24px"><h2>Queue</h2></div>
+        <div class="queue-list" id="queueList"><div class="empty-state">Tidak ada job aktif.</div></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script src="script.js"></script>
+</body>
+</html>

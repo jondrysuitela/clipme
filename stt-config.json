@@ -1,0 +1,95 @@
+{
+  "model": {
+    "name": "small",
+    "device": "auto",
+    "compute_type": "auto",
+    "cpu_threads": 4,
+    "num_workers": 1,
+    "download_root": "",
+    "cache_dir": ""
+  },
+  "transcription": {
+    "beam_size": 10,
+    "best_of": 5,
+    "temperature": 0.0,
+    "compression_ratio_threshold": 2.4,
+    "log_prob_threshold": -1.0,
+    "no_speech_threshold": 0.6,
+    "condition_on_previous_text": true,
+    "word_timestamps": true,
+    "vad_filter": true,
+    "vad_threshold": 0.5,
+    "chunk_length": 30,
+    "batch_size": 16,
+    "hotwords": []
+  },
+  "language": {
+    "auto_detect": true,
+    "default": "id",
+    "allowed": [
+      "id",
+      "en",
+      "ms",
+      "zh",
+      "ja",
+      "ar",
+      "th",
+      "vi"
+    ]
+  },
+  "vad": {
+    "enabled": true,
+    "threshold": 0.5,
+    "min_speech_duration_ms": 250,
+    "min_silence_duration_ms": 100,
+    "aggressiveness": 3
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "normalize": true,
+    "pre_emphasis": 0.97
+  },
+  "output": {
+    "word_timestamps": true,
+    "sentence_timestamps": true,
+    "punctuation": true,
+    "capitalization": true,
+    "max_line_width": 80,
+    "max_line_count": 2
+  },
+  "performance": {
+    "max_audio_duration": 36000,
+    "chunk_overlap_seconds": 2.0,
+    "stream_buffer_seconds": 5.0,
+    "preload_model": true
+  },
+  "queue": {
+    "max_concurrent": 2,
+    "max_queued": 10,
+    "default_timeout": 600
+  },
+  "filler_words": [
+    "uh",
+    "um",
+    "emm",
+    "ah",
+    "er",
+    "hmm",
+    "like",
+    "you know",
+    "actually",
+    "basically",
+    "literally",
+    "so",
+    "well",
+    "right",
+    "anu",
+    "ee",
+    "mmm",
+    "hah",
+    "eh",
+    "ahh",
+    "umm"
+  ]
+}
