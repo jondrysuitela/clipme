@@ -29,6 +29,7 @@ const state = {
   captionSegments: [],
   captionSelected: -1,
   captionLoadedFor: "",
+  captionByClip: {},
   timelineZoom: 1,
   userScrolling: false,
   userScrollTimer: 0,
@@ -590,6 +591,14 @@ async function exportSelectedClip() {
   showToast(state.noDownload ? "Mengambil bagian clip dari YouTube lalu membuat MP4." : "FFmpeg sedang membuat clip MP4.");
 
   try {
+    const exportSegments = state.captionSegments && state.captionSegments.length
+      ? state.captionSegments.map((s) => ({
+          start: Number(s.start) || 0,
+          end: Number(s.end) || 0,
+          text: String(s.text || "").trim(),
+          words: Array.isArray(s.words) && s.words.length ? s.words : []
+        }))
+      : [];
     const response = await fetch("/api/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -602,7 +611,9 @@ async function exportSelectedClip() {
         language: $("#languageSelect").value,
         captionStyle: $("#captionStyleSelect").value,
         captionSize: captionSize.value,
-        ratio: currentRatio()
+        captionPosition: state.captionPosition || 0.76,
+        ratio: currentRatio(),
+        segments: exportSegments
       })
     });
 
@@ -820,9 +831,34 @@ function updateLiveCaption() {
 }
 
 function captionTimelineKey() {
-  return state.projectId && state.activeClip
-    ? `${state.projectId}:${state.activeClip.id}:${state.activeClip.start}:${state.activeClip.end}`
+  return captionKeyForClip(state.activeClip);
+}
+
+function captionKeyForClip(clip) {
+  return state.projectId && clip
+    ? `${state.projectId}:${clip.id}:${clip.start}:${clip.end}`
     : "";
+}
+
+function captionSegmentsForClip(clip) {
+  const stored = state.captionByClip[captionKeyForClip(clip)];
+  if (Array.isArray(stored) && stored.length) {
+    return stored.map((s) => ({
+      start: Number(s.start) || 0,
+      end: Number(s.end) || 0,
+      text: String(s.text || "").trim(),
+      words: Array.isArray(s.words) && s.words.length ? s.words : []
+    }));
+  }
+  if (state.activeClip && state.activeClip.id === clip.id && state.captionSegments.length) {
+    return state.captionSegments.map((s) => ({
+      start: Number(s.start) || 0,
+      end: Number(s.end) || 0,
+      text: String(s.text || "").trim(),
+      words: Array.isArray(s.words) && s.words.length ? s.words : []
+    }));
+  }
+  return [];
 }
 
 function normalizeCaptionSegments(segments, start, end) {
@@ -843,6 +879,10 @@ function loadCaptionTimeline(segments) {
   state.captionSegments = normalizeCaptionSegments(segments, 0, dur);
   state.captionSelected = -1;
   state.captionLoadedFor = captionTimelineKey();
+  state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
+    ...s,
+    words: Array.isArray(s.words) ? s.words.slice() : []
+  }));
   renderCaptionTimeline();
 }
 
@@ -1154,6 +1194,10 @@ function saveCaptionTimeline() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Simpan gagal.");
       state.liveSegments = state.captionSegments.map((s) => ({ ...s }));
+      state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
+        ...s,
+        words: Array.isArray(s.words) ? s.words.slice() : []
+      }));
       showToast(`Caption tersimpan: ${data.segments} segmen.`);
       return data;
     })
@@ -1266,7 +1310,14 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
       ...s,
       words: Array.isArray(s.karaoke) ? s.karaoke : []
     }));
-    state.captionSegments = segs.map((s) => ({ ...s }));
+    state.captionSegments = segs.map((s) => ({
+      ...s,
+      words: Array.isArray(s.karaoke) ? s.karaoke : (Array.isArray(s.words) ? s.words : [])
+    }));
+    state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
+      ...s,
+      words: Array.isArray(s.words) ? s.words.slice() : []
+    }));
     state.liveActive = state.liveSegments.length > 0 && $("#captionStyleSelect").value !== "off";
     loadCaptionTimeline(state.liveSegments);
     updateLiveCaption();
@@ -1478,7 +1529,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
           language: $("#languageSelect").value,
           captionStyle: $("#captionStyleSelect").value,
           captionSize: captionSize.value,
-          ratio: currentRatio()
+          ratio: currentRatio(),
+          segments: captionSegmentsForClip(clip)
         }))
       })
     });

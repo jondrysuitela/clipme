@@ -2434,7 +2434,7 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const filterParts = buildVideoFilter(payload);
 
   const segments = payload.captionStyle !== "off"
-    ? getClipTranscriptSegments(projectDir, manifest, payload)
+    ? resolveExportSegments(payload, projectDir, manifest)
     : [];
 
   let timedFilters = [];
@@ -2933,6 +2933,36 @@ function clipTranscriptCacheRead(projectDir, payload) {
   }
 }
 
+// Normalize segments sent from the client (relative to clip start) into
+// absolute timeline coordinates, matching the format stored on disk.
+function normalizeClientSegments(rawSegments, offset) {
+  return (Array.isArray(rawSegments) ? rawSegments : [])
+    .map((seg) => ({
+      start: Math.max(0, Number(seg.start || 0)) + offset,
+      end: Math.max(0, Number(seg.end || 0)) + offset,
+      text: cleanCaptionText(seg.text || ""),
+      words: (Array.isArray(seg.words) ? seg.words : [])
+        .map((w) => ({
+          text: cleanCaptionText(w.text || ""),
+          start: Math.max(0, (w.start != null ? w.start : 0)) + offset,
+          end: Math.max(0, (w.end != null ? w.end : (w.start != null ? w.start : 0) + 0.3)) + offset
+        }))
+        .filter((w) => w.text)
+    }))
+    .filter((seg) => seg.text && seg.end > seg.start);
+}
+
+// WYSIWYG: prefer the segments the user currently sees/edits (sent by the
+// client), otherwise fall back to the server-side transcript. Keeps preview
+// text identical to what gets burned into the exported MP4.
+function resolveExportSegments(payload, projectDir, manifest) {
+  if (Array.isArray(payload.segments) && payload.segments.length) {
+    const normalized = normalizeClientSegments(payload.segments, Math.max(0, Number(payload.start || 0)));
+    if (normalized.length) return normalized;
+  }
+  return getClipTranscriptSegments(projectDir, manifest, payload);
+}
+
 async function handleExport(req, res) {
   const payload = JSON.parse((await collectRequest(req, 20)).toString("utf8"));
   if (!isValidUUID(payload.projectId || "")) {
@@ -3312,7 +3342,8 @@ function handleExportBatch(req, res) {
             ratio: clipDef.ratio || "portrait",
             captionStyle: clipDef.captionStyle || "bold",
             captionSize: clipDef.captionSize || 23,
-            fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76
+            fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
+            segments: clipDef.segments || []
           };
           exportClip(payload, (p) => {
             const overall = Math.round((processed / total) * 80 + (p / total));

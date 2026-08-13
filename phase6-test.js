@@ -11,21 +11,26 @@ async function t(name, fn) {
 }
 
 const scriptSrc = fs.readFileSync("script.js", "utf8");
+const serverSrc = fs.readFileSync("server.js", "utf8");
 
-function extract(name) {
-  const start = scriptSrc.indexOf(`function ${name}(`);
+function extractFrom(src, name) {
+  const start = src.indexOf(`function ${name}(`);
   if (start === -1) throw new Error(`${name} not found`);
   const openParen = start + `function ${name}`.length;
-  const closeParen = scriptSrc.indexOf(")", openParen);
-  const params = scriptSrc.slice(openParen + 1, closeParen);
-  const bodyStart = scriptSrc.indexOf("{", closeParen) + 1;
+  const closeParen = src.indexOf(")", openParen);
+  const params = src.slice(openParen + 1, closeParen);
+  const bodyStart = src.indexOf("{", closeParen) + 1;
   let depth = 1, i = bodyStart;
-  while (i < scriptSrc.length && depth > 0) {
-    if (scriptSrc[i] === "{") depth++;
-    else if (scriptSrc[i] === "}") depth--;
+  while (i < src.length && depth > 0) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") depth--;
     i++;
   }
-  return { params, body: scriptSrc.slice(bodyStart, i - 1) };
+  return { params, body: src.slice(bodyStart, i - 1) };
+}
+
+function extract(name) {
+  return extractFrom(scriptSrc, name);
 }
 
 function extractConst(name) {
@@ -68,6 +73,28 @@ const sandbox = new Function(
 function run(name, args) {
   return sandbox[name](...args);
 }
+
+const SERVER_FNS = ["normalizeClientSegments"];
+const srvSandbox = new Function(
+  "cleanCaptionText",
+  SERVER_FNS.map((n) => {
+    const { params, body } = extractFrom(serverSrc, n);
+    return `function ${n}(${params}) { ${body} }`;
+  }).join("\n") + "\nreturn { " + SERVER_FNS.join(", ") + " };"
+)((v) => String(v == null ? "" : v).trim());
+
+function srvRun(name, args) {
+  return srvSandbox[name].apply(null, args);
+}
+
+const srvResolveExport = new Function(
+  "cleanCaptionText",
+  [
+    (() => { const f = extractFrom(serverSrc, "normalizeClientSegments"); return `function normalizeClientSegments(${f.params}) { ${f.body} }`; })(),
+    "let getClipTranscriptSegments = null;",
+    (() => { const f = extractFrom(serverSrc, "resolveExportSegments"); return `function resolveExportSegments(${f.params}) { ${f.body} }`; })()
+  ].join("\n") + "\nreturn (payload, fallback) => { getClipTranscriptSegments = fallback; return resolveExportSegments(payload, null, null); };"
+)((v) => String(v == null ? "" : v).trim());
 
 (async () => {
   const cases = [
@@ -188,6 +215,53 @@ function run(name, args) {
       if (reversed !== "") throw new Error("reversed times filtered");
       const singleLine = run("buildSrt", [[{ start: 0, end: 1, text: "A\nB" }]]);
       if (!singleLine.includes("A B")) throw new Error("newline flattened");
+    }],
+    ["P6 normalizeClientSegments applies offset", () => {
+      const segs = srvRun("normalizeClientSegments", [[
+        { start: 0, end: 2.5, text: "Halo", words: [{ text: "Halo", start: 0, end: 1.2 }] },
+        { start: 3, end: 5, text: "Dunia" }
+      ], 10]);
+      if (segs.length !== 2) throw new Error("count");
+      if (Math.abs(segs[0].start - 10) > 1e-9 || Math.abs(segs[0].end - 12.5) > 1e-9) throw new Error("start/end offset");
+      if (Math.abs(segs[0].words[0].start - 10) > 1e-9 || Math.abs(segs[0].words[0].end - 11.2) > 1e-9) throw new Error("words offset");
+      if (segs[0].text !== "Halo") throw new Error("text preserved");
+    }],
+    ["P6 normalizeClientSegments filters invalid", () => {
+      const segs = srvRun("normalizeClientSegments", [[
+        { start: 5, end: 1, text: "reversed" },
+        { start: 0, end: 2, text: "   " },
+        { start: 0, end: 2, text: "valid" }
+      ], 0]);
+      if (segs.length !== 1 || segs[0].text !== "valid") throw new Error("only valid kept");
+      const noText = srvRun("normalizeClientSegments", [[{ start: 0, end: 2, text: "" }], 0]);
+      if (noText.length !== 0) throw new Error("empty text dropped");
+    }],
+    ["P6 normalizeClientSegments word fallback end", () => {
+      const segs = srvRun("normalizeClientSegments", [[
+        { start: 1, end: 4, text: "X", words: [{ text: "X", start: 1 }] }
+      ], 5]);
+      if (segs[0].words[0].end < segs[0].words[0].start) throw new Error("end fallback >= start");
+    }],
+    ["P6 resolveExportSegments prefers client segments", () => {
+      const payload = { start: 20, segments: [{ start: 1, end: 3, text: "client" }] };
+      const called = { value: false };
+      const fallback = () => { called.value = true; return [{ start: 30, end: 40, text: "server" }]; };
+      const resolved = srvResolveExport(payload, fallback);
+      if (called.value) throw new Error("must not call fallback");
+      if (!resolved.length || resolved[0].text !== "client") throw new Error("client segments used");
+      if (Math.abs(resolved[0].start - 21) > 1e-9) throw new Error("offset applied");
+    }],
+    ["P6 resolveExportSegments falls back on empty client", () => {
+      const payload = { start: 20, segments: [] };
+      const fallback = () => [{ start: 30, end: 40, text: "server" }];
+      const resolved = srvResolveExport(payload, fallback);
+      if (!resolved.length || resolved[0].text !== "server") throw new Error("server fallback used");
+    }],
+    ["P6 resolveExportSegments falls back when client invalid", () => {
+      const payload = { start: 20, segments: [{ start: 5, end: 1, text: "bad" }] };
+      const fallback = () => [{ start: 30, end: 40, text: "server" }];
+      const resolved = srvResolveExport(payload, fallback);
+      if (!resolved.length || resolved[0].text !== "server") throw new Error("server fallback used for invalid");
     }]
   ];
   await Promise.all(cases.map(([name, fn]) => t(name, fn)));
