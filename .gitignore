@@ -8,6 +8,7 @@ dist-installer/
 __pycache__/
 *.pyc
 models--*/
+models/
 outputs/
 uploads/
 tmp/

@@ -272,6 +272,17 @@ function findVenvPython() {
 const VENV_PYTHON = findVenvPython();
 const FASTER_WHISPER_SCRIPT = toUnpackedPath(path.join(ROOT, "transcribe_faster_whisper.py"));
 const STT_ENGINE = toUnpackedPath(path.join(ROOT, "stt-engine.py"));
+const MODELS_ROOT = toUnpackedPath(path.join(ROOT, "models"));
+
+// Prefer a bundled flat model dir (models/<name>) so faster-whisper never
+// needs the HF symlink cache or a network download; fall back to the plain
+// model name so HF auto-download still works when the dir is absent.
+function resolveLocalWhisperModel(name) {
+  const requested = String(name || process.env.LOCAL_WHISPER_MODEL || "small");
+  const flatDir = path.join(MODELS_ROOT, requested);
+  if (fs.existsSync(path.join(flatDir, "model.bin"))) return flatDir;
+  return requested;
+}
 const jobs = new Map();
 const jobQueue = [];
 let activeJobs = 0;
@@ -1595,7 +1606,7 @@ async function transcribeAudioWithLocalWhisper(audioPath) {
   const args = [
     FASTER_WHISPER_SCRIPT,
     audioPath,
-    "--model", process.env.LOCAL_WHISPER_MODEL || "small",
+    "--model", resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "small"),
     "--device", process.env.LOCAL_WHISPER_DEVICE || "cpu",
     "--compute-type", process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8",
     "--output", outputPath
@@ -3701,7 +3712,7 @@ async function handleSttTranscribe(req, res) {
 
     const pythonPath = process.env.LOCAL_WHISPER_PYTHON || VENV_PYTHON;
     const args = [STT_ENGINE, "transcribe", "--audio", audioPath, "--format", format];
-    if (model) args.push("--model", model);
+    if (model) args.push("--model", resolveLocalWhisperModel(model));
     if (language) args.push("--language", language);
     if (noiseReduction) args.push("--noise-reduction");
     if (removeSilence) args.push("--remove-silence");

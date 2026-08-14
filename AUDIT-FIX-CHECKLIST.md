@@ -125,7 +125,7 @@ Daftar perbaikan dari **Deep Forensic Audit** (read-only). Setiap item = 1 PR/co
 ### 3.4 Rampingkan installer — `L-04`
 - **Lokasi:** `package.json:41-58`
 - Evaluasi bundling model `.venv`/`small` (download-opsional / bootstrap) atau dokumentasikan ukuran.
-- **Status:** [~] Butuh keputusan: bundling model opsional menambah kompleksitas build; disarankan dokumentasi ukuran dulu.
+- **Status:** [x] **Keputusan: bundle semua (offline penuh)**. Struktur HF-cache (`models--Systran--*`, symlink) tidak portabel di Windows → dibangun folder datar `models/small` & `models/tiny` (file riil, total ~536MB). `server.js` menambah `resolveLocalWhisperModel()` — prefer path `models/<name>/model.bin`, fallback ke nama HF (auto-download). `package.json` bundle `models/`. Terverifikasi: load offline via `HF_HUB_OFFLINE=1` OK; E2E `/api/stt/transcribe` 200 dengan model tersolve ke `models/small`. Folder HF lama dihapus (~538MB). Ukuran installer akhir ~1GB (bin 719MB + venv 337MB + models 536MB).
 
 ### 3.5 Bersihkan wording lama — `L-05`
 - **Lokasi:** `server.js:2183`
@@ -168,4 +168,4 @@ node --check server.js script.js electron/main.js clipme-caption-engine.js  -> O
 py_compile semua *.py di stt/ + stt-engine.py  (via .venv python) -> OK
 ```
 
-> Status: **SEMUA HIJAU** (hasil 15 Agu 2026). Verifikasi runtime yang tersisa: I-08 sudah teratasi (resolusi 1080p via android_vr); L-04 (keputusan installer bundling) masih terbuka.
+> Status: **SEMUA HIJAU & LENGKAP** (hasil 15 Agu 2026). Semua item 1.1–3.8 berstatus `[x]`. L-04 teratasi: bundle offline penuh dengan folder model datar. Tinggal build installer final via `npm run dist` bila perlu distribusi.

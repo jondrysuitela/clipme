@@ -51,12 +51,8 @@
         "to": ".venv"
       },
       {
-        "from": "models--Systran--faster-whisper-small",
-        "to": "models--Systran--faster-whisper-small"
-      },
-      {
-        "from": "models--Systran--faster-whisper-tiny",
-        "to": "models--Systran--faster-whisper-tiny"
+        "from": "models",
+        "to": "models"
       }
     ],
     "win": {
