@@ -2,7 +2,7 @@
 interfaces.py — Abstract base classes for engine-agnostic design.
 
 Allows Faster-Whisper to be replaced by another engine without
-affecting the rest of Clipmee.
+affecting the rest of Clipper Studio.
 """
 
 from abc import ABC, abstractmethod

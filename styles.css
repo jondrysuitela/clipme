@@ -68,6 +68,15 @@ button {
   font-weight: 900;
 }
 
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
 .brand strong,
 .brand span {
   display: block;

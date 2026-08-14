@@ -367,7 +367,6 @@ async function uploadToBackend(file) {
 
   uploadStatus.textContent = "Uploading";
   $("#generateButton").disabled = true;
-  $("#processTop").disabled = true;
 
   const response = await fetch("/api/upload", {
     method: "POST",
@@ -464,7 +463,6 @@ async function processYouTubeUrl() {
   renderClipSkeleton();
   $("#attachUrl").disabled = true;
   $("#generateButton").disabled = true;
-  $("#processTop").disabled = true;
   showToast("Membaca metadata YouTube tanpa download full video.");
 
   try {
@@ -493,7 +491,6 @@ async function processYouTubeUrl() {
   } finally {
     $("#attachUrl").disabled = false;
     $("#generateButton").disabled = false;
-    $("#processTop").disabled = false;
   }
 }
 
@@ -513,7 +510,6 @@ async function attachFile(file) {
     showToast(error.message);
   } finally {
     $("#generateButton").disabled = false;
-    $("#processTop").disabled = false;
   }
 }
 
@@ -726,7 +722,6 @@ $("#generateButton").addEventListener("click", () => {
   showToast("Clip sudah dibuat dari video YouTube.");
 });
 
-$("#processTop").addEventListener("click", () => $("#generateButton").click());
 $("#playClip").addEventListener("click", playSelectedClip);
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
@@ -1397,13 +1392,6 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
     btn.disabled = false;
     btn.textContent = "Auto Caption";
   }
-});
-
-$("#loadDemo").addEventListener("click", () => {
-  $("#fileTitle").textContent = "Demo mode";
-  $("#fileMeta").textContent = "Paste URL YouTube untuk proses sungguhan.";
-  uploadStatus.textContent = "Demo only";
-  showToast("Demo hanya UI. Paste URL YouTube untuk download dan export nyata.");
 });
 
 $("#sortClips").addEventListener("click", () => {

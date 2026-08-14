@@ -1,6 +1,6 @@
 {
-  "name": "clipforge",
-  "productName": "ClipForge",
+  "name": "clipper-studio",
+  "productName": "Clipper Studio",
   "version": "0.1.0",
   "private": true,
   "main": "electron/main.js",
@@ -11,8 +11,9 @@
     "dist": "electron-builder --win nsis"
   },
   "build": {
-    "appId": "com.clipforge.desktop",
-    "productName": "ClipForge",
+    "appId": "com.clipperstudio.desktop",
+    "productName": "Clipper Studio",
+    "icon": "build/icon.png",
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -25,6 +26,7 @@
       "clipme-prompt.js",
       "clipme-caption-engine.js",
       "clipme-caption-prompt.js",
+      "build/icon.png",
       "transcribe_faster_whisper.py",
       "stt-engine.py",
       "stt/**/*.py",
@@ -55,7 +57,8 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

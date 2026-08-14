@@ -34,7 +34,7 @@ from stt.interfaces import TranscriptionResult, Segment, Word
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Clipmee STT Engine v2")
+    parser = argparse.ArgumentParser(description="Clipper Studio STT Engine v2")
     sub = parser.add_subparsers(dest="command")
 
     # transcribe

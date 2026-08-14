@@ -1,4 +1,4 @@
-# ClipForge
+# Clipper Studio
 
 Aplikasi lokal untuk mengubah URL YouTube menjadi short clips.
 

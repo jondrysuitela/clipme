@@ -12,7 +12,8 @@ app.whenReady().then(async () => {
     height: 900,
     minWidth: 960,
     minHeight: 620,
-    title: "ClipForge",
+    title: "Clipper Studio",
+    icon: require("path").join(__dirname, "..", "build", "icon.png"),
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,

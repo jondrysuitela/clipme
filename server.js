@@ -30,7 +30,12 @@ function packagedDataRoot() {
       return electron.app.getPath("userData");
     }
   } catch {}
-  return process.env.APPDATA ? path.join(process.env.APPDATA, "ClipForge") : ROOT;
+  const base = process.env.APPDATA;
+  const fresh = base ? path.join(base, "Clipper Studio") : ROOT;
+  const legacy = base ? path.join(base, "ClipForge") : "";
+  // Keep using the old data folder until the new one exists (avoids losing projects).
+  if (fresh !== ROOT && !fs.existsSync(fresh) && legacy && fs.existsSync(legacy)) return legacy;
+  return fresh;
 }
 
 const DATA_ROOT = process.env.CLIPFORGE_DATA_DIR || packagedDataRoot();
@@ -3630,7 +3635,7 @@ async function handleSttModels(req, res) {
 
 // Only these exact web assets are served from the project root.
 // Media (upload/preview/output) is served through dedicated /media/, /sections/, /outputs/ routes.
-const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js"]);
+const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/build/icon.png"]);
 
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -3715,7 +3720,7 @@ function startServer(port = PORT, host = "127.0.0.1") {
       server.off("error", reject);
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : port;
-      console.log(`ClipForge berjalan di http://${host}:${actualPort}`);
+      console.log(`Clipper Studio berjalan di http://${host}:${actualPort}`);
       resolve({ server, port: actualPort, url: `http://${host}:${actualPort}` });
     });
   });

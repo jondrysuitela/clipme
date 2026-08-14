@@ -1,5 +1,5 @@
 """
-stt — Clipmee Speech-to-Text Engine
+stt — Clipper Studio Speech-to-Text Engine
 =====================================
 
 Enterprise-grade offline speech recognition built on Faster-Whisper.

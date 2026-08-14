@@ -94,9 +94,18 @@ for (const [label, input, expected] of durationCases) {
 
   // ---------- M-03 serveStatic ----------
   await t("M-03: allowlist exists and contains only web assets", () => {
-    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js"\]\)/.test(serverSrc)) {
+    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js", "\/build\/icon.png"\]\)/.test(serverSrc)) {
       throw new Error("PUBLIC_WEB_FILES allowlist mismatch");
     }
+  });
+
+  await t("M-03: build/icon.png is served as public web asset", async () => {
+    if (!srv) srv = await boot();
+    const res = await fetch(`${srv.url}/build/icon.png`);
+    if (res.status !== 200) throw new Error(`build/icon.png not served (${res.status})`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 1000) throw new Error("icon payload looks truncated");
+    if (buf.slice(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("icon is not a PNG file");
   });
 
   if (!srv) srv = await boot();
