@@ -481,7 +481,7 @@ function collectRequest(req, limitMb = 2048) {
     req.on("data", (chunk) => {
       total += chunk.length;
       if (total > limitMb * 1024 * 1024) {
-        reject(new Error(`File terlalu besar. Batas demo lokal ${limitMb} MB.`));
+        reject(new Error(`File terlalu besar. Batas maksimal ${limitMb} MB.`));
         req.destroy();
         return;
       }
@@ -503,6 +503,35 @@ function walkDir(dir, fn) {
       } catch {}
     }
   } catch {}
+}
+
+const STORAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+function cleanupOldData() {
+  const now = Date.now();
+  const isOld = (filePath) => {
+    try { return now - fs.statSync(filePath).mtimeMs > STORAGE_RETENTION_MS; }
+    catch { return true; }
+  };
+
+  // tmp/ is purely transient (streaming parts, upload staging, stt scratch).
+  try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+  try { fs.mkdirSync(TMP_DIR, { recursive: true }); } catch {}
+
+  // Old projects (uploads/<uuid>/ and their sources/outputs) older than the
+  // retention window are removed so disk does not grow without bound.
+  for (const dir of [UPLOAD_DIR, OUTPUT_DIR]) {
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        try {
+          if (fs.statSync(full).isDirectory() && isOld(full)) {
+            fs.rmSync(full, { recursive: true, force: true });
+          }
+        } catch {}
+      }
+    } catch {}
+  }
 }
 
 function killProcess(child) {
@@ -571,7 +600,7 @@ function getJson(url, redirects = 0) {
   if (redirects > 5) return Promise.reject(new Error("Too many redirects"));
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https:") ? require("https") : require("http");
-    client.get(url, (response) => {
+    const request = client.get(url, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
         getJson(response.headers.location, redirects + 1).then(resolve, reject);
         return;
@@ -589,7 +618,11 @@ function getJson(url, redirects = 0) {
           reject(error);
         }
       });
-    }).on("error", reject);
+    });
+    request.setTimeout(30000, () => {
+      request.destroy(new Error("Request timed out"));
+    });
+    request.on("error", reject);
   });
 }
 
@@ -640,6 +673,9 @@ function postMultipart(url, fields, files, headers = {}) {
     });
 
     request.on("error", reject);
+    request.setTimeout(120000, () => {
+      request.destroy(new Error("Request timed out"));
+    });
     request.end(body);
   });
 }
@@ -1343,7 +1379,12 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
   const enriched = windows
     .map((w) => {
       const sentences = splitSentences(w.text);
-      const analysis = clipmeAssemble(sentences, w.segments, lang, length);
+      const relativeSegments = w.segments.map((s) => ({
+        ...s,
+        start: Math.max(0, Number(s.start || 0) - w.start),
+        end: Math.max(0, Number(s.end || 0) - w.start)
+      }));
+      const analysis = clipmeAssemble(sentences, relativeSegments, lang, length);
       return { ...w, analysis };
     })
     .sort((a, b) => b.analysis.score - a.analysis.score);
@@ -2180,7 +2221,7 @@ async function handleUpload(req, res) {
         uploadFailed = true;
         ws.destroy();
         req.destroy();
-        throw new Error("File terlalu besar. Batas demo lokal 2048 MB.");
+        throw new Error("File terlalu besar. Batas maksimal 2048 MB.");
       }
       await writeStreamChunk(ws, chunk);
     }
@@ -2232,6 +2273,16 @@ async function handleUpload(req, res) {
   try {
     const probe = await probeVideo(sourcePath);
     const clips = buildClips(probe.duration, targetClipLength(parsed.parts.duration?.text));
+
+    writeProjectManifest(projectDir, {
+      id,
+      type: "local",
+      name: file.filename,
+      probe,
+      clips,
+      transcriptPath: "",
+      transcriptProvider: "none"
+    });
 
     sendJson(res, 200, {
       id,
@@ -2306,6 +2357,11 @@ async function handleYouTube(req, res) {
   const videoId = extractYouTubeId(videoUrl);
 
   if (process.env.CLIPFORGE_DEEP_ANALYZE !== "1") {
+    if (!videoId) {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      sendJson(res, 400, { error: "URL YouTube tidak valid: tidak ada video ID." });
+      return;
+    }
     const assumedDuration = Math.max(60, Number(payload.assumedDuration || 3600));
     const probe = {
       duration: assumedDuration,
@@ -2546,12 +2602,14 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     }
   }
 
-  const filter = timedFilters.length
-    ? buildFilterChain(filterParts, timedFilters)
-    : [
-        filterParts.scale, filterParts.crop,
-        `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
-      ].join(",");
+  const filter = payload.captionStyle === "off"
+    ? [filterParts.scale, filterParts.crop].join(",")
+    : timedFilters.length
+      ? buildFilterChain(filterParts, timedFilters)
+      : [
+          filterParts.scale, filterParts.crop,
+          `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
+        ].join(",");
 
   await run(FFMPEG, buildFilterCommandArgs({
     input: sourcePath,
@@ -2713,9 +2771,10 @@ async function handlePreview(req, res) {
       sendJson(res, 404, { error: "Source video tidak ditemukan." });
       return;
     }
-    const prePromise = ensureClipTranscriptLocal(projectDir, manifest, payload).catch(() => {});
-    const clipStart = Math.max(0, Number(payload.start || 0));
-    await prePromise;
+    const result = await enqueueAndAwait("preview", (setProgress, children) =>
+      ensureClipTranscriptLocal(projectDir, manifest, payload, children)
+    ).catch(() => null);
+    void result;
     const segments = getPreviewTimedSegments(projectDir, manifest, payload);
     sendJson(res, 200, { previewUrl: `/media/${projectId}`, segments, baked: false });
     return;
@@ -2842,19 +2901,27 @@ async function downloadYouTubeAudioSection(projectDir, videoUrl, clip, children 
 
 async function getSpeechTranscriptForYouTube(projectDir, videoUrl, duration, targetLength, language, children = null) {
   const seedClips = buildClips(duration, targetLength).slice(0, 8);
+  const MAX_PARALLEL_STT = 2;
+  const results = new Array(seedClips.length).fill(null);
+  let cursor = 0;
 
-  const results = await Promise.all(seedClips.map(async (clip) => {
-    try {
-      const audioPath = await downloadYouTubeAudioSection(projectDir, videoUrl, clip, children);
-      const result = await transcribeAudio(audioPath, language);
-      if (result.text) {
-        return { start: clip.start, end: clip.end, text: result.text, provider: result.provider };
+  const worker = async () => {
+    while (cursor < seedClips.length) {
+      const index = cursor++;
+      const clip = seedClips[index];
+      try {
+        const audioPath = await downloadYouTubeAudioSection(projectDir, videoUrl, clip, children);
+        const result = await transcribeAudio(audioPath, language);
+        if (result.text) {
+          results[index] = { start: clip.start, end: clip.end, text: result.text, provider: result.provider };
+        }
+      } catch (err) {
+        console.error(`STT clip ${clip.id} gagal:`, err.message);
       }
-    } catch (err) {
-      console.error(`STT clip ${clip.id} gagal:`, err.message);
     }
-    return null;
-  }));
+  };
+
+  await Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_STT, seedClips.length) }, worker));
 
   const transcript = results.filter(Boolean);
   const provider = transcript.find((t) => t.provider)?.provider || "none";
@@ -2869,7 +2936,7 @@ function clipPayloadToClip(payload) {
   };
 }
 
-async function transcribeClipWithCache(projectDir, manifest, payload, children = null) {
+async function transcribeClipWithCacheSource(projectDir, manifest, payload, audioSource, children = null) {
   const transcriptDir = path.join(projectDir, "clip-transcripts");
   fs.mkdirSync(transcriptDir, { recursive: true });
   const cachePath = clipTranscriptCachePath(projectDir, payload);
@@ -2879,7 +2946,7 @@ async function transcribeClipWithCache(projectDir, manifest, payload, children =
       return JSON.parse(fs.readFileSync(cachePath, "utf8"));
     }
     const clip = clipPayloadToClip(payload);
-    const audioPath = await downloadYouTubeAudioSection(projectDir, manifest.url, clip, children);
+    const audioPath = await audioSource(projectDir, manifest, clip, children);
     const result = await transcribeAudio(audioPath, payload.language);
     if (!result.text) return null;
 
@@ -2907,6 +2974,18 @@ async function transcribeClipWithCache(projectDir, manifest, payload, children =
   };
 
   return singleFlight(cachePath, worker);
+}
+
+async function transcribeClipWithCache(projectDir, manifest, payload, children = null) {
+  return transcribeClipWithCacheSource(projectDir, manifest, payload, (dir, m, clip, kids) =>
+    downloadYouTubeAudioSection(dir, m.url, clip, kids), children
+  );
+}
+
+async function transcribeClipWithCacheLocal(projectDir, manifest, payload, children = null) {
+  return transcribeClipWithCacheSource(projectDir, manifest, payload, (dir, m, clip, kids) =>
+    downloadLocalAudioSection(dir, clip, kids), children
+  );
 }
 
 async function downloadLocalAudioSection(projectDir, clip, children = null) {
@@ -2938,43 +3017,9 @@ async function downloadLocalAudioSection(projectDir, clip, children = null) {
 }
 
 async function transcribeClipWithCacheLocal(projectDir, manifest, payload, children = null) {
-  const transcriptDir = path.join(projectDir, "clip-transcripts");
-  fs.mkdirSync(transcriptDir, { recursive: true });
-  const cachePath = clipTranscriptCachePath(projectDir, payload);
-
-  const worker = async () => {
-    if (fs.existsSync(cachePath)) {
-      return JSON.parse(fs.readFileSync(cachePath, "utf8"));
-    }
-    const clip = clipPayloadToClip(payload);
-    const audioPath = await downloadLocalAudioSection(projectDir, clip, children);
-    const result = await transcribeAudio(audioPath, payload.language);
-    if (!result.text) return null;
-
-    const caption = cleanCaptionText(result.text).slice(0, 155);
-    const offset = clip.start;
-    const data = {
-      provider: result.provider,
-      caption,
-      hook: clipHook(caption, 0),
-      start: clip.start,
-      end: clip.end,
-      segments: (result.segments || []).map((s) => ({
-        start: (s.start || 0) + offset,
-        end: (s.end || 0) + offset,
-        text: s.text,
-        words: (s.words || []).map((w) => ({
-          text: w.text,
-          start: (w.start || 0) + offset,
-          end: (w.end || 0) + offset
-        }))
-      }))
-    };
-    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2));
-    return data;
-  };
-
-  return singleFlight(cachePath, worker);
+  return transcribeClipWithCacheSource(projectDir, manifest, payload, (dir, m, clip, kids) =>
+    downloadLocalAudioSection(dir, clip, kids), children
+  );
 }
 
 async function ensureClipTranscriptLocal(projectDir, manifest, payload, children = null) {
@@ -3066,7 +3111,7 @@ async function handleExport(req, res) {
     sendJson(res, 400, { error: "Project ID tidak valid." });
     return;
   }
-  payload.caption = sanitizeString(payload.caption, 500);
+  payload.caption = String(payload.caption || "").slice(0, 500);
   payload.captionStyle = sanitizeString(payload.captionStyle || "bold", 20);
   payload.fontFamily = sanitizeString(payload.fontFamily || "Arial", 30);
   payload.captionColor = sanitizeColor(payload.captionColor);
@@ -3247,7 +3292,7 @@ async function handleAutoCaptions(req, res) {
   let result;
   let llmUsed = false;
   try {
-    result = await instance.processWithLLM(wordLevel, style, fillerMode, "speaker_1");
+    result = await instance.processWithLLM(wordLevel, style, fillerMode, "speaker_1", payload.language || "Indonesia");
     llmUsed = true;
   } catch (e) {
     // fallback ke heuristic
@@ -3350,6 +3395,52 @@ function handleDeleteProject(req, res, params) {
   if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
   fs.rmSync(projectDir, { recursive: true, force: true });
   sendJson(res, 200, { ok: true });
+}
+
+function handleListProjects(req, res) {
+  const projects = [];
+  try {
+    if (!fs.existsSync(UPLOAD_DIR)) { sendJson(res, 200, { projects: [] }); return; }
+    for (const entry of fs.readdirSync(UPLOAD_DIR)) {
+      if (!isValidUUID(entry)) continue;
+      const dir = path.join(UPLOAD_DIR, entry);
+      if (!fs.statSync(dir).isDirectory()) continue;
+      const manifest = readProjectManifest(dir);
+      if (!manifest.id) continue;
+      projects.push({
+        id: manifest.id,
+        name: manifest.name || "project",
+        duration: manifest.probe?.duration || 0,
+        clips: Array.isArray(manifest.clips) ? manifest.clips.length : 0,
+        transcriptStatus: (manifest.transcriptProvider && manifest.transcriptProvider !== "none")
+          ? manifest.transcriptProvider : "No transcript",
+        createdAt: fs.statSync(dir).birthtimeMs || 0
+      });
+    }
+  } catch {}
+  projects.sort((a, b) => b.createdAt - a.createdAt);
+  sendJson(res, 200, { projects });
+}
+
+function handleGetProject(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
+  const manifest = readProjectManifest(projectDir);
+  const sourcePath = findSourceFile(projectDir);
+  const sourceExists = Boolean(sourcePath) && isSafePath(sourcePath, UPLOAD_DIR);
+  sendJson(res, 200, {
+    id: manifest.id || projectId,
+    type: manifest.type || "local",
+    name: manifest.name || "project",
+    probe: manifest.probe || {},
+    clips: Array.isArray(manifest.clips) ? manifest.clips : [],
+    transcriptPath: manifest.transcriptPath || "",
+    transcriptProvider: manifest.transcriptProvider || "none",
+    url: manifest.url || "",
+    previewUrl: sourceExists ? `/media/${projectId}` : ""
+  });
 }
 
 function handleListExports(req, res) {
@@ -3535,7 +3626,7 @@ async function handleSttTranscribe(req, res) {
       sendJson(res, 403, { error: "Akses ke path ini tidak diizinkan." });
       return;
     }
-    if (!fs.existsSync(audioPath)) {
+    if (!fs.existsSync(resolvedAudioPath)) {
       sendJson(res, 400, { error: "Audio file tidak ditemukan." });
       return;
     }
@@ -3663,7 +3754,9 @@ router
   .add("POST", "/api/stt/transcribe", handleSttTranscribe)
   .add("POST", "/api/stt/search", handleSttSearch)
   .add("GET", "/api/stt/models", handleSttModels)
+  .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
+  .add("GET", "/api/projects/:projectId", handleGetProject)
   .add("DELETE", "/api/projects/:projectId", handleDeleteProject)
   .add("GET", "/api/exports", handleListExports)
   .add("DELETE", "/api/exports/:filename", handleDeleteExport)
@@ -3714,6 +3807,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 function startServer(port = PORT, host = "127.0.0.1") {
+  cleanupOldData();
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -3721,7 +3815,7 @@ function startServer(port = PORT, host = "127.0.0.1") {
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : port;
       console.log(`Clipper Studio berjalan di http://${host}:${actualPort}`);
-      resolve({ server, port: actualPort, url: `http://${host}:${actualPort}` });
+      resolve({ server, port: actualPort, url: `http://${host}:${actualPort}`, shutdown: () => server.close() });
     });
   });
 }

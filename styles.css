@@ -770,7 +770,7 @@ textarea:focus {
 
 .clip-card {
   display: grid;
-  grid-template-columns: 58px 1fr auto;
+  grid-template-columns: 20px 58px 1fr auto;
   gap: 10px;
   align-items: center;
   width: 100%;
@@ -780,6 +780,27 @@ textarea:focus {
   background: #15181b;
   color: inherit;
   text-align: left;
+}
+
+.clip-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+.clip-check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
 }
 
 .clip-card.skeleton {

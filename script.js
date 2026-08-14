@@ -33,7 +33,9 @@ const state = {
   timelineZoom: 1,
   userScrolling: false,
   userScrollTimer: 0,
-  suppressScrollMark: false
+  suppressScrollMark: false,
+  selectedClipIds: new Set(),
+  captionPosition: 0.76
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -46,6 +48,7 @@ const liveCaption = $("#liveCaption");
 const hookInput = $("#hookInput");
 const captionInput = $("#captionInput");
 const captionSize = $("#captionSize");
+const captionPosition = $("#captionPosition");
 const captionFontSelect = $("#captionFontSelect");
 const captionColorInput = $("#captionColor");
 const previewFrame = $("#previewFrame");
@@ -98,6 +101,7 @@ function renderStaticCaption() {
   const style = $("#captionStyleSelect").value;
   captionBox.style.fontSize = `${captionPreviewFontPx()}px`;
   captionBox.className = "caption-box" + (style !== "off" ? ` lc-${style}` : "");
+  captionBox.style.bottom = `${(state.captionPosition || 0.76) * 100}%`;
   applyCaptionVisuals();
   const hasText = captionBox.textContent && captionBox.textContent.replace(/"/g, "").trim();
   captionBox.style.display = style !== "off" && hasText ? "block" : "none";
@@ -173,7 +177,17 @@ function renderClips(list = clips) {
     const button = document.createElement("button");
     button.type = "button";
     const readiness = clip.previewLoading ? "Loading" : clip.previewReady ? "Ready" : "Needs preview";
-    button.className = `clip-card${state.activeClip && clip.id === state.activeClip.id ? " active" : ""}`;
+    const selected = state.selectedClipIds.has(clip.id);
+    button.className = `clip-card${state.activeClip && clip.id === state.activeClip.id ? " active" : ""}${selected ? " selected" : ""}`;
+
+    const check = document.createElement("span");
+    check.className = `clip-check${selected ? " checked" : ""}`;
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = selected ? "✓" : "";
+    check.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleClipSelected(clip.id);
+    });
 
     const thumb = document.createElement("span");
     thumb.className = `thumb ${clip.previewReady ? "ready" : ""} ${clip.previewLoading ? "loading" : ""}`;
@@ -197,12 +211,22 @@ function renderClips(list = clips) {
     score.className = "score";
     score.textContent = `${clip.score}%`;
 
+    button.appendChild(check);
     button.appendChild(thumb);
     button.appendChild(body);
     button.appendChild(score);
     button.addEventListener("click", () => selectClip(clip));
     clipList.appendChild(button);
   });
+}
+
+function toggleClipSelected(clipId) {
+  if (state.selectedClipIds.has(clipId)) {
+    state.selectedClipIds.delete(clipId);
+  } else {
+    state.selectedClipIds.add(clipId);
+  }
+  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
 }
 
 function selectClip(clip) {
@@ -265,6 +289,78 @@ function renderClipSkeleton(count = 4) {
   `).join("");
 }
 
+async function refreshStorage() {
+  try {
+    const response = await fetch("/api/storage", { method: "HEAD" });
+    const bytes = Number(response.headers.get("X-Storage-Used") || 0);
+    const mb = bytes / (1024 * 1024);
+    const el = document.getElementById("storageUsed");
+    const meter = document.getElementById("storageMeter");
+    if (el) el.textContent = `${mb.toFixed(1)} MB`;
+    if (meter) {
+      const pct = Math.min(100, (mb / 512) * 100);
+      meter.style.width = `${pct}%`;
+    }
+  } catch {}
+}
+
+async function pollQueue() {
+  const el = $("#queueList");
+  if (!el) return;
+  try {
+    const response = await fetch("/api/queue");
+    const data = await response.json();
+    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    if (!jobs.length) {
+      el.innerHTML = '<div class="empty-state">Tidak ada job aktif.</div>';
+      return;
+    }
+    el.innerHTML = "";
+    for (const job of jobs) {
+      const row = document.createElement("div");
+      row.className = "table-row";
+
+      const main = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = `${job.type} - ${job.status}`;
+      const meta = document.createElement("span");
+      meta.textContent = `${job.progress || 0}%`;
+      main.appendChild(name);
+      main.appendChild(meta);
+      row.appendChild(main);
+
+      if (job.status === "queued" || job.status === "running") {
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "secondary-button compact";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", () => {
+          fetch(`/api/jobs/${encodeURIComponent(job.id)}`, { method: "DELETE" })
+            .then(() => pollQueue())
+            .catch(() => {});
+        });
+        row.appendChild(cancel);
+      }
+      el.appendChild(row);
+    }
+  } catch {}
+}
+
+async function loadProjects() {
+  try {
+    const response = await fetch("/api/projects");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memuat Library.");
+    state.projects = (Array.isArray(data.projects) ? data.projects : []).map((p) => ({
+      ...p,
+      createdAt: p.createdAt ? new Date(p.createdAt).toLocaleString() : ""
+    }));
+  } catch (err) {
+    state.projects = [];
+  }
+  renderLibrary();
+}
+
 function renderLibrary() {
   if (!state.projects.length) {
     libraryList.innerHTML = '<div class="empty-state">Belum ada project. Paste URL YouTube di Studio untuk mulai.</div>';
@@ -300,9 +396,18 @@ function renderLibrary() {
   });
 
   $$("[data-open-project]").forEach((button) => {
-    button.addEventListener("click", () => {
-      showView("studio");
-      showToast("Project metadata tersimpan. Paste URL lagi jika ingin regenerate clip.");
+    button.addEventListener("click", async () => {
+      const projectId = button.getAttribute("data-open-project");
+      try {
+        const response = await fetch(`/api/projects/${projectId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Gagal memuat project.");
+        loadProject(data);
+        showView("studio");
+        showToast(`Project "${data.name}" dimuat dari Library.`);
+      } catch (err) {
+        showToast(err.message || "Gagal memuat project.");
+      }
     });
   });
 }
@@ -385,13 +490,25 @@ async function uploadToBackend(file) {
   $("#fileMeta").textContent = `${formatTime(data.probe.duration)} - ${data.probe.width}x${data.probe.height} - ${data.probe.codec}`;
   uploadStatus.textContent = `${clips.length} clips ready`;
   showToast(`${clips.length} clip dibuat. Kamu bisa preview dan export MP4.`);
+
+  state.projects.unshift({
+    id: data.id,
+    name: data.name,
+    duration: data.probe.duration,
+    clips: clips.length,
+    transcriptStatus: "No transcript",
+    createdAt: new Date().toLocaleString()
+  });
+  state.projects = state.projects.slice(0, 20);
+  renderLibrary();
 }
 
 function loadProject(data) {
   state.projectId = data.id;
   state.sourceUrl = data.previewUrl || "";
   state.previewClipKey = "";
-  state.youtubeUrl = data.youtubeUrl || "";
+  state.selectedClipIds = new Set();
+  state.youtubeUrl = data.youtubeUrl || data.url || "";
   state.noDownload = Boolean(data.noDownload);
   state.sourceName = data.name || "youtube-video";
   clips = Array.isArray(data.clips) ? data.clips : [];
@@ -440,6 +557,13 @@ async function waitForJob(jobId) {
     if (!response.ok) throw new Error(job.error || "Job tidak ditemukan.");
 
     uploadStatus.textContent = `${job.status} ${job.progress}%`;
+
+    if (typeof $ === "function") {
+      const progressBar = $("#progressBar");
+      const progressText = $("#progressText");
+      if (progressBar) progressBar.style.width = `${Math.max(5, Math.min(100, job.progress || 5))}%`;
+      if (progressText) progressText.textContent = `${job.status} ${job.progress || 0}%`;
+    }
 
     if (job.status === "done") return job.result;
     if (job.status === "failed") throw new Error(job.error || "Export gagal.");
@@ -1345,6 +1469,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
         clipId: state.activeClip.id,
         start: state.activeClip.start,
         end: state.activeClip.end,
+        language: $("#languageSelect").value,
         style: $("#captionStyleSelect").value || "dynamic",
         fillerMode: "aggressive",
         maxLines: 2,
@@ -1418,6 +1543,15 @@ captionSize.addEventListener("input", () => {
   renderStaticCaption();
   if (state.liveActive) {
     liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
+    updateLiveCaption();
+  }
+});
+
+captionPosition.addEventListener("input", () => {
+  state.captionPosition = Number(captionPosition.value) / 100;
+  renderStaticCaption();
+  if (state.liveActive) {
+    liveCaption.style.bottom = `${state.captionPosition * 100}%`;
     updateLiveCaption();
   }
 });
@@ -1558,11 +1692,18 @@ function renderIntel(a) {
 $("#exportButton").addEventListener("click", exportSelectedClip);
 
 $("#selectAllClips").addEventListener("click", () => {
-  showToast(`Selected ${clips.length} clips`);
+  const allSelected = clips.length > 0 && clips.every((clip) => state.selectedClipIds.has(clip.id));
+  state.selectedClipIds = new Set(allSelected ? [] : clips.map((clip) => clip.id));
+  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  showToast(allSelected ? "Semua clip di-unselect." : `Selected ${clips.length} clips`);
 });
 
 $("#exportAllBtn").addEventListener("click", async () => {
-  if (!clips.length) {
+  const selectedIds = state.selectedClipIds;
+  const targetClips = selectedIds.size > 0
+    ? clips.filter((clip) => selectedIds.has(clip.id))
+    : clips;
+  if (!targetClips.length) {
     showToast("Tidak ada clip untuk di-export.");
     return;
   }
@@ -1574,8 +1715,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
 
   state.isExporting = true;
   $("#exportAllBtn").disabled = true;
-  $("#exportAllBtn").textContent = "Exporting all...";
-  showToast(`Mengekspor ${clips.length} clip...`);
+  $("#exportAllBtn").textContent = "Exporting...";
+  showToast(`Mengekspor ${targetClips.length} clip...`);
 
   try {
     const response = await fetch("/api/export-batch", {
@@ -1583,7 +1724,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         projectId: state.projectId,
-        clips: clips.map((clip) => ({
+        clips: targetClips.map((clip) => ({
           clipId: clip.id,
           start: clip.start,
           end: clip.end,
@@ -1618,7 +1759,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
     }
     renderExports();
 
-    const summary = `${okResults.length}/${result.total || clips.length} berhasil`;
+    const summary = `${okResults.length}/${result.total || targetClips.length} berhasil`;
     if (errors.length) {
       showToast(`${summary}, ${errors.length} gagal (${errors[0].error || "error"}).`);
     } else {
@@ -1640,20 +1781,37 @@ $$(".nav-item").forEach((button) => {
   });
 });
 
-$("#clearLibrary").addEventListener("click", () => {
+$("#clearLibrary").addEventListener("click", async () => {
+  const ids = state.projects.map((p) => p.id);
+  for (const id of ids) {
+    try {
+      await fetch(`/api/projects/${id}`, { method: "DELETE" });
+    } catch {}
+  }
   state.projects = [];
   renderLibrary();
-  showToast("Library dibersihkan.");
+  showToast("Project dan file di server dihapus.");
+  refreshStorage();
 });
 
-$("#clearExports").addEventListener("click", () => {
+$("#clearExports").addEventListener("click", async () => {
+  const files = state.exports.map((e) => e.filename);
+  for (const filename of files) {
+    try {
+      await fetch(`/api/exports/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    } catch {}
+  }
   state.exports = [];
   renderExports();
-  showToast("Riwayat export dibersihkan.");
+  showToast("Export dan file MP4 di server dihapus.");
+  refreshStorage();
 });
 
 renderClips();
 selectClip(clips[0]);
-renderLibrary();
+loadProjects();
 renderExports();
 setRatio(currentRatio());
+refreshStorage();
+pollQueue();
+setInterval(pollQueue, 5000);

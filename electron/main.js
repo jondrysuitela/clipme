@@ -1,4 +1,5 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
+const path = require("node:path");
 const { startServer } = require("../server.js");
 
 let mainWindow;
@@ -13,12 +14,20 @@ app.whenReady().then(async () => {
     minWidth: 960,
     minHeight: 620,
     title: "Clipper Studio",
-    icon: require("path").join(__dirname, "..", "build", "icon.png"),
+    icon: path.join(__dirname, "..", "build", "icon.png"),
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true
     }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
   });
 
   mainWindow.loadURL(server.url);
@@ -29,7 +38,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  if (server) server.server.close();
+  if (server) {
+    try { server.server.close(); } catch {}
+    if (server.shutdown) server.shutdown();
+  }
 });
 
 app.on("activate", () => {

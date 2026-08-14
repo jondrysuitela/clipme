@@ -311,7 +311,7 @@ function AutoCaptionEngine(options = {}) {
   };
 
   // Main LLM integration
-  async function processWithLLM(transcript, style, fillerMode, speaker) {
+  async function processWithLLM(transcript, style, fillerMode, speaker, language) {
     if (!OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY tidak tersedia');
     }
@@ -321,7 +321,7 @@ function AutoCaptionEngine(options = {}) {
       throw new Error('clipme-caption-prompt.js tidak ditemukan');
     }
     
-    const userPrompt = buildUserPrompt(transcript, style, fillerMode, speaker);
+    const userPrompt = buildUserPrompt(transcript, style, fillerMode, speaker, language);
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -418,7 +418,7 @@ function AutoCaptionEngine(options = {}) {
   }
 
   // Build user prompt for LLM
-  function buildUserPrompt(transcript, style, fillerMode, speaker) {
+  function buildUserPrompt(transcript, style, fillerMode, speaker, language) {
     const timeWindowText = transcript
       .map(word => `[${word.start.toFixed(1)}-${word.end.toFixed(1)}s] ${word.text}`)
       .join('\n');
@@ -429,7 +429,7 @@ Role: Auto Caption Intelligence Engine
 Task: Ubah transkrip kata-per-kata di atas menjadi subtitle profesional yang mudah dibaca untuk video singkat, sambil mempertahankan makna dan waktu.
 
 PARAMETER:
-- Bahasa target: ${style}
+- Bahasa target: ${language || 'Indonesia'}
 - Gaya caption: ${style}
 - Mode penghapusan filler: ${fillerMode}
 - Speaker ID: ${speaker}
