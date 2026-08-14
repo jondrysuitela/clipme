@@ -42,6 +42,9 @@ const BIN_DIR = process.env.CLIPFORGE_BIN_DIR || (isPackaged ? path.join(RESOURC
 const YTDLP = process.env.YTDLP_PATH || path.join(BIN_DIR, "yt-dlp.exe");
 const FFMPEG = process.env.FFMPEG_PATH || path.join(BIN_DIR, "ffmpeg.exe");
 const FFPROBE = process.env.FFPROBE_PATH || path.join(BIN_DIR, "ffprobe.exe");
+// YouTube sometimes returns 403 on android_vr/default stream URLs; the pure
+// "android" client still yields valid (non-SABR) URLs without a JS runtime.
+const YTDLP_EXTRACTOR_ARGS = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=android";
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const CLIPME_ANALYZE_MODEL = process.env.CLIPME_ANALYZE_MODEL || "gpt-4o-mini";
 const CLIPME_PROMPT_MODULE = path.join(ROOT, "clipme-prompt.js");
@@ -2340,6 +2343,7 @@ async function handleYouTube(req, res) {
     "--no-playlist",
     "--no-warnings",
     "--skip-download",
+    "--extractor-args", YTDLP_EXTRACTOR_ARGS,
     "--print", "%(id)s\t%(title)s\t%(duration)s\t%(width)s\t%(height)s",
     videoUrl
   ]);
@@ -2366,6 +2370,7 @@ async function handleYouTube(req, res) {
       "--no-playlist",
       "--dump-single-json",
       "--skip-download",
+      "--extractor-args", YTDLP_EXTRACTOR_ARGS,
       videoUrl
     ]);
     const info = JSON.parse(detail.stdout);
@@ -2625,6 +2630,9 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
       "-f", format,
       "--merge-output-format", "mp4",
       "--download-sections", section,
+      "--extractor-args", YTDLP_EXTRACTOR_ARGS,
+      "--retries", "10",
+      "--fragment-retries", "10",
       ...(options.preview ? [] : ["--force-keyframes-at-cuts"]),
       "-o", rawTemplate,
       manifest.url
@@ -2794,6 +2802,9 @@ async function downloadYouTubeAudioSection(projectDir, videoUrl, clip, children 
       "-f", "ba/best",
       "--download-sections", section,
       "--force-keyframes-at-cuts",
+      "--extractor-args", YTDLP_EXTRACTOR_ARGS,
+      "--retries", "10",
+      "--fragment-retries", "10",
       "-o", rawTemplate,
       videoUrl
     ], 300000, children);
