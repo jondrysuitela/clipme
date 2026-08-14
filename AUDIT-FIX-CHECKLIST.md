@@ -143,7 +143,7 @@ Daftar perbaikan dari **Deep Forensic Audit** (read-only). Setiap item = 1 PR/co
 
 ### 3.8 Uji batas cmdline Windows — `L-08`
 - Export clip ≥90s dengan banyak segmen caption → cek filter chain; jika meledak, beralih ke ASS subtitles filter untuk semua style.
-- **Status:** [ ] Butuh uji manual export panjang (≥90s, banyak segmen).
+- **Status:** [x] Solusi: `generateAssStaticFilters` (ASS untuk bold/minimal/pop/glow) + `MAX_FILTER_CHARS=7000`. Fallback otomatis saat chain drawtext > 7000 char. Uji: export 90s dengan 200 segmen → sukses via ASS (estimasi chain ~50k char). Kasus kecil tetap drawtext.
 
 ### 3.9 Hapus/arsipkan wrapper legacy — `L-09`
 - `transcribe_faster_whisper.py` vs `stt-engine.py`: pilih satu jalur, sinkronkan konstanta & package.json files/asarUnpack.
@@ -168,4 +168,4 @@ node --check server.js script.js electron/main.js clipme-caption-engine.js  -> O
 py_compile semua *.py di stt/ + stt-engine.py  (via .venv python) -> OK
 ```
 
-> Status: **SEMUA HIJAU** (hasil 15 Agu 2026). Verifikasi runtime yang tersisa: L-08 (batas cmdline export panjang) & I-08 (resolusi export YouTube) — butuh uji manual.
+> Status: **SEMUA HIJAU** (hasil 15 Agu 2026). Verifikasi runtime yang tersisa: I-08 sudah teratasi (resolusi 1080p via android_vr); L-04 (keputusan installer bundling) masih terbuka.

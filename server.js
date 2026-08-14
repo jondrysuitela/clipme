@@ -1929,6 +1929,68 @@ function buildFilterChain(filterParts, timedFilters) {
   return chain.join(",");
 }
 
+// Windows command line limit is ~8191 chars per CreateProcess; keep well below.
+const MAX_FILTER_CHARS = 7000;
+
+// ASS rendering for non-karaoke styles (bold/minimal/pop/glow). Mirrors
+// generateTimedDrawtextFilters visually, but lives in a file so there is no
+// Windows command-line length limit when a long clip has many segments.
+function generateAssStaticFilters(segments, opts) {
+  const { width, height, style = "bold", startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1, captionColor = "" } = opts;
+  const preset = CAPTION_STYLES[style] || CAPTION_STYLES.bold;
+  const fontColor = sanitizeColor(captionColor) || preset.fontColor;
+  const fontSize = Math.round(width * CAPTION_FONT_RATIO * (Number(fontSizeRatio) || 1));
+  const lineHeight = Math.round(fontSize * 1.25);
+  const baseY = Math.round(height * Math.max(0.3, Math.min(0.95, Number(captionPosition))));
+  const fontName = fontFamily && FONT_MAP[fontFamily] ? fontFamily : "Arial";
+  const primaryAss = colorToAss(fontColor);
+  const outlineAss = preset.bordercolor ? colorToAss(preset.bordercolor) : "000000";
+  const shadowAss = preset.shadowcolor ? colorToAss(preset.shadowcolor) : "000000";
+  const outline = Math.max(0, Number(preset.borderw) || 0);
+  const shadow = Math.max(0, Number(preset.shadowy) || 0);
+
+  function assTime(t) {
+    const ms = Math.max(0, t) * 1000;
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    const cs = Math.floor((ms % 1000) / 10);
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+  }
+
+  const lines = [];
+  lines.push("[Script Info]");
+  lines.push("ScriptType: v4.00+");
+  lines.push(`PlayResX: ${width}`);
+  lines.push(`PlayResY: ${height}`);
+  lines.push("ScaledBorderAndShadow: yes");
+  lines.push("WrapStyle: 0");
+  lines.push("");
+  lines.push("[V4+ Styles]");
+  lines.push("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
+  lines.push(`Style: Caption,${fontName},${fontSize},&H00${primaryAss},&H00FFFFFF,&H00${outlineAss},&H64000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,10,10,120,1`);
+  lines.push("");
+  lines.push("[Events]");
+  lines.push("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+
+  for (const seg of segments) {
+    const segStart = Math.max(0, seg.start - startOffset);
+    const segEnd = Math.max(segStart + 0.1, seg.end - startOffset);
+    const textLines = splitText(seg.text);
+    if (!textLines.length) continue;
+    const marginV = Math.round(height - (baseY + textLines.length * lineHeight * 0.5));
+    const text = textLines.map((l) => String(l).replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}")).join("\\N");
+    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Caption,,0,0,0,,${text}`);
+  }
+
+  fs.mkdirSync(TMP_DIR, { recursive: true });
+  const filePath = path.join(TMP_DIR, `caption-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ass`);
+  fs.writeFileSync(filePath, lines.join("\r\n") + "\r\n", "utf8");
+  setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 60000);
+  const escapedPath = `'${filePath.replace(/\\/g, "/").replace(/:/g, "\\:")}'`;
+  return [`ass=filename=${escapedPath}`];
+}
+
 function buildFilterCommandArgs({ input, start, duration, filterGraph, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k" }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
@@ -2583,9 +2645,10 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     : [];
 
   let timedFilters = [];
+  let genOpts = null;
   if (segments.length) {
     const clipStart = Math.max(0, Number(payload.start || 0));
-    const genOpts = {
+    genOpts = {
       width: filterParts.size.width,
       height: filterParts.size.height,
       style: payload.captionStyle || "bold",
@@ -2605,7 +2668,12 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const filter = payload.captionStyle === "off"
     ? [filterParts.scale, filterParts.crop].join(",")
     : timedFilters.length
-      ? buildFilterChain(filterParts, timedFilters)
+      ? (() => {
+          const chain = buildFilterChain(filterParts, timedFilters);
+          return chain.length > MAX_FILTER_CHARS
+            ? [filterParts.scale, filterParts.crop, ...generateAssStaticFilters(segments, genOpts)].join(",")
+            : chain;
+        })()
       : [
           filterParts.scale, filterParts.crop,
           `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
