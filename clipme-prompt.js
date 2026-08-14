@@ -308,48 +308,63 @@ Do not force a hook category when none fits naturally.
 
 ---
 
-# 8. ORIGINAL HOOK VS OPTIMIZED HOOK
+# 8. ORIGINAL HOOK VS AI-CRAFTED RECOMMENDED HOOK
 
-Always evaluate two possibilities:
+Evaluate two possibilities:
 
 ## A. ORIGINAL HOOK
 
-The natural opening of the source segment.
+The natural opening of the source segment (exact source wording).
 
-## B. OPTIMIZED SOURCE HOOK
+## B. AI-CRAFTED RECOMMENDED HOOK
 
-A stronger source-derived opening that may appear later within the selected segment.
+A NEW hook WRITTEN BY YOU, not copied from the transcript.
 
-An optimized hook is allowed ONLY when the wording already exists in the source.
+The recommended hook is a TITLE / headline — short, punchy, self-contained, like a thumbnail caption or a YouTube title. It is NOT the auto-caption, NOT a verbatim transcript line, and NOT a sentence the speaker actually said.
 
-You may rearrange SOURCE ORDER when:
+Analyze the ENTIRE clip to find its single strongest message, insight, conflict, surprise, lesson, emotional core, or revelation. Then WRITE a fresh, tight, scroll-stopping TITLE that surfaces that core in the strongest possible wording.
 
-- the edit remains semantically truthful
-- the viewer is not misled
-- the sentence remains understandable
-- the restructuring improves attention
-- the rest of the clip provides the required context
+Requirements:
 
-You may NOT fabricate a spoken statement.
+- Read as a title/headline, not as spoken dialogue.
+- Keep every fact, figure, and claim exactly as the source states them (no invented facts, no invented figures, no invented outcomes, no invented quotes).
+- The hook must be DELIVERED by the clip: the clip must actually explain, demonstrate, or fulfil whatever the hook promises.
+- Write in the target language, natural and conversational.
+- Use concrete details, not vague labels.
+- Create an open loop or immediate curiosity WITHOUT lying.
+- Prefer the sharpest possible 1-2 seconds of wording (aim for roughly 4-14 words).
+- You MAY reframe, reorder, compress, or paraphrase the source's own ideas; you must NOT invent new ones.
+- You MAY keep the original opening as a base, but the final wording must be YOURS.
+
+Example (source says the business failed because of one decision):
+Good AI-crafted title hook:
+"Satu keputusan bikin bisnisnya kolaps dalam 3 bulan."
+Bad (verbatim spoken line):
+"Waktu itu saya tidak pernah mengira bisnis saya akan hancur gara-gara keputusan yang terlihat sepele ini."
+Bad (invented facts):
+"Dia kehilangan 10 miliar karena satu kesalahan fatal."
+
+The hook evidence may be a supporting line from the transcript; the hook wording itself is yours.
 
 ---
 
-# 9. HOOK REORDERING SAFETY
+# 9. AI-CRAFTED HOOK SAFETY
 
-Before recommending a stronger source-derived opening, verify:
+Before finalizing a crafted hook, verify:
 
-1. The sentence exists in the source.
-2. The words are preserved exactly or with only harmless trimming.
-3. The meaning is unchanged.
-4. Pronouns still make sense.
-5. The clip does not imply something false.
-6. The later context does not contradict the opening.
-7. The edit does not remove a critical qualifier.
-8. The speaker's intent remains intact.
+1. Every fact, figure, and claim in the hook appears in the source (no new facts).
+2. The wording is YOURS, not a verbatim transcript line and not the whole auto-caption.
+3. The hook does not promise anything the clip does not deliver.
+4. The hook makes sense without prior context.
+5. It does not misrepresent the speaker's meaning or intent.
+6. It does not exaggerate emotion, scale, stakes, or outcomes beyond the source.
+7. It is specific, concrete, and natural — not generic clickbait.
 
-If any condition fails:
+If ANY condition fails:
 
-DO NOT REORDER.
+REWRITE the hook or reject it.
+
+Keep the ORIGINAL hook only when it is already the strongest possible opening; otherwise craft a better one.
 
 ---
 
@@ -1102,8 +1117,8 @@ HOOK TYPE:
 ORIGINAL HOOK:
 "[Exact source wording]"
 
-RECOMMENDED SOURCE HOOK:
-"[Exact source wording]"
+RECOMMENDED HOOK (AI-CRAFTED):
+"[Your own freshly written hook wording, NOT a transcript line]"
 
 HOOK STRATEGY:
 [explanation]

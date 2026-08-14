@@ -124,8 +124,8 @@ async function callClipmeLLM(content, targetLanguage) {
     `  "shareabilityScore": 0-100,`,
     `  "commentScore": 0-100,`,
     `  "hookType": "one of the 16 hook types",`,
-    `  "originalHook": "exact source wording",`,
-    `  "recommendedHook": "exact source wording (source-derived, may be reordered per safety rules)",`,
+    `  "originalHook": "exact source wording (the clip's natural opening)",`,
+    `  "recommendedHook": "AI-crafted TITLE-style hook: a short, punchy headline WRITTEN BY THE MODEL (like a thumbnail caption / video title) drawn from the clip's single strongest message, insight, conflict, surprise or lesson; NOT a verbatim transcript line, NOT the whole auto-caption, NOT a sentence the speaker actually said; engineered for scroll-stop, curiosity and retention; every fact must stay 100% truthful to the source and the clip must deliver the hook's promise",`,
     `  "hookReordered": true|false,`,
     `  "hookStrategy": "short explanation",`,
     `  "keyMessage": "concise factual description",`,
@@ -825,6 +825,54 @@ function pickOptimizedHook(sentences, lang) {
   return best;
 }
 
+// Extract a short, concrete core phrase from a sentence — NOT the full spoken line.
+function clipmeHookCore(sentence, lang) {
+  let text = String(sentence || "").trim();
+  if (!text) return "";
+  const prefixes = /^(sebentar\s*[,:]?\s*|oke\s*[,:]?\s*|ya\s*[,:]?\s*|baiklah\s*[,:]?\s*|jadi\s*[,:]?\s*|nah\s*|the\s+|so\s*[,:]?\s+|well\s+|okay\s+|alright\s+|aku\s+|saya\s+|gue\s+|gua\s+|kita\s+|kami\s+|mereka\s+|kamu\s+|dia\s+|ini\s+|itu\s+|i\s+|we\s+|you\s+|they\s+|he\s+|she\s+)/i;
+  text = text.replace(prefixes, "");
+  text = text.replace(/^(adalah|merupakan|is|are|was|were)\s+/i, "");
+  text = text.replace(/\s+(adalah|merupakan|is|are|was|were)\s+/gi, " ");
+  const words = text.split(/\s+/).filter(Boolean);
+  const chosen = words.slice(0, 9);
+  while (chosen.length > 3 && /^(yang|dan|dengan|untuk|dari|of|and|to|that|with|the|a|an)$/i.test(chosen[chosen.length - 1])) chosen.pop();
+  text = chosen.join(" ");
+  text = text.replace(/([^?!])[.!…]+$/g, "$1").trim();
+  return text;
+}
+
+// Craft a title-style hook (a headline, NOT a quoted spoken sentence).
+function clipmeCraftHookTitle(sentences, hits, lang, keyMessage) {
+  const core = clipmeHookCore(keyMessage || sentences[0] || "", lang);
+  if (!core) return clippedForField(keyMessage || sentences[0] || "", 90);
+  const type = classifyClipmeHook(sentences[0] || keyMessage || "", hits, lang);
+  const id = lang === "id";
+  const low = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+  switch (type) {
+    case "QUESTION":
+      return /[?]$/.test(core) ? core : `${core}?`;
+    case "SURPRISE":
+      return id ? `${core}, padahal jarang disadari` : `${core} — yet almost no one realizes it`;
+    case "CONFESSION":
+      return id ? `Aku baru sadar ${low(core)}` : `I only just realized ${low(core)}`;
+    case "CONTROVERSY":
+      return id ? `${core}: opini yang bikin perdebatan` : `${core}: the take that starts a debate`;
+    case "PROBLEM":
+      return id ? `${core} — dan ini solusinya` : `${core} — and here is the fix`;
+    case "DIRECT VALUE":
+    case "EDUCATIONAL":
+      return id ? `Cara ${low(core)}` : `How to ${low(core)}`;
+    case "STORY":
+      return id ? `Kisah ${low(core)}` : `The story of ${low(core)}`;
+    case "EMOTIONAL":
+      return id ? `${core}: kisah yang mudah relate` : `${core}: a story that hits home`;
+    case "MYSTERY":
+      return id ? `${core} — teka-teki yang akhirnya terbongkar` : `${core} — a mystery finally explained`;
+    default:
+      return id ? `${core}: hal yang jarang dibahas` : `${core}: the point most people miss`;
+  }
+}
+
 // 0-100 per criterion. All derived from text signals only.
 function clipmeCriterionScores({ sentences, fullText, hits, starter, starterScore, lang, segments }) {
   const totalWords = (fullText || "").split(/\s+/).filter(Boolean).length;
@@ -1190,7 +1238,7 @@ function clipmeAssemble(sentences, segments, lang, targetLength) {
 
   const hookType = classifyClipmeHook(starter, hits, lang);
   const originalHook = splitSentences(starter)[0] || starter;
-  const recommendedHook = optimizedSafe ? optimized.sentence : originalHook;
+  const recommendedHook = clipmeCraftHookTitle(sentences, hits, lang, keyMessage);
 
   return {
     score: overall,
