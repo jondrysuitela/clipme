@@ -49,7 +49,7 @@ const FFMPEG = process.env.FFMPEG_PATH || path.join(BIN_DIR, "ffmpeg.exe");
 const FFPROBE = process.env.FFPROBE_PATH || path.join(BIN_DIR, "ffprobe.exe");
 // YouTube sometimes returns 403 on android_vr/default stream URLs; the pure
 // "android" client still yields valid (non-SABR) URLs without a JS runtime.
-const YTDLP_EXTRACTOR_ARGS = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=android";
+const YTDLP_EXTRACTOR_ARGS = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=android_vr,android";
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const CLIPME_ANALYZE_MODEL = process.env.CLIPME_ANALYZE_MODEL || "gpt-4o-mini";
 const CLIPME_PROMPT_MODULE = path.join(ROOT, "clipme-prompt.js");
@@ -2686,7 +2686,7 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
     const section = `*${start}-${end}`;
     const format = options.preview
       ? "bv*[height<=360]+ba/b[height<=360]/best[height<=360]/best"
-      : "bv*[height<=720]+ba/b[height<=720]/best[height<=720]/best";
+      : "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best";
 
     await run(YTDLP, [
       "--no-playlist",
