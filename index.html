@@ -47,8 +47,10 @@
 
     <!-- STUDIO VIEW -->
     <div class="app-view page-view active" data-view-panel="studio">
-      <div class="studio-grid">        <!-- Upload Panel -->
-        <div class="upload-panel panel">
+      <div class="studio-grid">
+        <div class="studio-left">
+          <!-- Upload Panel -->
+          <div class="upload-panel panel">
           <div class="panel-heading">
             <h2>Source</h2>
             <span class="status-pill" id="fileMeta">Ready</span>
@@ -90,6 +92,20 @@
           <button class="wide-button" id="generateButton" type="button" disabled>Generate clips</button>
         </div>
 
+        <!-- Clips Panel -->
+        <div class="clips-panel panel">
+          <div class="panel-heading">
+            <h2>Clips</h2>
+            <div>
+              <button class="ghost-button compact" id="sortClips" type="button">Sort by score</button>
+              <button class="ghost-button compact" id="selectAllClips" type="button">Select all</button>
+              <button class="primary-button compact" id="exportAllBtn" type="button">Export all</button>
+            </div>
+          </div>
+          <div class="clip-list" id="clipList"></div>
+        </div>
+        </div>
+
         <!-- Preview Panel -->
         <div class="preview-panel panel">
           <div class="panel-heading">
@@ -117,25 +133,12 @@
           <div class="transport-row">
             <span id="clipRange">00:00 - 00:90</span>
             <div class="transport-controls">
-            <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
+              <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
               <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
               <span id="captionStatus" class="caption-status"></span>
               <button class="primary-button compact" id="exportButton" type="button">Export selected clip</button>
             </div>
           </div>
-        </div>
-
-        <!-- Clips Panel -->
-        <div class="clips-panel panel">
-          <div class="panel-heading">
-            <h2>Clips</h2>
-            <div>
-              <button class="ghost-button compact" id="sortClips" type="button">Sort by score</button>
-              <button class="ghost-button compact" id="selectAllClips" type="button">Select all</button>
-              <button class="primary-button compact" id="exportAllBtn" type="button">Export all</button>
-            </div>
-          </div>
-          <div class="clip-list" id="clipList"></div>
         </div>
 
         <!-- Inspector Panel -->
@@ -217,6 +220,27 @@
               <option value="glow">Glow</option>
               <option value="off">Off</option>
             </select>
+            <div class="field-label">Font</div>
+            <select id="captionFontSelect" class="inspector-input">
+              <option value="Arial" style="font-family: Arial, sans-serif">Arial</option>
+              <option value="Arial Black" style="font-family: 'Arial Black', Arial, sans-serif">Arial Black</option>
+              <option value="Calibri" style="font-family: Calibri, sans-serif">Calibri</option>
+              <option value="Cambria" style="font-family: Cambria, Georgia, serif">Cambria</option>
+              <option value="Comic Sans MS" style="font-family: 'Comic Sans MS', 'Comic Sans', cursive">Comic Sans MS</option>
+              <option value="Consolas" style="font-family: Consolas, monospace">Consolas</option>
+              <option value="Courier New" style="font-family: 'Courier New', monospace">Courier New</option>
+              <option value="Franklin Gothic Medium" style="font-family: 'Franklin Gothic Medium', 'Franklin Gothic', sans-serif">Franklin Gothic Medium</option>
+              <option value="Georgia" style="font-family: Georgia, serif">Georgia</option>
+              <option value="Impact" style="font-family: Impact, 'Arial Black', sans-serif">Impact</option>
+              <option value="Segoe UI" style="font-family: 'Segoe UI', sans-serif">Segoe UI</option>
+              <option value="Segoe UI Black" style="font-family: 'Segoe UI Black', 'Segoe UI', sans-serif">Segoe UI Black</option>
+              <option value="Tahoma" style="font-family: Tahoma, sans-serif">Tahoma</option>
+              <option value="Times New Roman" style="font-family: 'Times New Roman', Times, serif">Times New Roman</option>
+              <option value="Trebuchet MS" style="font-family: 'Trebuchet MS', sans-serif">Trebuchet MS</option>
+              <option value="Verdana" style="font-family: Verdana, sans-serif">Verdana</option>
+            </select>
+            <div class="field-label">Warna font</div>
+            <input type="color" id="captionColor" value="#FFFFFF" style="width:100%; height:34px; padding:2px; border:1px solid var(--line); border-radius:8px; background:transparent; cursor:pointer">
             <div class="field-label">Layout</div>
             <select id="layoutSelect" class="inspector-input">
               <option value="portrait">Portrait 9:16</option>

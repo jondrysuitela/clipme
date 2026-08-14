@@ -231,7 +231,8 @@ button {
 
 .studio-grid {
   display: grid;
-  grid-template-columns: minmax(290px, 0.95fr) minmax(320px, 1.35fr) minmax(280px, 0.9fr);
+  grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.45fr) minmax(300px, 1fr);
+  grid-template-rows: auto auto;
   gap: 16px;
   align-items: start;
 }
@@ -260,6 +261,20 @@ button {
   box-shadow: var(--shadow);
 }
 
+.studio-left {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
 .upload-panel,
 .preview-panel,
 .clips-panel,
@@ -268,11 +283,26 @@ button {
 }
 
 .preview-panel {
-  grid-row: span 2;
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 16px;
+  align-self: start;
 }
 
 .inspector-panel {
   grid-column: 3;
+  grid-row: 1;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.caption-timeline-panel {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 .inspector-input {
@@ -280,9 +310,15 @@ button {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--panel-soft);
   color: var(--text);
   font-size: 13px;
+  color-scheme: dark;
+}
+
+.inspector-input option {
+  background: var(--panel-soft);
+  color: var(--text);
 }
 
 .panel-heading {
@@ -439,6 +475,7 @@ textarea {
   background: #14171a;
   color: var(--text);
   outline: 0;
+  color-scheme: dark;
 }
 
 input,
@@ -562,10 +599,10 @@ textarea:focus {
   padding: 10px 12px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.72);
-  color: #ffffff;
+  color: var(--lc-color, #ffffff);
   font-size: 23px;
   font-weight: 900;
-  font-family: Arial, sans-serif;
+  font-family: var(--lc-font, Arial), Arial, sans-serif;
   line-height: 1.12;
   text-align: center;
   text-wrap: balance;
@@ -578,10 +615,10 @@ textarea:focus {
   right: 6%;
   bottom: 13%;
   z-index: 3;
-  color: #ffffff;
+  color: var(--lc-color, #ffffff);
   font-size: 23px;
   font-weight: 900;
-  font-family: Arial, sans-serif;
+  font-family: var(--lc-font, Arial), Arial, sans-serif;
   line-height: 1.25;
   text-align: center;
   text-wrap: balance;
@@ -619,24 +656,24 @@ textarea:focus {
 }
 
 .live-caption.lc-pop .lc-word {
-  color: #FFFF00;
+  color: var(--lc-color, #FFFF00);
   -webkit-text-stroke: 1.5px #000000;
   text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
 }
 
 .live-caption.lc-glow .lc-word {
-  color: #00CCFF;
+  color: var(--lc-color, #00CCFF);
   -webkit-text-stroke: 0;
   text-shadow: 0 0 8px rgba(0, 102, 255, 0.95), 2px 2px 0 rgba(0, 0, 0, 0.7);
 }
 
 .live-caption.lc-karaoke .lc-word {
-  color: #ffffff;
+  color: var(--lc-color, #ffffff);
   -webkit-text-stroke: 1.5px #000000;
 }
 
 .live-caption.lc-karaoke .lc-word.lc-active {
-  color: #00FFFF;
+  color: var(--lc-color-active, #00FFFF);
   -webkit-text-stroke: 1.5px #000000;
 }
 
@@ -651,19 +688,19 @@ textarea:focus {
 }
 
 .caption-box.lc-pop {
-  color: #FFFF00;
+  color: var(--lc-color, #FFFF00);
   -webkit-text-stroke: 1.5px #000000;
   text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
 }
 
 .caption-box.lc-glow {
-  color: #00CCFF;
+  color: var(--lc-color, #00CCFF);
   -webkit-text-stroke: 0;
   text-shadow: 0 0 8px rgba(0, 102, 255, 0.95), 2px 2px 0 rgba(0, 0, 0, 0.7);
 }
 
 .caption-box.lc-karaoke {
-  color: #ffffff;
+  color: var(--lc-color, #ffffff);
   -webkit-text-stroke: 1.5px #000000;
 }
 
@@ -944,11 +981,15 @@ input[type="range"] {
 
 @media (max-width: 1180px) {
   .studio-grid {
-    grid-template-columns: minmax(290px, 1fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(290px, 1fr) minmax(320px, 1.3fr);
   }
 
   .inspector-panel {
-    grid-column: auto;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -1002,6 +1043,23 @@ input[type="range"] {
 
   .studio-grid {
     grid-template-columns: 1fr;
+  }
+
+  .studio-left,
+  .upload-panel,
+  .clips-panel,
+  .preview-panel,
+  .caption-timeline-panel,
+  .inspector-panel {
+    grid-column: auto;
+    grid-row: auto;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .studio-left {
+    display: contents;
   }
 
   .table-row {
@@ -1095,9 +1153,8 @@ input[type="range"] {
 
 /* ---- Caption Timeline Panel ---- */
 .caption-timeline-panel {
-  margin-top: 16px;
+  margin-top: 0;
   padding: 18px;
-  grid-column: 1 / -1;
 }
 
 .caption-tl-actions {

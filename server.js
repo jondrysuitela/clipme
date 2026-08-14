@@ -353,6 +353,20 @@ function sanitizeString(value, maxLen = 200) {
   return String(value || "").replace(/[<>"'&]/g, "").slice(0, maxLen);
 }
 
+function sanitizeColor(value) {
+  const hex = String(value || "").trim().replace(/^#/, "");
+  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex.toUpperCase()}` : "";
+}
+
+function colorToAss(value) {
+  const hex = sanitizeColor(value);
+  if (!hex) return "";
+  const r = hex.slice(1, 3);
+  const g = hex.slice(3, 5);
+  const b = hex.slice(5, 7);
+  return `${b}${g}${r}`;
+}
+
 function sendFile(req, res, filePath) {
   if (!fs.existsSync(filePath)) {
     res.writeHead(404);
@@ -1588,7 +1602,18 @@ const CAPTION_STYLES = {
 const FONT_MAP = {
   "Arial": "C:/Windows/Fonts/Arial.ttf",
   "Arial Black": "C:/Windows/Fonts/ARIBLK.TTF",
+  "Calibri": "C:/Windows/Fonts/calibri.ttf",
+  "Cambria": "C:/Windows/Fonts/cambria.ttc",
+  "Comic Sans MS": "C:/Windows/Fonts/comic.ttf",
+  "Consolas": "C:/Windows/Fonts/consola.ttf",
+  "Courier New": "C:/Windows/Fonts/cour.ttf",
+  "Franklin Gothic Medium": "C:/Windows/Fonts/framd.ttf",
+  "Georgia": "C:/Windows/Fonts/georgia.ttf",
   "Impact": "C:/Windows/Fonts/impact.ttf",
+  "Segoe UI": "C:/Windows/Fonts/segoeui.ttf",
+  "Segoe UI Black": "C:/Windows/Fonts/seguibl.ttf",
+  "Tahoma": "C:/Windows/Fonts/tahoma.ttf",
+  "Times New Roman": "C:/Windows/Fonts/times.ttf",
   "Trebuchet MS": "C:/Windows/Fonts/trebuc.ttf",
   "Verdana": "C:/Windows/Fonts/verdana.ttf"
 };
@@ -1636,8 +1661,9 @@ function escDrawtext(value) {
 }
 
 function generateTimedDrawtextFilters(segments, opts) {
-  const { width, height, style = "bold", startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1 } = opts;
+  const { width, height, style = "bold", startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1, captionColor = "" } = opts;
   const preset = CAPTION_STYLES[style] || CAPTION_STYLES.bold;
+  const fontColor = sanitizeColor(captionColor) || preset.fontColor;
   const fontSize = Math.round(width * CAPTION_FONT_RATIO * Number(fontSizeRatio) || 1);
   const lineHeight = Math.round(fontSize * 1.25);
   const baseY = Math.round(height * Math.max(0.3, Math.min(0.95, Number(captionPosition))));
@@ -1665,7 +1691,7 @@ function generateTimedDrawtextFilters(segments, opts) {
       const yPos = startY - Math.round((numLines - 1 - li) * lineHeight);
       const opts = [
         `text='${text}'`,
-        `fontcolor=${preset.fontColor}`,
+        `fontcolor=${fontColor}`,
         `fontsize=${fontSize}`,
         `x=(w-text_w)/2`,
         `y=${yPos}`,
@@ -1690,7 +1716,8 @@ function generateTimedDrawtextFilters(segments, opts) {
 // highlighted, upcoming words stay white. Handled as a single file-based
 // filter, so there is no Windows command-line length limit.
 function generateKaraokeFilters(segments, opts) {
-  const { width, height, startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1 } = opts;
+  const { width, height, startOffset = 0, fontFamily = "Arial", captionPosition = 0.76, fontSizeRatio = 1, captionColor = "" } = opts;
+  const karaokeColour = colorToAss(captionColor);
   const fontSize = Math.round(width * CAPTION_FONT_RATIO * (Number(fontSizeRatio) || 1));
   const lineHeight = Math.round(fontSize * 1.3);
   const baseY = Math.round(height * Math.max(0.3, Math.min(0.95, Number(captionPosition))));
@@ -1784,8 +1811,9 @@ function generateKaraokeFilters(segments, opts) {
       textParts.push(karaokeLine);
     }
     lineText = textParts.join("\\N");
+    const colourTag = karaokeColour ? `{\\1c&H${karaokeColour}&}` : "";
 
-    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Karaoke,,0,0,0,,${lineText}`);
+    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Karaoke,,0,0,0,,${colourTag}${lineText}`);
   }
 
   fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -2450,7 +2478,8 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
       startOffset: clipStart,
       fontFamily: payload.fontFamily || "Arial",
       captionPosition: payload.captionPosition != null ? payload.captionPosition : 0.76,
-      fontSizeRatio: payload.captionSize ? Number(payload.captionSize) / 23 : 1
+      fontSizeRatio: payload.captionSize ? Number(payload.captionSize) / 23 : 1,
+      captionColor: payload.captionColor || ""
     };
     if (payload.captionStyle === "karaoke") {
       timedFilters = generateKaraokeFilters(segments, genOpts);
@@ -2610,6 +2639,7 @@ async function handlePreview(req, res) {
   }
   payload.captionStyle = sanitizeString(payload.captionStyle || "bold", 20);
   payload.fontFamily = sanitizeString(payload.fontFamily || "Arial", 30);
+  payload.captionColor = sanitizeColor(payload.captionColor);
   if (!isSupportedRatio(payload.ratio)) {
     sendJson(res, 400, { error: "Rasio tidak didukung." });
     return;
@@ -2975,6 +3005,7 @@ async function handleExport(req, res) {
   payload.caption = sanitizeString(payload.caption, 500);
   payload.captionStyle = sanitizeString(payload.captionStyle || "bold", 20);
   payload.fontFamily = sanitizeString(payload.fontFamily || "Arial", 30);
+  payload.captionColor = sanitizeColor(payload.captionColor);
   if (!isSupportedRatio(payload.ratio)) {
     sendJson(res, 400, { error: "Rasio tidak didukung." });
     return;
@@ -3346,6 +3377,7 @@ function handleExportBatch(req, res) {
             captionStyle: clipDef.captionStyle || "bold",
             captionSize: clipDef.captionSize || 23,
             fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
+            captionColor: clipDef.captionColor || "",
             segments: clipDef.segments || []
           };
           exportClip(payload, (p) => {

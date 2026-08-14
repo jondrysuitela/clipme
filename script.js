@@ -46,6 +46,8 @@ const liveCaption = $("#liveCaption");
 const hookInput = $("#hookInput");
 const captionInput = $("#captionInput");
 const captionSize = $("#captionSize");
+const captionFontSelect = $("#captionFontSelect");
+const captionColorInput = $("#captionColor");
 const previewFrame = $("#previewFrame");
 const previewVideo = $("#previewVideo");
 const uploadStatus = $("#uploadStatus");
@@ -69,10 +71,34 @@ function captionPreviewFontPx() {
   return Math.max(8, Math.round(frameW * CAPTION_FONT_RATIO * (Number(captionSize.value || CAPTION_FONT_BASE) / CAPTION_FONT_BASE)));
 }
 
+function applyCaptionVisuals() {
+  const font = (captionFontSelect && captionFontSelect.value) || "Arial";
+  const color = captionColorInput ? captionColorInput.value : "";
+  const style = ($("#captionStyleSelect") && $("#captionStyleSelect").value) || "bold";
+  captionBox.style.fontFamily = font;
+  liveCaption.style.fontFamily = font;
+  const useColor = /^#[0-9a-fA-F]{6}$/.test(color) && color.toLowerCase() !== "#ffffff";
+  if (useColor) {
+    if (style === "karaoke") {
+      captionBox.style.setProperty("--lc-color-active", color);
+      liveCaption.style.setProperty("--lc-color-active", color);
+    } else {
+      captionBox.style.setProperty("--lc-color", color);
+      liveCaption.style.setProperty("--lc-color", color);
+    }
+  } else {
+    captionBox.style.removeProperty("--lc-color");
+    captionBox.style.removeProperty("--lc-color-active");
+    liveCaption.style.removeProperty("--lc-color");
+    liveCaption.style.removeProperty("--lc-color-active");
+  }
+}
+
 function renderStaticCaption() {
   const style = $("#captionStyleSelect").value;
   captionBox.style.fontSize = `${captionPreviewFontPx()}px`;
   captionBox.className = "caption-box" + (style !== "off" ? ` lc-${style}` : "");
+  applyCaptionVisuals();
   const hasText = captionBox.textContent && captionBox.textContent.replace(/"/g, "").trim();
   captionBox.style.display = style !== "off" && hasText ? "block" : "none";
 }
@@ -545,6 +571,8 @@ async function loadPreviewClip() {
         language: $("#languageSelect").value,
         captionStyle: $("#captionStyleSelect").value,
         captionSize: captionSize.value,
+        fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
+        captionColor: captionColorInput ? captionColorInput.value : "",
         ratio: currentRatio()
       })
     });
@@ -629,6 +657,8 @@ async function exportSelectedClip() {
         language: $("#languageSelect").value,
         captionStyle: $("#captionStyleSelect").value,
         captionSize: captionSize.value,
+        fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
+        captionColor: captionColorInput ? captionColorInput.value : "",
         captionPosition: state.captionPosition || 0.76,
         ratio: currentRatio(),
         segments: exportSegments
@@ -702,6 +732,11 @@ $("#playClip").addEventListener("click", playSelectedClip);
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
 previewVideo.addEventListener("play", () => { if (state.liveActive) updateLiveCaption(); });
 previewVideo.addEventListener("pause", () => { if (state.liveActive) updateLiveCaption(); });
+previewVideo.addEventListener("ended", () => {
+  liveCaption.innerHTML = "";
+  liveCaption.style.display = "none";
+  captionBox.style.display = "none";
+});
 previewVideo.addEventListener("seeked", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
 previewVideo.addEventListener("timeupdate", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
 
@@ -824,13 +859,14 @@ function updateLiveCaption() {
   if (!seg) {
     liveCaption.innerHTML = "";
     liveCaption.style.display = "none";
-    if (previewVideo.paused) renderStaticCaption();
+    if (previewVideo.paused && !previewVideo.ended) renderStaticCaption();
     return;
   }
   const cap = document.createElement("div");
   const style = $("#captionStyleSelect").value;
   liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
   liveCaption.className = "live-caption" + (style !== "off" ? ` lc-${style}` : "");
+  applyCaptionVisuals();
   if (style === "karaoke" && seg.words && seg.words.length) {
     seg.words.forEach((w) => {
       const span = document.createElement("span");
@@ -1417,6 +1453,20 @@ $("#layoutSelect").addEventListener("change", (event) => {
   showToast(`Layout diganti ke ${event.target.selectedOptions[0].text}.`);
 });
 
+if (captionFontSelect) {
+  captionFontSelect.addEventListener("change", () => {
+    renderStaticCaption();
+    if (state.liveActive) updateLiveCaption();
+  });
+}
+
+if (captionColorInput) {
+  captionColorInput.addEventListener("input", () => {
+    renderStaticCaption();
+    if (state.liveActive) updateLiveCaption();
+  });
+}
+
 $$(".segmented button").forEach((button) => {
   button.addEventListener("click", () => {
     setRatio(button.dataset.ratio);
@@ -1553,6 +1603,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
           language: $("#languageSelect").value,
           captionStyle: $("#captionStyleSelect").value,
           captionSize: captionSize.value,
+          fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
+          captionColor: captionColorInput ? captionColorInput.value : "",
           ratio: currentRatio(),
           segments: captionSegmentsForClip(clip)
         }))
