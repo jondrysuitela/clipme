@@ -132,6 +132,10 @@
           <div class="transport-row">
             <span id="clipRange">00:00 - 00:90</span>
             <div class="transport-controls">
+              <label class="trim-label">Trim <input class="trim-input" id="trimStart" type="text" inputmode="numeric" placeholder="00:00"></label>
+              <span class="trim-dash">–</span>
+              <input class="trim-input" id="trimEnd" type="text" inputmode="numeric" placeholder="00:30">
+              <button class="ghost-button compact" id="applyTrim" type="button">Apply</button>
               <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
               <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
               <span id="captionStatus" class="caption-status"></span>

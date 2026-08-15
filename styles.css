@@ -1390,3 +1390,31 @@ input[type="range"] {
   accent-color: var(--accent, #6c5ce7);
   cursor: pointer;
 }
+
+.trim-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.trim-input {
+  width: 54px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
+.trim-input:focus {
+  outline: none;
+  border-color: var(--accent, #6c5ce7);
+}
+
+.trim-dash {
+  color: var(--muted);
+}

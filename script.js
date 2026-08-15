@@ -38,7 +38,8 @@ const state = {
   captionPosition: 0.76,
   removeSilence: false,
   denoise: false,
-  enhance: false
+  enhance: false,
+  sourceDuration: 0
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -121,6 +122,48 @@ function formatTime(totalSeconds) {
 
 function clipRange(clip) {
   return `${formatTime(clip.start)} - ${formatTime(clip.end)}`;
+}
+
+function parseTimeInput(value) {
+  const str = String(value || "").trim();
+  if (!str) return NaN;
+  if (/^\d+(\.\d+)?$/.test(str)) return Number(str);
+  const m = str.match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+  if (m) return Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  const mm = str.match(/^(?:(\d+)m)?\s*(\d+)(?:\.(\d+))?s?$/);
+  if (mm) return Number(mm[1] || 0) * 60 + Number(mm[2]) + Number(mm[3] || 0) / 10;
+  return NaN;
+}
+
+function syncTrimInputs() {
+  if (!state.activeClip) return;
+  $("#trimStart").value = formatTime(state.activeClip.start);
+  $("#trimEnd").value = formatTime(state.activeClip.end);
+}
+
+function applyTrim() {
+  const clip = state.activeClip;
+  if (!clip) { showToast("Pilih clip dulu."); return; }
+  const startRaw = parseTimeInput($("#trimStart").value);
+  const endRaw = parseTimeInput($("#trimEnd").value);
+  if (!Number.isFinite(startRaw) || !Number.isFinite(endRaw)) {
+    showToast("Format waktu tidak valid. Gunakan 00:00 atau 12.5.");
+    syncTrimInputs();
+    return;
+  }
+  const maxEnd = Number(state.sourceDuration) || Math.max(endRaw, clip.end);
+  const start = Math.max(0, Math.min(startRaw, endRaw - 1, maxEnd - 1));
+  const end = Math.min(Math.max(endRaw, start + 1), maxEnd);
+  if (end - start < 1) { showToast("Clip minimal 1 detik."); syncTrimInputs(); return; }
+  clip.start = start;
+  clip.end = end;
+  syncTrimInputs();
+  clipTime.textContent = clipRange(clip);
+  $("#clipRange").textContent = clipRange(clip);
+  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  state.previewClipKey = "";
+  if (state.sourceUrl && Number.isFinite(clip.start)) previewVideo.currentTime = clip.start;
+  showToast(`Clip dipangkas: ${formatTime(start)} - ${formatTime(end)}`);
 }
 
 const RATIO_PRESETS = ["portrait", "wide", "four5"];
@@ -256,6 +299,7 @@ function selectClip(clip) {
   hookInput.value = clip.hook;
   captionInput.value = clip.caption;
   clipTime.textContent = clipRange(clip);
+  syncTrimInputs();
 
   if (state.sourceUrl && Number.isFinite(clip.start)) {
     previewVideo.currentTime = clip.start;
@@ -486,6 +530,7 @@ async function uploadToBackend(file) {
 
   state.projectId = data.id;
   clips = Array.isArray(data.clips) ? data.clips : [];
+  state.sourceDuration = data.probe && data.probe.duration;
   state.sorted = false;
   setActiveClipOrEmpty(clips[0]);
 
@@ -528,6 +573,7 @@ function loadProject(data) {
   }
 
   setActiveClipOrEmpty(clips[0]);
+  state.sourceDuration = data.probe && data.probe.duration;
   $("#fileTitle").textContent = data.name;
   $("#fileMeta").textContent = `${formatTime(data.probe.duration)} - ${data.transcriptStatus || "No transcript"} - ${data.probe.codec}`;
   uploadStatus.textContent = `${clips.length} clips ready`;
@@ -1700,6 +1746,10 @@ function renderIntel(a) {
 }
 
 $("#exportButton").addEventListener("click", exportSelectedClip);
+
+$("#applyTrim").addEventListener("click", applyTrim);
+$("#trimStart").addEventListener("change", applyTrim);
+$("#trimEnd").addEventListener("change", applyTrim);
 
 $("#selectAllClips").addEventListener("click", () => {
   const allSelected = clips.length > 0 && clips.every((clip) => state.selectedClipIds.has(clip.id));
