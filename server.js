@@ -47,9 +47,10 @@ const BIN_DIR = process.env.CLIPFORGE_BIN_DIR || (isPackaged ? path.join(RESOURC
 const YTDLP = process.env.YTDLP_PATH || path.join(BIN_DIR, "yt-dlp.exe");
 const FFMPEG = process.env.FFMPEG_PATH || path.join(BIN_DIR, "ffmpeg.exe");
 const FFPROBE = process.env.FFPROBE_PATH || path.join(BIN_DIR, "ffprobe.exe");
-// YouTube sometimes returns 403 on android_vr/default stream URLs; the pure
-// "android" client still yields valid (non-SABR) URLs without a JS runtime.
-const YTDLP_EXTRACTOR_ARGS = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=android_vr,android";
+// YouTube's SABR-only streaming experiment (yt-dlp#12482) makes several clients
+// return 403 on range/segment requests. Excluding android_sdkless keeps stable
+// non-SABR URLs while `default` still provides the full format ladder.
+const YTDLP_EXTRACTOR_ARGS = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=default,-android_sdkless";
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const CLIPME_ANALYZE_MODEL = process.env.CLIPME_ANALYZE_MODEL || "gpt-4o-mini";
 const CLIPME_PROMPT_MODULE = path.join(ROOT, "clipme-prompt.js");
@@ -2548,6 +2549,7 @@ async function handleYouTube(req, res) {
     "--no-playlist",
     "--no-warnings",
     "--skip-download",
+    "--js-runtimes", "node",
     "--extractor-args", YTDLP_EXTRACTOR_ARGS,
     "--print", "%(id)s\t%(title)s\t%(duration)s\t%(width)s\t%(height)s",
     videoUrl
@@ -2575,6 +2577,7 @@ async function handleYouTube(req, res) {
       "--no-playlist",
       "--dump-single-json",
       "--skip-download",
+      "--js-runtimes", "node",
       "--extractor-args", YTDLP_EXTRACTOR_ARGS,
       videoUrl
     ]);
@@ -2870,13 +2873,14 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
     const end = Math.max(start + 1, Number(payload.end || start + 30));
     const section = `*${start}-${end}`;
     const format = options.preview
-      ? "bv*[height<=360]+ba/b[height<=360]/best[height<=360]/best"
-      : "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best";
+      ? "bv*[height<=360][vcodec^=avc1]+ba/b[height<=360]/best[height<=360]/best"
+      : "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080]/best[height<=1080]/best";
 
     const ytdlpBase = [
       "--no-playlist",
       "-f", format,
       "--merge-output-format", "mp4",
+      "--js-runtimes", "node",
       "--extractor-args", YTDLP_EXTRACTOR_ARGS,
       "--retries", "10",
       "--fragment-retries", "10"
@@ -3094,17 +3098,55 @@ async function downloadYouTubeAudioSection(projectDir, videoUrl, clip, children 
     const rawTemplate = path.join(audioDir, `raw-${clipId}-%(id)s.%(ext)s`);
     const section = `*${clip.start}-${clip.end}`;
 
-    await run(YTDLP, [
+    const ytdlpBase = [
       "--no-playlist",
       "-f", "ba/best",
-      "--download-sections", section,
-      "--force-keyframes-at-cuts",
+      "--js-runtimes", "node",
       "--extractor-args", YTDLP_EXTRACTOR_ARGS,
       "--retries", "10",
-      "--fragment-retries", "10",
-      "-o", rawTemplate,
-      videoUrl
-    ], 300000, children);
+      "--fragment-retries", "10"
+    ];
+
+    try {
+      await run(YTDLP, [
+        ...ytdlpBase,
+        "--download-sections", section,
+        "--force-keyframes-at-cuts",
+        "-o", rawTemplate,
+        videoUrl
+      ], 300000, children);
+    } catch (err) {
+      // Same SABR 403 workaround as the video path: full download then local cut.
+      if (!/403|Forbidden/.test(String(err && err.message || err))) throw err;
+      const rawFull = path.join(audioDir, `raw-full-${clipId}.%(ext)s`);
+      await run(YTDLP, [
+        ...ytdlpBase,
+        "-o", rawFull,
+        videoUrl
+      ], 300000, children);
+      const fullFile = fs.readdirSync(audioDir)
+        .map((name) => path.join(audioDir, name))
+        .filter((filePath) => path.basename(filePath).startsWith(`raw-full-${clipId}`))
+        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+      if (!fullFile) throw new Error("Gagal mengambil audio full dari YouTube.");
+      const tmpCut = path.join(audioDir, `cut-${clipId}.mp3`);
+      await run(FFMPEG, [
+        "-y",
+        "-ss", String(clip.start),
+        "-i", fullFile,
+        "-t", String(Math.max(0, clip.end - clip.start)),
+        "-vn",
+        "-ar", "16000",
+        "-ac", "1",
+        "-b:a", "48k",
+        tmpCut
+      ], 300000, children);
+      for (const file of fs.readdirSync(audioDir).filter((name) => name.startsWith(`raw-full-${clipId}`))) {
+        try { fs.unlinkSync(path.join(audioDir, file)); } catch {}
+      }
+      try { fs.renameSync(tmpCut, outputPath); } catch { fs.copyFileSync(tmpCut, outputPath); fs.unlinkSync(tmpCut); }
+      return outputPath;
+    }
 
     const rawFile = fs.readdirSync(audioDir)
       .map((name) => path.join(audioDir, name))
