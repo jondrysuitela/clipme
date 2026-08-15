@@ -1373,3 +1373,20 @@ input[type="range"] {
   color: var(--muted);
   font-size: 12px;
 }
+
+.audio-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.audio-opt input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #6c5ce7);
+  cursor: pointer;
+}

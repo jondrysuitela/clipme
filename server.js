@@ -1696,6 +1696,25 @@ function buildVideoFilter({ ratio }) {
   return { scale, crop, size, ratio: requested };
 }
 
+// Build an ffmpeg audio filter chain from payload enhancement flags.
+// - removeSilence: cut leading/trailing/short silences (viral-clip editing)
+// - denoise:       FFT denoise (afftdn) to clean up background hiss
+// - enhance:       dynamic loudness normalization + gentle compression
+// Returns "" when no enhancement requested.
+function buildAudioFilter({ removeSilence, denoise, enhance }) {
+  const parts = [];
+  if (removeSilence) {
+    parts.push("silenceremove=stop_periods=-1:stop_duration=0.4:stop_threshold=-50dB");
+  }
+  if (denoise) {
+    parts.push("afftdn=nf=-25");
+  }
+  if (enhance) {
+    parts.push("dynaudnorm=f=200:g=15:p=0.9,acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=6dB");
+  }
+  return parts.join(",");
+}
+
 const CAPTION_FONT_RATIO = 0.07;
 const CAPTION_FONT_BASE = 23;
 
@@ -2002,13 +2021,16 @@ function generateAssStaticFilters(segments, opts) {
   return [`ass=filename=${escapedPath}`];
 }
 
-function buildFilterCommandArgs({ input, start, duration, filterGraph, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k" }) {
+function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k" }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
   args.push("-i", input);
   if (duration != null) args.push("-t", String(duration));
   if (filterGraph) {
     args.push("-vf", filterGraph);
+  }
+  if (audioFilter) {
+    args.push("-af", audioFilter);
   }
   args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-movflags", "+faststart", outputPath);
   return args;
@@ -2650,6 +2672,11 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const end = isSectionSource ? originalEnd - originalStart : originalEnd;
   const cutDuration = end - start;
   const filterParts = buildVideoFilter(payload);
+  const audioFilter = buildAudioFilter({
+    removeSilence: !!payload.removeSilence,
+    denoise: !!payload.denoise,
+    enhance: !!payload.enhance
+  });
 
   const segments = payload.captionStyle !== "off"
     ? resolveExportSegments(payload, projectDir, manifest)
@@ -2695,6 +2722,7 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     start,
     duration: cutDuration,
     filterGraph: filter,
+    audioFilter,
     outputPath,
     preset: "veryfast",
     crf: "23",

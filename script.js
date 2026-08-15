@@ -35,7 +35,10 @@ const state = {
   userScrollTimer: 0,
   suppressScrollMark: false,
   selectedClipIds: new Set(),
-  captionPosition: 0.76
+  captionPosition: 0.76,
+  removeSilence: false,
+  denoise: false,
+  enhance: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -780,6 +783,9 @@ async function exportSelectedClip() {
         fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
         captionColor: captionColorInput ? captionColorInput.value : "",
         captionPosition: state.captionPosition || 0.76,
+        removeSilence: state.removeSilence,
+        denoise: state.denoise,
+        enhance: state.enhance,
         ratio: currentRatio(),
         segments: exportSegments
       })
@@ -1570,6 +1576,10 @@ $("#captionStyleSelect").addEventListener("change", () => {
   }
 });
 
+$("#enhanceRemoveSilence").addEventListener("change", (e) => { state.removeSilence = e.target.checked; });
+$("#enhanceDenoise").addEventListener("change", (e) => { state.denoise = e.target.checked; });
+$("#enhanceBoost").addEventListener("change", (e) => { state.enhance = e.target.checked; });
+
 $("#layoutSelect").addEventListener("change", (event) => {
   setRatio(event.target.value);
   showToast(`Layout diganti ke ${event.target.selectedOptions[0].text}.`);
@@ -1735,6 +1745,9 @@ $("#exportAllBtn").addEventListener("click", async () => {
           fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
           captionColor: captionColorInput ? captionColorInput.value : "",
           ratio: currentRatio(),
+          removeSilence: state.removeSilence,
+          denoise: state.denoise,
+          enhance: state.enhance,
           segments: captionSegmentsForClip(clip)
         }))
       })
