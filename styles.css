@@ -401,6 +401,13 @@ button {
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin: 12px 0 16px;
+  align-items: stretch;
+}
+
+#videoUrl {
+  resize: vertical;
+  min-height: 40px;
+  font-family: inherit;
 }
 
 .process-steps {

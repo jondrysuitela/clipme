@@ -16,7 +16,7 @@ http://localhost:4173
 
 ## Fitur yang sudah berfungsi
 
-- Paste URL YouTube.
+- Paste URL YouTube (bisa beberapa URL sekaligus, satu per baris, maksimal 10 — diproses batch dan masuk Library).
 - Baca metadata YouTube dengan `yt-dlp` tanpa download full video.
 - Ambil transcript/subtitle YouTube bila tersedia.
 - Jika YouTube tidak menyediakan transcript, aplikasi bisa mencoba speech-to-text dari audio clip.
@@ -45,6 +45,7 @@ http://localhost:4173
 - **Export SRT**: tombol `Export SRT` pada panel Caption Timeline menghasilkan file `.srt` untuk clip aktif.
 - **Import SRT/VTT**: tombol `Import SRT/VTT` membaca file subtitle lalu memuat segmen ke timeline caption untuk clip aktif.
 - **Gabung clip jadi satu video**: tombol `Gabung jadi 1` mengekspor setiap clip pilihan (atau semua) lalu menggabungkannya menjadi satu MP4 via ffmpeg concat.
+- **Export ke folder per project**: hasil export disimpan di `outputs/<nama-project>-<id>/` lengkap dengan file `info.txt` berisi rentang waktu, rasio, caption, dan hook untuk tiap clip.
 - **Undo/Redo**: tombol `Undo`/`Redo` (atau `Ctrl+Z`/`Ctrl+Y`) memulihkan urutan clip dan hasil trim sebelumnya.
 - **Trim dengan drag**: handle di kiri/kanan pada progress track bisa diseret untuk mengubah awal/akhir clip aktif.
 - **Reorder clip**: kartu clip bisa diseret (drag & drop) untuk mengubah urutan clip.

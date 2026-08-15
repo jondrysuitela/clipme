@@ -611,7 +611,7 @@ async function loadExports() {
     if (!response.ok) throw new Error(data.error || "Gagal memuat Exports.");
     state.exports = (Array.isArray(data.exports) ? data.exports : []).map((e) => ({
       filename: e.filename,
-      downloadUrl: `/outputs/${encodeURIComponent(e.filename)}`,
+      downloadUrl: e.downloadUrl || `/outputs/${encodeURIComponent(e.filename)}`,
       clipTitle: "Export",
       status: "Done",
       createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : ""
@@ -878,10 +878,16 @@ async function waitForJob(jobId) {
 }
 
 async function processYouTubeUrl() {
-  const url = $("#videoUrl").value.trim();
+  const raw = $("#videoUrl").value.trim();
+  const urls = raw.split(/\r?\n/).map((u) => u.trim()).filter((u) => u.length > 0);
 
-  if (!url) {
+  if (!urls.length) {
     showToast("Paste URL YouTube dulu.");
+    return;
+  }
+
+  if (urls.length > 10) {
+    showToast("Maksimal 10 URL dalam satu batch.");
     return;
   }
 
@@ -890,27 +896,75 @@ async function processYouTubeUrl() {
   renderClipSkeleton();
   $("#attachUrl").disabled = true;
   $("#generateButton").disabled = true;
-  showToast("Membaca metadata YouTube tanpa download full video.");
 
   try {
-    const response = await fetch("/api/youtube", {
+    if (urls.length === 1) {
+      const response = await fetch("/api/youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: urls[0],
+          duration: $("#durationSelect").value,
+          language: $("#languageSelect").value,
+          assumedDuration: 3600
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Download YouTube gagal.");
+      setProcessStep("clips", ["metadata"]);
+      loadProject(data);
+      setProcessStep("", ["metadata", "clips"]);
+      showToast(data.fastMode ? `${clips.length} clip dibuat instan. Preview akan mengambil section asli.` : `${clips.length} clip dibuat. ${data.transcriptStatus || "Transcript tidak ditemukan."}`);
+      return;
+    }
+
+    showToast(`Memproses ${urls.length} URL...`);
+    const response = await fetch("/api/youtube-bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        url,
+        urls,
         duration: $("#durationSelect").value,
         language: $("#languageSelect").value,
         assumedDuration: 3600
       })
     });
-
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Download YouTube gagal.");
+    if (!response.ok) throw new Error(data.error || "Batch YouTube gagal.");
 
-    setProcessStep("clips", ["metadata"]);
-    loadProject(data);
-    setProcessStep("", ["metadata", "clips"]);
-    showToast(data.fastMode ? `${clips.length} clip dibuat instan. Preview akan mengambil section asli.` : `${clips.length} clip dibuat. ${data.transcriptStatus || "Transcript tidak ditemukan."}`);
+    const ok = (Array.isArray(data.projects) ? data.projects : []).filter((p) => p && p.ok);
+    const failed = (Array.isArray(data.projects) ? data.projects : []).filter((p) => p && !p.ok);
+    const firstOk = ok[0];
+
+    const otherProjects = ok.slice(1).map((p) => p.project);
+    if (otherProjects.length) {
+      otherProjects.forEach((proj) => {
+        if (!proj || !proj.id) return;
+        state.projects.unshift({
+          id: proj.id,
+          name: proj.name || "project",
+          duration: proj.probe && proj.probe.duration,
+          clips: Array.isArray(proj.clips) ? proj.clips.length : 0,
+          transcriptStatus: proj.transcriptStatus || "No transcript",
+          createdAt: new Date().toLocaleString()
+        });
+      });
+      state.projects = state.projects.slice(0, 30);
+      renderLibrary();
+    }
+
+    if (firstOk) {
+      setProcessStep("clips", ["metadata"]);
+      loadProject(firstOk.project);
+      setProcessStep("", ["metadata", "clips"]);
+    }
+
+    const summary = `${ok.length}/${urls.length} berhasil`;
+    if (failed.length) {
+      showToast(`${summary}. ${failed.length} gagal (${failed[0].error || "error"}).`);
+    } else {
+      showToast(`${summary}. ${ok.length} project siap di Library.`);
+    }
   } catch (error) {
     uploadStatus.textContent = "Failed";
     setProcessStep("");
@@ -1169,7 +1223,10 @@ $("#dropzone").addEventListener("drop", (event) => {
 $("#attachUrl").addEventListener("click", processYouTubeUrl);
 
 $("#videoUrl").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") processYouTubeUrl();
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    processYouTubeUrl();
+  }
 });
 
 $("#generateButton").addEventListener("click", () => {

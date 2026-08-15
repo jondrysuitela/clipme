@@ -2486,13 +2486,10 @@ function findSourceFile(projectDir) {
     .find((filePath) => path.basename(filePath).startsWith("source")) || "";
 }
 
-async function handleYouTube(req, res) {
-  const payload = JSON.parse((await collectRequest(req, 5)).toString("utf8"));
-  const videoUrl = String(payload.url || "").trim();
-
+async function analyzeYouTubeUrl(videoUrl, payload) {
+  videoUrl = String(videoUrl || "").trim();
   if (!isSupportedVideoUrl(videoUrl)) {
-    sendJson(res, 400, { error: "Masukkan URL YouTube yang valid." });
-    return;
+    throw new Error("Masukkan URL YouTube yang valid.");
   }
 
   payload.language = ["Indonesia", "English", "Mixed"].includes(payload.language) ? payload.language : "Indonesia";
@@ -2506,8 +2503,7 @@ async function handleYouTube(req, res) {
   if (process.env.CLIPFORGE_DEEP_ANALYZE !== "1") {
     if (!videoId) {
       fs.rmSync(projectDir, { recursive: true, force: true });
-      sendJson(res, 400, { error: "URL YouTube tidak valid: tidak ada video ID." });
-      return;
+      throw new Error("URL YouTube tidak valid: tidak ada video ID.");
     }
     const assumedDuration = Math.max(60, Number(payload.assumedDuration || 3600));
     // Fast mode: ambil durasi nyata via metadata ringan (skip-download) agar
@@ -2548,7 +2544,7 @@ async function handleYouTube(req, res) {
       transcriptProvider: "fast-mode"
     });
 
-    sendJson(res, 200, {
+    return {
       id,
       name: title,
       probe,
@@ -2561,8 +2557,7 @@ async function handleYouTube(req, res) {
       youtubeUrl: videoUrl,
       noDownload: true,
       fastMode: true
-    });
-    return;
+    };
   }
 
   const { stdout } = await run(YTDLP, [
@@ -2629,7 +2624,7 @@ async function handleYouTube(req, res) {
     fs.writeFileSync(path.join(projectDir, "transcript.json"), JSON.stringify(transcript, null, 2));
   }
 
-  sendJson(res, 200, {
+  return {
     id,
     name: title,
     probe,
@@ -2641,7 +2636,47 @@ async function handleYouTube(req, res) {
     previewUrl: "",
     youtubeUrl: videoUrl,
     noDownload: true
-  });
+  };
+}
+
+async function handleYouTube(req, res) {
+  try {
+    const payload = JSON.parse((await collectRequest(req, 5)).toString("utf8"));
+    const videoUrl = String(payload.url || "").trim();
+    const data = await analyzeYouTubeUrl(videoUrl, payload);
+    sendJson(res, 200, data);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Download YouTube gagal." });
+  }
+}
+
+async function handleYouTubeBulk(req, res) {
+  try {
+    const payload = JSON.parse((await collectRequest(req, 20)).toString("utf8"));
+    const urls = (Array.isArray(payload.urls) ? payload.urls : [])
+      .map((u) => String(u || "").trim())
+      .filter((u) => u.length > 0);
+    if (!urls.length) {
+      sendJson(res, 400, { error: "Tidak ada URL YouTube yang valid." });
+      return;
+    }
+    if (urls.length > 10) {
+      sendJson(res, 400, { error: "Maksimal 10 URL dalam satu batch." });
+      return;
+    }
+    const projects = [];
+    for (const url of urls) {
+      try {
+        const data = await analyzeYouTubeUrl(url, payload);
+        projects.push({ ok: true, url, project: data });
+      } catch (error) {
+        projects.push({ ok: false, url, error: error.message || "Gagal memproses URL." });
+      }
+    }
+    sendJson(res, 200, { projects });
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Batch gagal." });
+  }
 }
 
 function createJob(type, worker) {
@@ -2712,6 +2747,46 @@ function enqueueAndAwait(type, worker) {
   return job.promise;
 }
 
+function outputSubdir(projectId) {
+  const projectDir = path.join(UPLOAD_DIR, projectId || "");
+  const manifest = readProjectManifest(projectDir);
+  const slug = String(manifest.name || "project")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 40) || "project";
+  const folder = `${slug}-${String(projectId || "x").slice(0, 6)}`;
+  const dir = path.join(OUTPUT_DIR, folder);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+
+function formatDurationLabel(seconds) {
+  const s = Math.max(0, Number(seconds || 0));
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+
+function writeExportInfo(outputDir, outputName, payload, manifest) {
+  try {
+    const clip = Array.isArray(manifest.clips)
+      ? manifest.clips.find((c) => String(c.id) === String(payload.clipId))
+      : null;
+    const infoPath = path.join(outputDir, `${outputName}.info.txt`);
+    const lines = [
+      `File: ${outputName}`,
+      `Project: ${manifest.name || ""}`,
+      `Clip ID: ${payload.clipId || ""}`,
+      `Rentang: ${formatDurationLabel(payload.start)} - ${formatDurationLabel(payload.end)}`,
+      `Rasio: ${payload.ratio || "portrait"}`,
+      `Caption: ${payload.caption || ""}`,
+      `Hook: ${(clip && clip.hook) || ""}`,
+      `Language: ${payload.language || ""}`
+    ];
+    fs.writeFileSync(infoPath, lines.join("\r\n") + "\r\n", "utf8");
+  } catch {}
+}
+
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
@@ -2735,7 +2810,8 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }
 
   setProgress(58);
-  const outputDir = options.outputDir || OUTPUT_DIR;
+  const outputDir = options.outputDir || outputSubdir(payload.projectId);
+  const isIntermediate = !!options.outputDir;
   const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.mp4`;
   const outputPath = path.join(outputDir, outputName);
   const isSectionSource = manifest.type === "youtube" && sourcePath.includes(`${path.sep}sections${path.sep}`);
@@ -2833,11 +2909,12 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }), 300000, children);
 
   setProgress(95);
+  if (!isIntermediate) writeExportInfo(outputDir, outputName, payload, manifest);
   const result = {
     filename: outputName,
-    downloadUrl: `/outputs/${outputName}`
+    downloadUrl: `/outputs/${path.relative(OUTPUT_DIR, outputDir).split(path.sep).map(encodeURIComponent).join("/")}/${encodeURIComponent(outputName)}`
   };
-  if (outputDir !== OUTPUT_DIR) {
+  if (isIntermediate) {
     // Intermediate file in temp (concat): not directly downloadable.
     delete result.downloadUrl;
   }
@@ -3747,21 +3824,32 @@ function handleGetProject(req, res, params) {
 
 function handleListExports(req, res) {
   const files = [];
-  try {
-    for (const entry of fs.readdirSync(OUTPUT_DIR)) {
-      const fpath = path.join(OUTPUT_DIR, entry);
-      const stat = fs.statSync(fpath);
-      if (stat.isFile()) files.push({ filename: entry, size: stat.size, createdAt: stat.birthtimeMs || stat.mtimeMs });
+  const walk = (dir, prefix = "") => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir); } catch { return; }
+    for (const entry of entries) {
+      const fpath = path.join(dir, entry);
+      let stat;
+      try { stat = fs.statSync(fpath); } catch { continue; }
+      if (stat.isDirectory()) {
+        walk(fpath, `${prefix}${entry}/`);
+      } else {
+        const rel = `${prefix}${entry}`;
+        const urlPath = rel.split(path.sep).map(encodeURIComponent).join("/");
+        files.push({ filename: rel, downloadUrl: `/outputs/${urlPath}`, size: stat.size, createdAt: stat.birthtimeMs || stat.mtimeMs });
+      }
     }
-  } catch {}
+  };
+  walk(OUTPUT_DIR);
   files.sort((a, b) => b.createdAt - a.createdAt);
   sendJson(res, 200, { exports: files });
 }
 
 function handleDeleteExport(req, res, params) {
-  const filename = path.basename(params.filename || "");
-  if (!filename) { sendJson(res, 400, { error: "Invalid filename" }); return; }
-  const fpath = path.join(OUTPUT_DIR, filename);
+  const rel = decodeURIComponent(params.filename || "").replace(/\\/g, "/");
+  if (!rel) { sendJson(res, 400, { error: "Invalid filename" }); return; }
+  const fpath = path.join(OUTPUT_DIR, rel);
+  if (!isSafePath(fpath, OUTPUT_DIR)) { sendJson(res, 403, { error: "Forbidden" }); return; }
   if (!fs.existsSync(fpath)) { sendJson(res, 404, { error: "Export not found" }); return; }
   fs.unlinkSync(fpath);
   sendJson(res, 200, { ok: true });
@@ -4040,7 +4128,7 @@ async function handleExportCombined(req, res) {
           const listPath = path.join(tmpDir, "concat.txt");
           fs.writeFileSync(listPath, concatList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
           const combinedName = `combined-${Date.now()}.mp4`;
-          const combinedPath = path.join(OUTPUT_DIR, combinedName);
+          const combinedPath = path.join(outputSubdir(projectId), combinedName);
           const concatArgs = ["-y", "-f", "concat", "-safe", "0", "-i", listPath];
           const runConcat = (copyMode) => run(
             FFMPEG,
@@ -4060,7 +4148,7 @@ async function handleExportCombined(req, res) {
             .then(() => {
               setProgress(100);
               try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-              resolve({ filename: combinedName, downloadUrl: `/outputs/${combinedName}`, clips: concatList.length });
+              resolve({ filename: combinedName, downloadUrl: `/outputs/${path.relative(OUTPUT_DIR, outputSubdir(projectId)).split(path.sep).map(encodeURIComponent).join("/")}/${encodeURIComponent(combinedName)}`, clips: concatList.length });
             })
             .catch((err) => {
               try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -4260,6 +4348,7 @@ function serveStatic(req, res) {
 router
   .add("POST", "/api/upload", handleUpload)
   .add("POST", "/api/youtube", handleYouTube)
+  .add("POST", "/api/youtube-bulk", handleYouTubeBulk)
   .add("POST", "/api/preview", handlePreview)
   .add("POST", "/api/export", handleExport)
   .add("POST", "/api/edit-transcript", handleEditTranscript)
@@ -4275,7 +4364,7 @@ router
   .add("GET", "/api/projects/:projectId", handleGetProject)
   .add("DELETE", "/api/projects/:projectId", handleDeleteProject)
   .add("GET", "/api/exports", handleListExports)
-  .add("DELETE", "/api/exports/:filename", handleDeleteExport)
+  .add("DELETE", /^\/api\/exports\/(.+)$/, (req, res, m) => handleDeleteExport(req, res, { filename: m[1] }))
   .add("POST", "/api/open-output", handleOpenOutput)
   .add("POST", "/api/bgmusic", handleBgMusicUpload)
   .add("GET", "/api/queue", handleListQueue)
@@ -4291,7 +4380,12 @@ router
     res.end();
   })
   .add("GET", /^\/api\/jobs\/([^/]+)$/, (req, res, m) => handleJob(req, res, m[1]))
-  .add("GET", /^\/outputs\/(.+)$/, (req, res, m) => sendFile(req, res, path.join(OUTPUT_DIR, path.basename(m[1]))))
+  .add("GET", /^\/outputs\/(.+)$/, (req, res, m) => {
+    const rel = decodeURIComponent(m[1]).replace(/\\/g, "/");
+    const target = path.join(OUTPUT_DIR, rel);
+    if (!isSafePath(target, OUTPUT_DIR)) { sendJson(res, 403, { error: "Forbidden" }); return; }
+    sendFile(req, res, target);
+  })
   .add("GET", /^\/media\/([^/]+)$/, (req, res, m) => {
     const projectId = sanitizeString(m[1]);
     if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
