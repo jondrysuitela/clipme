@@ -1,6 +1,6 @@
 {
   "model": {
-    "name": "small",
+    "name": "tiny",
     "device": "auto",
     "compute_type": "auto",
     "cpu_threads": 4,

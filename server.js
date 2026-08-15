@@ -279,7 +279,7 @@ const MODELS_ROOT = toUnpackedPath(path.join(ROOT, "models"));
 // needs the HF symlink cache or a network download; fall back to the plain
 // model name so HF auto-download still works when the dir is absent.
 function resolveLocalWhisperModel(name) {
-  const requested = String(name || process.env.LOCAL_WHISPER_MODEL || "small");
+  const requested = String(name || process.env.LOCAL_WHISPER_MODEL || "tiny");
   const flatDir = path.join(MODELS_ROOT, requested);
   if (fs.existsSync(path.join(flatDir, "model.bin"))) return flatDir;
   return requested;
@@ -1613,7 +1613,7 @@ async function transcribeAudioWithLocalWhisper(audioPath) {
   const args = [
     FASTER_WHISPER_SCRIPT,
     audioPath,
-    "--model", resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "small"),
+    "--model", resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "tiny"),
     "--device", process.env.LOCAL_WHISPER_DEVICE || "cpu",
     "--compute-type", process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8",
     "--output", outputPath
@@ -2833,7 +2833,7 @@ function clipTranscriptBaseName(payload) {
 function clipTranscriptConfigHash() {
   const config = [
     process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
-    process.env.LOCAL_WHISPER_MODEL || "small",
+    process.env.LOCAL_WHISPER_MODEL || "tiny",
     process.env.LOCAL_WHISPER_DEVICE || "cpu",
     process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8"
   ].join("|");
