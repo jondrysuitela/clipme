@@ -377,6 +377,12 @@ function sanitizeColor(value) {
   return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex.toUpperCase()}` : "";
 }
 
+const X264_PRESETS = new Set(["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]);
+
+function sanitizePreset(value) {
+  return X264_PRESETS.has(String(value || "")) ? String(value) : "veryfast";
+}
+
 function colorToAss(value) {
   const hex = sanitizeColor(value);
   if (!hex) return "";
@@ -2037,7 +2043,7 @@ function generateAssStaticFilters(segments, opts) {
   return [`ass=filename=${escapedPath}`];
 }
 
-function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k" }) {
+function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0 }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
   args.push("-i", input);
@@ -2047,6 +2053,9 @@ function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilt
   }
   if (audioFilter) {
     args.push("-af", audioFilter);
+  }
+  if (fps && Number(fps) > 0) {
+    args.push("-r", String(fps));
   }
   args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-movflags", "+faststart", outputPath);
   return args;
@@ -2742,9 +2751,10 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     filterGraph: filter,
     audioFilter,
     outputPath,
-    preset: "veryfast",
-    crf: "23",
-    audioBitrate: "128k"
+    preset: sanitizePreset(payload.preset),
+    crf: String(payload.crf || 23),
+    audioBitrate: `${payload.audioBitrate || 128}k`,
+    fps: Number(payload.fps) || 0
   }), 300000, children);
 
   setProgress(95);
@@ -3675,6 +3685,9 @@ function handleExportBatch(req, res) {
               denoise: !!clipDef.denoise,
               enhance: !!clipDef.enhance,
               autoZoom: !!clipDef.autoZoom,
+              fps: Number(clipDef.fps) || 0,
+              crf: Number(clipDef.crf) || 23,
+              audioBitrate: Number(clipDef.audioBitrate) || 128,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {

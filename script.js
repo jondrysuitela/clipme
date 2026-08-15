@@ -40,6 +40,9 @@ const state = {
   denoise: false,
   enhance: false,
   autoZoom: false,
+  fps: 25,
+  crf: 23,
+  audioBitrate: 128,
   sourceDuration: 0,
   exportRatios: ["portrait"]
 };
@@ -839,6 +842,9 @@ async function exportSelectedClip() {
       denoise: state.denoise,
       enhance: state.enhance,
       autoZoom: state.autoZoom,
+      fps: Number(state.fps) || 0,
+      crf: Number(state.crf) || 23,
+      audioBitrate: Number(state.audioBitrate) || 128,
       ratio: currentRatio(),
       segments: exportSegments
     };
@@ -1653,6 +1659,9 @@ $("#enhanceRemoveSilence").addEventListener("change", (e) => { state.removeSilen
 $("#enhanceDenoise").addEventListener("change", (e) => { state.denoise = e.target.checked; });
 $("#enhanceBoost").addEventListener("change", (e) => { state.enhance = e.target.checked; });
 $("#autoZoomToggle").addEventListener("change", (e) => { state.autoZoom = e.target.checked; });
+$("#fpsSelect").addEventListener("change", (e) => { state.fps = Number(e.target.value) || 25; });
+$("#qualitySelect").addEventListener("change", (e) => { state.crf = Number(e.target.value) || 23; });
+$("#audioBitrateSelect").addEventListener("change", (e) => { state.audioBitrate = Number(e.target.value) || 128; });
 
 $("#layoutSelect").addEventListener("change", (event) => {
   setRatio(event.target.value);
@@ -1828,6 +1837,9 @@ $("#exportAllBtn").addEventListener("click", async () => {
           denoise: state.denoise,
           enhance: state.enhance,
           autoZoom: state.autoZoom,
+          fps: Number(state.fps) || 0,
+          crf: Number(state.crf) || 23,
+          audioBitrate: Number(state.audioBitrate) || 128,
           segments: captionSegmentsForClip(clip)
         }))
       })

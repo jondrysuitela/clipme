@@ -265,6 +265,25 @@
             <div class="field-label">Motion</div>
             <label class="audio-opt"><input type="checkbox" id="autoZoomToggle"> Auto-zoom (slow zoom-in)</label>
             <div class="caption-hint">Efek Ken Burns ringan — kamera zoom pelan ke tengah selama clip.</div>
+            <div class="field-label">Frame rate</div>
+            <select id="fpsSelect" class="inspector-input">
+              <option value="24">24 fps</option>
+              <option value="25" selected>25 fps</option>
+              <option value="30">30 fps</option>
+              <option value="60">60 fps</option>
+            </select>
+            <div class="field-label">Kualitas video</div>
+            <select id="qualitySelect" class="inspector-input">
+              <option value="18">Tinggi (lebih besar)</option>
+              <option value="23" selected>Standar</option>
+              <option value="28">Rendah (lebih kecil)</option>
+            </select>
+            <div class="field-label">Bitrate audio</div>
+            <select id="audioBitrateSelect" class="inspector-input">
+              <option value="96">96 kbps</option>
+              <option value="128" selected>128 kbps</option>
+              <option value="192">192 kbps</option>
+            </select>
           </div>
         </div>
       </div>
