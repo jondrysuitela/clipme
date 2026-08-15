@@ -200,6 +200,13 @@ function selectedExportRatios() {
   return [currentRatio()];
 }
 
+$$(".export-ratio-chk").forEach((el) => {
+  el.addEventListener("change", () => {
+    const checked = $$(".export-ratio-chk:checked").map((item) => item.dataset.ratio);
+    state.exportRatios = checked.length ? checked : [currentRatio()];
+  });
+});
+
 function renderEmptyClips(message) {
   state.activeClip = null;
   clipList.innerHTML = "";
@@ -1924,6 +1931,100 @@ $("#clearExports").addEventListener("click", async () => {
   refreshStorage();
 });
 
+const SETTINGS_KEY = "clipperStudio.settings";
+
+function saveSettings() {
+  const style = $("#captionStyleSelect") ? $("#captionStyleSelect").value : "bold";
+  const data = {
+    removeSilence: state.removeSilence,
+    denoise: state.denoise,
+    enhance: state.enhance,
+    autoZoom: state.autoZoom,
+    fps: state.fps,
+    crf: state.crf,
+    audioBitrate: state.audioBitrate,
+    watermark: state.watermark,
+    watermarkPosition: state.watermarkPosition,
+    watermarkOpacity: state.watermarkOpacity,
+    exportRatios: state.exportRatios,
+    captionStyle: style,
+    captionSize: Number(captionSize.value) || 23,
+    captionPosition: state.captionPosition || 0.76
+  };
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+function loadSettings() {
+  let data;
+  try {
+    data = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+  } catch {
+    data = null;
+  }
+  if (!data || typeof data !== "object") return;
+  state.removeSilence = !!data.removeSilence;
+  state.denoise = !!data.denoise;
+  state.enhance = !!data.enhance;
+  state.autoZoom = !!data.autoZoom;
+  if (Number(data.fps)) state.fps = Number(data.fps);
+  if (Number(data.crf)) state.crf = Number(data.crf);
+  if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
+  if (typeof data.watermark === "string") state.watermark = data.watermark;
+  if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
+  if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
+  if (Array.isArray(data.exportRatios)) {
+    const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
+    if (valid.length) state.exportRatios = valid;
+  }
+  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+
+  $("#enhanceRemoveSilence").checked = state.removeSilence;
+  $("#enhanceDenoise").checked = state.denoise;
+  $("#enhanceBoost").checked = state.enhance;
+  $("#autoZoomToggle").checked = state.autoZoom;
+  $("#fpsSelect").value = String(state.fps);
+  $("#qualitySelect").value = String(state.crf);
+  $("#audioBitrateSelect").value = String(state.audioBitrate);
+  $("#watermarkText").value = state.watermark;
+  $("#watermarkPosition").value = state.watermarkPosition;
+  $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
+  $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
+  if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
+  if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
+  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
+}
+
+const saveSettingsDebounced = (() => {
+  let timer = 0;
+  return () => {
+    clearTimeout(timer);
+    timer = setTimeout(saveSettings, 300);
+  };
+})();
+
+const settingsControls = [
+  ["change", "#enhanceRemoveSilence"],
+  ["change", "#enhanceDenoise"],
+  ["change", "#enhanceBoost"],
+  ["change", "#autoZoomToggle"],
+  ["change", "#fpsSelect"],
+  ["change", "#qualitySelect"],
+  ["change", "#audioBitrateSelect"],
+  ["input", "#watermarkText"],
+  ["change", "#watermarkPosition"],
+  ["input", "#watermarkOpacity"],
+  ["change", ".export-ratio-chk"],
+  ["change", "#captionStyleSelect"],
+  ["input", "#captionSize"],
+  ["input", "#captionPosition"]
+];
+settingsControls.forEach(([eventName, sel]) => {
+  $$(sel).forEach((el) => el.addEventListener(eventName, saveSettingsDebounced));
+});
+
+loadSettings();
 renderClips();
 selectClip(clips[0]);
 loadProjects();
