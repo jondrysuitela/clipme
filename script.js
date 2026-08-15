@@ -39,7 +39,8 @@ const state = {
   removeSilence: false,
   denoise: false,
   enhance: false,
-  sourceDuration: 0
+  sourceDuration: 0,
+  exportRatios: ["portrait"]
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -184,6 +185,12 @@ function currentRatio() {
   if (previewFrame.classList.contains("wide")) return "wide";
   if (previewFrame.classList.contains("four5")) return "four5";
   return "portrait";
+}
+
+function selectedExportRatios() {
+  const checked = $$(".export-ratio-chk:checked").map((el) => el.dataset.ratio);
+  if (checked.length) return checked;
+  return [currentRatio()];
 }
 
 function renderEmptyClips(message) {
@@ -814,50 +821,68 @@ async function exportSelectedClip() {
           words: Array.isArray(s.words) && s.words.length ? s.words : []
         }))
       : [];
-    const response = await fetch("/api/export", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: state.projectId,
-        clipId: state.activeClip.id,
-        start: state.activeClip.start,
-        end: state.activeClip.end,
-        caption: captionInput.value,
-        language: $("#languageSelect").value,
-        captionStyle: $("#captionStyleSelect").value,
-        captionSize: captionSize.value,
-        fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
-        captionColor: captionColorInput ? captionColorInput.value : "",
-        captionPosition: state.captionPosition || 0.76,
-        removeSilence: state.removeSilence,
-        denoise: state.denoise,
-        enhance: state.enhance,
-        ratio: currentRatio(),
-        segments: exportSegments
-      })
-    });
+    const ratios = selectedExportRatios();
+    const basePayload = {
+      projectId: state.projectId,
+      clipId: state.activeClip.id,
+      start: state.activeClip.start,
+      end: state.activeClip.end,
+      caption: captionInput.value,
+      language: $("#languageSelect").value,
+      captionStyle: $("#captionStyleSelect").value,
+      captionSize: captionSize.value,
+      fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
+      captionColor: captionColorInput ? captionColorInput.value : "",
+      captionPosition: state.captionPosition || 0.76,
+      removeSilence: state.removeSilence,
+      denoise: state.denoise,
+      enhance: state.enhance,
+      ratio: currentRatio(),
+      segments: exportSegments
+    };
+    let response;
+    if (ratios.length > 1) {
+      response = await fetch("/api/export-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: state.projectId,
+          clips: [{ ...basePayload, ratios }]
+        })
+      });
+    } else {
+      response = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(basePayload)
+      });
+    }
 
     const data = await response.json();
     if (!response.ok && response.status !== 202) throw new Error(data.error || "Export gagal.");
     if (!data.jobId) throw new Error("Server tidak mengembalikan job export.");
 
     const result = await waitForJob(data.jobId);
-    const anchor = document.createElement("a");
-    anchor.href = result.downloadUrl;
-    anchor.download = result.filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    state.exports.unshift({
-      filename: result.filename,
-      downloadUrl: result.downloadUrl,
-      clipTitle: previewTitle.textContent,
-      status: "Done",
-      createdAt: new Date().toLocaleString()
-    });
+    const results = Array.isArray(result.results) && result.results.length ? result.results : [result];
+    for (const item of results) {
+      if (!item.downloadUrl) continue;
+      const anchor = document.createElement("a");
+      anchor.href = item.downloadUrl;
+      anchor.download = item.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      state.exports.unshift({
+        filename: item.filename,
+        downloadUrl: item.downloadUrl,
+        clipTitle: previewTitle.textContent,
+        status: "Done",
+        createdAt: new Date().toLocaleString()
+      });
+    }
     renderExports();
     uploadStatus.textContent = `${clips.length} clips ready`;
-    showToast(`Export selesai: ${result.filename}`);
+    showToast(`Export selesai: ${results.length} file`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1795,6 +1820,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
           fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
           captionColor: captionColorInput ? captionColorInput.value : "",
           ratio: currentRatio(),
+          ratios: selectedExportRatios(),
           removeSilence: state.removeSilence,
           denoise: state.denoise,
           enhance: state.enhance,

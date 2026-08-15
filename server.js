@@ -3615,7 +3615,12 @@ function handleExportBatch(req, res) {
       }
     }
     const batchId = crypto.randomUUID();
-    const total = clipDefs.length;
+    const total = clipDefs.reduce((sum, clipDef) => {
+      const ratios = Array.isArray(clipDef.ratios) && clipDef.ratios.length
+        ? clipDef.ratios.filter((r) => isSupportedRatio(r))
+        : [clipDef.ratio || "portrait"];
+      return sum + Math.max(1, ratios.length);
+    }, 0);
     let completed = 0;
     let failed = 0;
     let processed = 0;
@@ -3623,40 +3628,53 @@ function handleExportBatch(req, res) {
     const batchJob = createJob("batch-export", (setProgress) => {
       return new Promise((resolve, reject) => {
         let cancelled = false;
+        let activeOutputs = 0;
         const children = new Set();
         batchJob.children = children;
         const runNext = () => {
           if (cancelled) return reject(new Error("Cancelled"));
-          if (!clipDefs.length) {
+          if (!clipDefs.length && activeOutputs === 0) {
             resolve({ batchId, results: exportResults, total, completed, failed });
             return;
           }
+          if (!clipDefs.length) return;
           const clipDef = clipDefs.shift();
-          const payload = {
-            projectId, clipId: clipDef.clipId, start: clipDef.start, end: clipDef.end,
-            caption: clipDef.caption || "", language: clipDef.language || "Indonesia",
-            ratio: clipDef.ratio || "portrait",
-            captionStyle: clipDef.captionStyle || "bold",
-            captionSize: clipDef.captionSize || 23,
-            fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
-            captionColor: clipDef.captionColor || "",
-            segments: clipDef.segments || []
-          };
-          exportClip(payload, (p) => {
-            const overall = Math.round((processed / total) * 80 + (p / total));
-            setProgress(Math.min(99, overall));
-          }, children).then((result) => {
-            processed += 1;
-            completed += 1;
-            exportResults.push(result);
-            setProgress(Math.round((processed / total) * 80));
-            runNext();
-          }).catch((err) => {
-            processed += 1;
-            failed += 1;
-            exportResults.push({ error: err.message });
-            setProgress(Math.round((processed / total) * 80));
-            runNext();
+          const ratios = Array.isArray(clipDef.ratios) && clipDef.ratios.length
+            ? clipDef.ratios.filter((r) => isSupportedRatio(r))
+            : [clipDef.ratio || "portrait"];
+          if (!ratios.length) ratios.push(clipDef.ratio || "portrait");
+          ratios.forEach((ratio) => {
+            activeOutputs += 1;
+            const payload = {
+              projectId, clipId: clipDef.clipId, start: clipDef.start, end: clipDef.end,
+              caption: clipDef.caption || "", language: clipDef.language || "Indonesia",
+              ratio,
+              captionStyle: clipDef.captionStyle || "bold",
+              captionSize: clipDef.captionSize || 23,
+              fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
+              captionColor: clipDef.captionColor || "",
+              removeSilence: !!clipDef.removeSilence,
+              denoise: !!clipDef.denoise,
+              enhance: !!clipDef.enhance,
+              segments: clipDef.segments || []
+            };
+            exportClip(payload, (p) => {
+              const overall = Math.round((processed / total) * 80 + (p / total));
+              setProgress(Math.min(99, overall));
+            }, children).then((result) => {
+              processed += 1;
+              completed += 1;
+              exportResults.push({ ratio, ...result });
+              setProgress(Math.round((processed / total) * 80));
+            }).catch((err) => {
+              processed += 1;
+              failed += 1;
+              exportResults.push({ ratio, error: err.message });
+              setProgress(Math.round((processed / total) * 80));
+            }).finally(() => {
+              activeOutputs -= 1;
+              runNext();
+            });
           });
         };
         batchJob.workerCleanup = () => { cancelled = true; };
