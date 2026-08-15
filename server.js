@@ -2715,9 +2715,12 @@ function enqueueAndAwait(type, worker) {
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
-  const enriched = manifest.type === "youtube"
+  const audioOnly = !!options.audioOnly;
+  const enriched = (!audioOnly && manifest.type === "youtube")
     ? await ensureClipTranscript(projectDir, manifest, payload, children)
-    : await ensureClipTranscriptLocal(projectDir, manifest, payload, children);
+    : (!audioOnly
+        ? await ensureClipTranscriptLocal(projectDir, manifest, payload, children)
+        : null);
   if (enriched && (!payload.caption || /^(Edit caption|Caption otomatis)/i.test(payload.caption))) {
     payload.caption = enriched.caption;
   }
@@ -2735,7 +2738,6 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }
 
   setProgress(58);
-  const audioOnly = !!options.audioOnly;
   const outputDir = options.outputDir || OUTPUT_DIR;
   const ext = audioOnly ? "mp3" : "mp4";
   const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.${ext}`;
@@ -2856,10 +2858,15 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }), 300000, children);
 
   setProgress(95);
-  return {
+  const result = {
     filename: outputName,
     downloadUrl: `/outputs/${outputName}`
   };
+  if (outputDir !== OUTPUT_DIR) {
+    // Intermediate file in temp (concat): not directly downloadable.
+    delete result.downloadUrl;
+  }
+  return result;
 }
 
 function sectionFileName(payload, suffix = "export") {
@@ -4059,7 +4066,22 @@ async function handleExportCombined(req, res) {
           fs.writeFileSync(listPath, concatList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
           const combinedName = `combined-${Date.now()}.mp4`;
           const combinedPath = path.join(OUTPUT_DIR, combinedName);
-          run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", combinedPath], 300000, children)
+          const concatArgs = ["-y", "-f", "concat", "-safe", "0", "-i", listPath];
+          const runConcat = (copyMode) => run(
+            FFMPEG,
+            copyMode
+              ? [...concatArgs, "-c", "copy", combinedPath]
+              : [...concatArgs, "-c:v", "libx264", "-preset", "veryfast", "-crf", String(Number(clipDefs[0].crf) || 23), "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", combinedPath],
+            300000,
+            children
+          );
+          runConcat(true)
+            .catch(() => {
+              // Streams from different clips may not match (-c copy fails); re-encode as fallback.
+              try { fs.rmSync(combinedPath, { force: true }); } catch {}
+              setProgress(93);
+              return runConcat(false);
+            })
             .then(() => {
               setProgress(100);
               try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

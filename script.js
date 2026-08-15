@@ -174,14 +174,14 @@ function snapshotEditable() {
 
 function restoreSnapshot(snap) {
   if (!snap) return;
+  const prevActiveId = state.activeClip ? state.activeClip.id : (clips[0] ? clips[0].id : null);
   clips.splice(0, clips.length, ...snap.clips);
   state.captionByClip = snap.captionByClip;
-  state.liveSegments = (state.captionByClip[captionTimelineKey()] || []).map((s) => ({ ...s }));
+  state.activeClip = clips.find((clip) => clip.id === prevActiveId) || clips[0] || null;
   if (state.activeClip) {
-    const rehydrated = clips.find((clip) => clip.id === state.activeClip.id) || clips[0];
-    state.activeClip = rehydrated || null;
+    state.liveSegments = (state.captionByClip[captionTimelineKey()] || []).map((s) => ({ ...s }));
   } else {
-    state.activeClip = clips[0] || null;
+    state.liveSegments = [];
   }
 }
 
@@ -325,7 +325,7 @@ function renderClips(list = clips) {
   list.forEach((clip) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.draggable = true;
+    button.draggable = !state.sorted;
     button.dataset.clipId = String(clip.id);
     const readiness = clip.previewLoading ? "Loading" : clip.previewReady ? "Ready" : "Needs preview";
     const selected = state.selectedClipIds.has(clip.id);
@@ -428,7 +428,7 @@ function initTrimHandleDrag() {
       if (!state.activeClip) return;
       event.preventDefault();
       event.stopPropagation();
-      pushHistory();
+      let historyPushed = false;
       const onMove = (moveEvent) => {
         const rect = track.getBoundingClientRect();
         const total = Math.max(1, Number(state.sourceDuration) || state.activeClip.end);
@@ -436,12 +436,17 @@ function initTrimHandleDrag() {
         const t = pct * total;
         const clip = state.activeClip;
         const min = 1;
+        const candidate = isStart
+          ? Math.max(0, Math.min(t, clip.end - min, total - min))
+          : Math.min(total, Math.max(t, clip.start + min));
+        if (!historyPushed && Math.abs(candidate - (isStart ? clip.start : clip.end)) > 0.01) {
+          pushHistory();
+          historyPushed = true;
+        }
         if (isStart) {
-          const newStart = Math.max(0, Math.min(t, clip.end - min, total - min));
-          clip.start = Math.round(newStart * 10) / 10;
+          clip.start = Math.round(candidate * 10) / 10;
         } else {
-          const newEnd = Math.min(total, Math.max(t, clip.start + min));
-          clip.end = Math.round(newEnd * 10) / 10;
+          clip.end = Math.round(candidate * 10) / 10;
         }
         syncTrimInputs();
         clipTime.textContent = clipRange(clip);
@@ -453,7 +458,7 @@ function initTrimHandleDrag() {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
         renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
-        showToast("Trim diubah via drag.");
+        if (historyPushed) showToast("Trim diubah via drag.");
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
@@ -1279,11 +1284,10 @@ document.addEventListener("keydown", (event) => {
         showToast("Timeline caption disimpan.");
       }
     }
-    if (event.code === "KeyZ") {
+    if (event.code === "KeyZ" && !event.shiftKey) {
       event.preventDefault();
       undoEditable();
-    }
-    if (event.code === "KeyY" || (event.code === "KeyZ" && event.shiftKey)) {
+    } else if (event.code === "KeyY" || (event.code === "KeyZ" && event.shiftKey)) {
       event.preventDefault();
       redoEditable();
     }
@@ -2733,4 +2737,5 @@ loadExports();
 setRatio(currentRatio());
 refreshStorage();
 pollQueue();
+syncUndoRedoButtons();
 setInterval(pollQueue, 5000);
