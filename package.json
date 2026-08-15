@@ -2,6 +2,8 @@
   "name": "clipper-studio",
   "productName": "Clipper Studio",
   "version": "0.1.0",
+  "description": "Desktop video clipper & caption studio with offline STT",
+  "author": "Clipper Studio",
   "private": true,
   "main": "electron/main.js",
   "engines": {
