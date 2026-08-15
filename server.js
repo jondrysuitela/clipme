@@ -1606,7 +1606,7 @@ async function transcribeAudioWithOpenAI(audioPath, language) {
   };
 }
 
-async function transcribeAudioWithLocalWhisper(audioPath) {
+async function transcribeAudioWithLocalWhisper(audioPath, modelOverride = "") {
   const pythonPath = process.env.LOCAL_WHISPER_PYTHON || VENV_PYTHON;
   if (!fs.existsSync(pythonPath) || !fs.existsSync(FASTER_WHISPER_SCRIPT)) return { text: "", segments: [] };
 
@@ -1614,7 +1614,7 @@ async function transcribeAudioWithLocalWhisper(audioPath) {
   const args = [
     FASTER_WHISPER_SCRIPT,
     audioPath,
-    "--model", resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "tiny"),
+    "--model", resolveLocalWhisperModel(modelOverride || process.env.LOCAL_WHISPER_MODEL || "tiny"),
     "--device", process.env.LOCAL_WHISPER_DEVICE || "cpu",
     "--compute-type", process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8",
     "--config", STT_CONFIG_FILE,
@@ -1645,11 +1645,11 @@ async function transcribeAudioWithLocalWhisper(audioPath) {
   };
 }
 
-async function transcribeAudio(audioPath, language) {
+async function transcribeAudio(audioPath, language, modelOverride = "") {
   const openAiResult = await transcribeAudioWithOpenAI(audioPath, language);
   if (openAiResult.text) return { text: openAiResult.text, segments: openAiResult.segments || [], provider: "openai" };
 
-  const localResult = await transcribeAudioWithLocalWhisper(audioPath);
+  const localResult = await transcribeAudioWithLocalWhisper(audioPath, modelOverride);
   if (localResult.text) return { text: localResult.text, segments: localResult.segments || [], provider: "local-whisper" };
   if (localResult.error) return { text: "", segments: [], provider: "none", error: localResult.error };
 
@@ -2712,7 +2712,7 @@ function enqueueAndAwait(type, worker) {
   return job.promise;
 }
 
-async function exportClip(payload, setProgress = () => {}, children = null) {
+async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
   const enriched = manifest.type === "youtube"
@@ -2735,8 +2735,11 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   }
 
   setProgress(58);
-  const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.mp4`;
-  const outputPath = path.join(OUTPUT_DIR, outputName);
+  const audioOnly = !!options.audioOnly;
+  const outputDir = options.outputDir || OUTPUT_DIR;
+  const ext = audioOnly ? "mp3" : "mp4";
+  const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.${ext}`;
+  const outputPath = path.join(outputDir, outputName);
   const isSectionSource = manifest.type === "youtube" && sourcePath.includes(`${path.sep}sections${path.sep}`);
   const start = isSectionSource ? 0 : Math.max(0, Number(payload.start || 0));
   const originalStart = Math.max(0, Number(payload.start || 0));
@@ -2744,6 +2747,28 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const end = isSectionSource ? originalEnd - originalStart : originalEnd;
   const cutDuration = end - start;
   payload.duration = cutDuration;
+
+  if (audioOnly) {
+    const audioFilter = buildAudioFilter({
+      removeSilence: !!payload.removeSilence,
+      denoise: !!payload.denoise,
+      enhance: !!payload.enhance
+    });
+    const args = ["-y"];
+    if (start > 0) args.push("-ss", String(start));
+    args.push("-i", sourcePath);
+    if (cutDuration) args.push("-t", String(cutDuration));
+    if (audioFilter) args.push("-af", audioFilter);
+    args.push("-vn", "-c:a", "libmp3lame", "-b:a", `${payload.audioBitrate || 128}k`, outputPath);
+    await run(FFMPEG, args, 300000, children);
+    setProgress(95);
+    return {
+      filename: outputName,
+      downloadUrl: `/outputs/${outputName}`,
+      audioOnly: true
+    };
+  }
+
   const filterParts = buildVideoFilter(payload);
   const audioFilter = buildAudioFilter({
     removeSilence: !!payload.removeSilence,
@@ -2850,10 +2875,10 @@ function clipTranscriptBaseName(payload) {
   return `${sectionFileName(payload, "clip").replace(/\.mp4$/, "")}-${lang}.json`;
 }
 
-function clipTranscriptConfigHash() {
+function clipTranscriptConfigHash(payload = {}) {
   const config = [
     process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
-    process.env.LOCAL_WHISPER_MODEL || "tiny",
+    payload.model || process.env.LOCAL_WHISPER_MODEL || "tiny",
     process.env.LOCAL_WHISPER_DEVICE || "cpu",
     process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8"
   ].join("|");
@@ -2862,7 +2887,7 @@ function clipTranscriptConfigHash() {
 
 function clipTranscriptCachePath(projectDir, payload) {
   const base = clipTranscriptBaseName(payload).replace(/\.json$/, "");
-  return path.join(projectDir, "clip-transcripts", `${base}-${clipTranscriptConfigHash()}.json`);
+  return path.join(projectDir, "clip-transcripts", `${base}-${clipTranscriptConfigHash(payload)}.json`);
 }
 
 function clipTranscriptEditedPath(projectDir, payload) {
@@ -3242,7 +3267,7 @@ async function transcribeClipWithCacheSource(projectDir, manifest, payload, audi
     }
     const clip = clipPayloadToClip(payload);
     const audioPath = await audioSource(projectDir, manifest, clip, children);
-    const result = await transcribeAudio(audioPath, payload.language);
+    const result = await transcribeAudio(audioPath, payload.language, payload.model || "");
     if (!result.text) return null;
 
     const caption = cleanCaptionText(result.text).slice(0, 155);
@@ -3418,7 +3443,7 @@ async function handleExport(req, res) {
   const job = createJob("export", async (setProgress) => {
     const children = new Set();
     job.children = children;
-    return exportClip(payload, setProgress, children);
+    return exportClip(payload, setProgress, children, { audioOnly: !!payload.audioOnly });
   });
   sendJson(res, 202, { jobId: job.id, status: job.status, progress: job.progress });
 }
@@ -3954,6 +3979,105 @@ function handleExportBatch(req, res) {
   }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
 }
 
+async function handleExportCombined(req, res) {
+  collectRequest(req, 300).then((buf) => {
+    const data = JSON.parse(buf.toString("utf8"));
+    const projectId = data.projectId || "";
+    if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+    const projectDir = path.join(UPLOAD_DIR, projectId);
+    if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
+    const manifest = readProjectManifest(projectDir);
+    const clipDefs = data.clips || [];
+    if (!clipDefs.length) { sendJson(res, 400, { error: "No clips specified" }); return; }
+    for (const clipDef of clipDefs) {
+      if (!isSupportedRatio(clipDef.ratio)) {
+        sendJson(res, 400, { error: "Rasio tidak didukung." });
+        return;
+      }
+    }
+    const job = createJob("export-combined", (setProgress) => {
+      return new Promise((resolve, reject) => {
+        const children = new Set();
+        job.children = children;
+        const tmpDir = fs.mkdtempSync(path.join(TMP_DIR, "concat-"));
+        let cancelled = false;
+        let index = 0;
+        const concatList = [];
+        const runNext = () => {
+          if (cancelled) {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+            return reject(new Error("Cancelled"));
+          }
+          if (index >= clipDefs.length) {
+            finalize();
+            return;
+          }
+          const clipDef = clipDefs[index];
+          const payload = {
+            projectId, clipId: clipDef.clipId, start: clipDef.start, end: clipDef.end,
+            caption: clipDef.caption || "", language: clipDef.language || "Indonesia",
+            ratio: clipDef.ratio || "portrait",
+            captionStyle: clipDef.captionStyle || "bold",
+            captionSize: clipDef.captionSize || 23,
+            fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
+            captionColor: clipDef.captionColor || "",
+            removeSilence: !!clipDef.removeSilence,
+            denoise: !!clipDef.denoise,
+            enhance: !!clipDef.enhance,
+            autoZoom: !!clipDef.autoZoom,
+            fps: Number(clipDef.fps) || 0,
+            crf: Number(clipDef.crf) || 23,
+            audioBitrate: Number(clipDef.audioBitrate) || 128,
+            watermark: String(clipDef.watermark || ""),
+            watermarkPosition: clipDef.watermarkPosition || "br",
+            watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
+            bgMusicPath: clipDef.bgMusicPath || "",
+            bgMusicVolume: Number(clipDef.bgMusicVolume) || 0.3,
+            ducking: !!clipDef.ducking,
+            segments: clipDef.segments || []
+          };
+          const myIndex = index;
+          index += 1;
+          exportClip(payload, (p) => {
+            const overall = Math.round(((myIndex) / clipDefs.length) * 60 + (p / clipDefs.length));
+            setProgress(Math.min(98, overall));
+          }, children, { outputDir: tmpDir }).then((result) => {
+            concatList.push(path.join(tmpDir, result.filename));
+            runNext();
+          }).catch((err) => {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+            reject(new Error(`Clip ${clipDef.clipId || myIndex + 1} gagal: ${err.message}`));
+          });
+        };
+        const finalize = () => {
+          if (!concatList.length) {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+            return reject(new Error("Tidak ada clip berhasil di-export."));
+          }
+          setProgress(90);
+          const listPath = path.join(tmpDir, "concat.txt");
+          fs.writeFileSync(listPath, concatList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
+          const combinedName = `combined-${Date.now()}.mp4`;
+          const combinedPath = path.join(OUTPUT_DIR, combinedName);
+          run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", combinedPath], 300000, children)
+            .then(() => {
+              setProgress(100);
+              try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+              resolve({ filename: combinedName, downloadUrl: `/outputs/${combinedName}`, clips: concatList.length });
+            })
+            .catch((err) => {
+              try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+              reject(new Error(`Gabungan gagal: ${err.message}`));
+            });
+        };
+        job.workerCleanup = () => { cancelled = true; };
+        runNext();
+      });
+    });
+    sendJson(res, 202, { jobId: job.id, status: job.status, progress: job.progress });
+  }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
+}
+
 class RouteRegistry {
   constructor() {
     this.routes = [];
@@ -4144,6 +4268,7 @@ router
   .add("POST", "/api/edit-transcript", handleEditTranscript)
   .add("POST", "/api/analyze-clip", handleAnalyzeClip)
   .add("POST", "/api/export-batch", handleExportBatch)
+  .add("POST", "/api/export-combined", handleExportCombined)
   .add("POST", "/api/auto-captions", handleAutoCaptions)
   .add("POST", "/api/stt/transcribe", handleSttTranscribe)
   .add("POST", "/api/stt/search", handleSttSearch)

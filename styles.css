@@ -734,7 +734,6 @@ textarea:focus {
   height: 6px;
   border-radius: 999px;
   background: var(--line);
-  overflow: hidden;
 }
 
 .progress-fill {
@@ -745,6 +744,24 @@ textarea:focus {
   transition: width 0.4s ease;
   min-width: 0;
 }
+
+.trim-handle {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid var(--line-strong, #555);
+  cursor: ew-resize;
+  z-index: 3;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.trim-handle-start { left: 0%; }
+.trim-handle-end { left: 100%; }
+.trim-handle:hover { background: var(--accent); }
 
 .transport-row {
   display: flex;
@@ -832,6 +849,9 @@ textarea:focus {
   border-color: var(--accent);
   background: #211a14;
 }
+
+.clip-card[draggable="true"] { cursor: grab; }
+.clip-card.dragging { opacity: 0.45; cursor: grabbing; border-style: dashed; }
 
 .thumb {
   position: relative;
@@ -1152,6 +1172,10 @@ input[type="range"] {
 .clip-actions { display: flex; align-items: center; gap: 4px; }
 .clip-del { font-size: 18px; line-height: 1; padding: 0 4px; color: var(--danger); }
 
+/* ---- Danger button (Library delete) ---- */
+.danger-btn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.danger-btn:hover { background: color-mix(in srgb, var(--danger) 15%, transparent); }
+
 /* ---- Queue list ---- */
 .queue-list { display: flex; flex-direction: column; gap: 8px; }
 .queue-item {
@@ -1365,8 +1389,29 @@ input[type="range"] {
 
 .caption-edit-time span:first-child {
   color: var(--accent-strong);
-  font-size: 11px;
 }
+
+.caption-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.caption-search-input {
+  flex: 1;
+  min-height: 34px;
+}
+
+.caption-search-count {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.caption-block.search-hit { box-shadow: 0 0 0 2px var(--accent); }
+.caption-block.search-hidden { opacity: 0.28; }
 
 .caption-hint {
   margin-top: 10px;

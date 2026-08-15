@@ -43,6 +43,15 @@ http://localhost:4173
 - Queue membatasi pekerjaan berat agar tidak saling menabrak.
 - **Timeline caption editor**: blok caption bisa digeser (drag) dan di-resize dari kiri/kanan, zoom dengan Ctrl+scroll, geser timeline dengan scroll, klik area kosong untuk seek, Space untuk play/pause.
 - **Export SRT**: tombol `Export SRT` pada panel Caption Timeline menghasilkan file `.srt` untuk clip aktif.
+- **Import SRT/VTT**: tombol `Import SRT/VTT` membaca file subtitle lalu memuat segmen ke timeline caption untuk clip aktif.
+- **Gabung clip jadi satu video**: tombol `Gabung jadi 1` mengekspor setiap clip pilihan (atau semua) lalu menggabungkannya menjadi satu MP4 via ffmpeg concat.
+- **Export MP3**: tombol `Export MP3` membuat versi audio-only dari clip aktif (`libmp3lame`).
+- **Undo/Redo**: tombol `Undo`/`Redo` (atau `Ctrl+Z`/`Ctrl+Y`) memulihkan urutan clip dan hasil trim sebelumnya.
+- **Trim dengan drag**: handle di kiri/kanan pada progress track bisa diseret untuk mengubah awal/akhir clip aktif.
+- **Reorder clip**: kartu clip bisa diseret (drag & drop) untuk mengubah urutan clip.
+- **Hapus project per-baris**: tombol `Hapus` di setiap baris Library menghapus project beserta file-nya.
+- **Cari kata di caption**: kotak pencarian di panel Caption Timeline menyorot segmen yang cocok.
+- **Pilih model STT**: dropdown `Model STT (offline)` di tab Settings menampilkan model Faster-Whisper yang tersedia di server.
 
 ## Catatan
 
@@ -88,7 +97,7 @@ $env:CLIPFORGE_VENV_PYTHON="C:\path\ke\.venv\Scripts\python.exe"
 node server.js
 ```
 
-Model default local STT adalah `small` di CPU dengan `int8`. Bisa diganti:
+Model default local STT adalah `tiny` di CPU dengan `int8` (tercepat). Model `small` juga ter-bundle. Bisa diganti:
 
 ```powershell
 $env:LOCAL_WHISPER_MODEL="base"

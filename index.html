@@ -96,9 +96,13 @@
           <div class="panel-heading">
             <h2>Clips</h2>
             <div>
+              <button class="ghost-button compact" id="undoBtn" type="button" title="Undo (Ctrl+Z)">Undo</button>
+              <button class="ghost-button compact" id="redoBtn" type="button" title="Redo (Ctrl+Y)">Redo</button>
               <button class="ghost-button compact" id="sortClips" type="button">Sort by score</button>
               <button class="ghost-button compact" id="selectAllClips" type="button">Select all</button>
               <button class="primary-button compact" id="exportAllBtn" type="button">Export all</button>
+              <button class="secondary-button compact" id="exportCombinedBtn" type="button">Gabung jadi 1</button>
+              <button class="ghost-button compact" id="exportMp3Btn" type="button">Export MP3</button>
             </div>
           </div>
           <div class="clip-list" id="clipList"></div>
@@ -126,6 +130,8 @@
             <span id="clipTime" class="tl-label">00:00 - 00:00</span>
             <div class="timeline-track" id="progressTrack">
               <span id="progressBar" class="progress-fill" style="width:0%"></span>
+              <span id="trimHandleStart" class="trim-handle trim-handle-start" title="Seret untuk ubah awal clip"></span>
+              <span id="trimHandleEnd" class="trim-handle trim-handle-end" title="Seret untuk ubah akhir clip"></span>
             </div>
             <span id="progressText" class="tl-label tl-status">Ready</span>
           </div>
@@ -311,6 +317,11 @@
             <label class="audio-opt">Volume musik <input type="range" id="bgMusicVolume" min="0" max="100" value="30" style="flex:1"></label>
             <label class="audio-opt"><input type="checkbox" id="duckingToggle"> Volume ducking (musik mengecil saat ada suara)</label>
             <input type="file" id="bgMusicFile" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" hidden>
+            <div class="field-label">Model STT (offline)</div>
+            <select id="sttModelSelect" class="inspector-input">
+              <option value="">Auto (default)</option>
+            </select>
+            <div class="caption-hint">Model untuk transkripsi offline. Pilihan dimuat dari server (daftar model Faster-Whisper).</div>
           </div>
         </div>
       </div>
@@ -321,6 +332,8 @@
           <h2>Caption Timeline</h2>
           <div class="caption-tl-actions">
             <button class="ghost-button compact" id="refreshTimeline" type="button">Refresh</button>
+            <button class="ghost-button compact" id="importSrtBtn" type="button">Import SRT/VTT</button>
+            <input type="file" id="importSrtInput" accept=".srt,.vtt,text/plain" style="display:none">
             <button class="ghost-button compact" id="exportSrt" type="button">Export SRT</button>
             <button class="primary-button compact" id="saveTimeline" type="button">Simpan Perubahan</button>
           </div>
@@ -345,6 +358,10 @@
             <span id="captionEditTime">00:00 - 00:00</span>
           </div>
           <input class="caption-edit-input" id="captionEditInput" type="text" placeholder="Teks caption (klik blok di timeline untuk edit)">
+        </div>
+        <div class="caption-search-row">
+          <input class="caption-search-input" id="captionSearchInput" type="search" placeholder="Cari kata di caption...">
+          <span class="caption-search-count" id="captionSearchCount"></span>
         </div>
         <div class="caption-hint">Klik blok pada timeline untuk memilih &amp; mengedit teks caption. Simpan Perubahan agar dipakai saat export. Gunakan tombol play/space untuk preview.</div>
       </div>
