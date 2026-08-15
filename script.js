@@ -433,6 +433,24 @@ async function loadProjects() {
   renderLibrary();
 }
 
+async function loadExports() {
+  try {
+    const response = await fetch("/api/exports");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memuat Exports.");
+    state.exports = (Array.isArray(data.exports) ? data.exports : []).map((e) => ({
+      filename: e.filename,
+      downloadUrl: `/outputs/${encodeURIComponent(e.filename)}`,
+      clipTitle: "Export",
+      status: "Done",
+      createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : ""
+    }));
+  } catch (err) {
+    state.exports = [];
+  }
+  renderExports();
+}
+
 function renderLibrary() {
   if (!state.projects.length) {
     libraryList.innerHTML = '<div class="empty-state">Belum ada project. Paste URL YouTube di Studio untuk mulai.</div>';
@@ -968,6 +986,14 @@ $("#generateButton").addEventListener("click", () => {
 
 $("#playClip").addEventListener("click", playSelectedClip);
 
+$("#muteToggle").addEventListener("click", () => {
+  previewVideo.muted = !previewVideo.muted;
+  $("#muteToggle").textContent = previewVideo.muted ? "Unmute" : "Mute";
+});
+previewVideo.addEventListener("volumechange", () => {
+  $("#muteToggle").textContent = previewVideo.muted ? "Unmute" : "Mute";
+});
+
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
 previewVideo.addEventListener("play", () => { if (state.liveActive) updateLiveCaption(); });
 previewVideo.addEventListener("pause", () => { if (state.liveActive) updateLiveCaption(); });
@@ -1360,6 +1386,7 @@ function renderCaptionTimeline() {
   const scroller = document.getElementById("captionTlScroll");
   const pxPerSec = captionPxPerSec(state.timelineZoom);
   if (inner) inner.style.width = `${captionTimelineWidth(dur, state.timelineZoom)}px`;
+  const prevScrollLeft = scroller ? scroller.scrollLeft : 0;
   captionTrack.querySelectorAll(".caption-block").forEach((el) => el.remove());
 
   const ruler = document.getElementById("captionRuler");
@@ -1398,7 +1425,7 @@ function renderCaptionTimeline() {
     captionTrack.appendChild(block);
   });
 
-  if (scroller) scroller.scrollLeft = 0;
+  if (scroller) scroller.scrollLeft = prevScrollLeft;
   updateCaptionZoomLabel();
   updateCaptionPlayhead();
   updateCaptionEditor();
@@ -2004,6 +2031,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
 $$(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     showView(button.dataset.view);
+    if (button.dataset.view === "library") loadProjects();
+    if (button.dataset.view === "exports") loadExports();
   });
 });
 
@@ -2250,7 +2279,7 @@ renderTemplateOptions();
 renderClips();
 selectClip(clips[0]);
 loadProjects();
-renderExports();
+loadExports();
 setRatio(currentRatio());
 refreshStorage();
 pollQueue();

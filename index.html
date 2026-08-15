@@ -117,7 +117,7 @@
           </div>
           <div class="video-stage">
             <div class="phone-frame portrait" id="previewFrame">
-              <video class="preview-video" id="previewVideo" playsinline muted></video>
+              <video class="preview-video" id="previewVideo" playsinline></video>
               <div class="caption-box" id="captionBox" style="display:none"></div>
               <div class="live-caption" id="liveCaption"></div>
             </div>
@@ -137,6 +137,7 @@
               <input class="trim-input" id="trimEnd" type="text" inputmode="numeric" placeholder="00:30">
               <button class="ghost-button compact" id="applyTrim" type="button">Apply</button>
               <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
+              <button class="ghost-button compact" id="muteToggle" type="button" title="Mute/unmute">Mute</button>
               <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
               <span id="captionStatus" class="caption-status"></span>
               <button class="primary-button compact" id="exportButton" type="button">Export selected clip</button>

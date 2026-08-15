@@ -273,6 +273,7 @@ function findVenvPython() {
 const VENV_PYTHON = findVenvPython();
 const FASTER_WHISPER_SCRIPT = toUnpackedPath(path.join(ROOT, "transcribe_faster_whisper.py"));
 const STT_ENGINE = toUnpackedPath(path.join(ROOT, "stt-engine.py"));
+const STT_CONFIG_FILE = toUnpackedPath(path.join(ROOT, "stt-config.json"));
 const MODELS_ROOT = toUnpackedPath(path.join(ROOT, "models"));
 
 // Prefer a bundled flat model dir (models/<name>) so faster-whisper never
@@ -1616,6 +1617,7 @@ async function transcribeAudioWithLocalWhisper(audioPath) {
     "--model", resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "tiny"),
     "--device", process.env.LOCAL_WHISPER_DEVICE || "cpu",
     "--compute-type", process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8",
+    "--config", STT_CONFIG_FILE,
     "--output", outputPath
   ];
 
@@ -2508,8 +2510,26 @@ async function handleYouTube(req, res) {
       return;
     }
     const assumedDuration = Math.max(60, Number(payload.assumedDuration || 3600));
+    // Fast mode: ambil durasi nyata via metadata ringan (skip-download) agar
+    // clip tidak jatuh di luar durasi video asli; fallback ke asumsi jika gagal.
+    let realDuration = assumedDuration;
+    try {
+      const { stdout } = await run(YTDLP, [
+        "--no-playlist",
+        "--no-warnings",
+        "--skip-download",
+        "--js-runtimes", "node",
+        "--extractor-args", YTDLP_EXTRACTOR_ARGS,
+        "--print", "%(duration)s",
+        videoUrl
+      ], 300000, null);
+      const parsed = Number(String(stdout || "").trim().split("\n")[0]);
+      if (Number.isFinite(parsed) && parsed > 0) realDuration = parsed;
+    } catch {
+      // yt-dlp gagal (offline/error) -> pakai asumsi
+    }
     const probe = {
-      duration: assumedDuration,
+      duration: realDuration,
       width: 0,
       height: 0,
       codec: "youtube-fast"
@@ -4006,7 +4026,7 @@ async function handleSttTranscribe(req, res) {
     }
 
     const pythonPath = process.env.LOCAL_WHISPER_PYTHON || VENV_PYTHON;
-    const args = [STT_ENGINE, "transcribe", "--audio", audioPath, "--format", format];
+    const args = [STT_ENGINE, "transcribe", "--audio", audioPath, "--format", format, "--config", STT_CONFIG_FILE];
     if (model) args.push("--model", resolveLocalWhisperModel(model));
     if (language) args.push("--language", language);
     if (noiseReduction) args.push("--noise-reduction");
