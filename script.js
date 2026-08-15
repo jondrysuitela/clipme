@@ -39,6 +39,7 @@ const state = {
   removeSilence: false,
   denoise: false,
   enhance: false,
+  autoZoom: false,
   sourceDuration: 0,
   exportRatios: ["portrait"]
 };
@@ -837,6 +838,7 @@ async function exportSelectedClip() {
       removeSilence: state.removeSilence,
       denoise: state.denoise,
       enhance: state.enhance,
+      autoZoom: state.autoZoom,
       ratio: currentRatio(),
       segments: exportSegments
     };
@@ -1650,6 +1652,7 @@ $("#captionStyleSelect").addEventListener("change", () => {
 $("#enhanceRemoveSilence").addEventListener("change", (e) => { state.removeSilence = e.target.checked; });
 $("#enhanceDenoise").addEventListener("change", (e) => { state.denoise = e.target.checked; });
 $("#enhanceBoost").addEventListener("change", (e) => { state.enhance = e.target.checked; });
+$("#autoZoomToggle").addEventListener("change", (e) => { state.autoZoom = e.target.checked; });
 
 $("#layoutSelect").addEventListener("change", (event) => {
   setRatio(event.target.value);
@@ -1824,6 +1827,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
           removeSilence: state.removeSilence,
           denoise: state.denoise,
           enhance: state.enhance,
+          autoZoom: state.autoZoom,
           segments: captionSegmentsForClip(clip)
         }))
       })

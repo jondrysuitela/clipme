@@ -1686,14 +1686,30 @@ function resolveRatio(value) {
   return isSupportedRatio(value) ? (value || "portrait") : null;
 }
 
-function buildVideoFilter({ ratio }) {
+function buildVideoFilter(payload) {
+  const ratio = payload.ratio;
   const requested = resolveRatio(ratio);
   if (!requested) throw new Error(`Rasio tidak didukung: ${ratio}`);
   const size = RATIO_PRESETS[requested];
   const scale = `scale=${size.width}:${size.height}:force_original_aspect_ratio=increase`;
   const crop = `crop=${size.width}:${size.height}`;
 
-  return { scale, crop, size, ratio: requested };
+  let pre = [scale, crop];
+  if (payload.autoZoom) {
+    const fps = Math.max(1, Number(payload.fps) || 25);
+    const duration = Math.max(1, Number(payload.duration) || 30);
+    const totalFrames = Math.max(2, Math.round(duration * fps));
+    // Upscale slightly so zoompan has headroom, then pan slowly from 1.0 -> 1.3.
+    const zoomWidth = Math.ceil(size.width * 1.35 / 2) * 2;
+    const zoomHeight = Math.ceil(size.height * 1.35 / 2) * 2;
+    pre = [
+      `scale=${zoomWidth}:${zoomHeight}:force_original_aspect_ratio=increase`,
+      `zoompan=z='min(1+0.30*on/${totalFrames},1.30)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${size.width}x${size.height}:fps=${fps}`,
+      crop
+    ];
+  }
+
+  return { scale: pre[0], crop: pre[pre.length - 1], pre, size, ratio: requested };
 }
 
 // Build an ffmpeg audio filter chain from payload enhancement flags.
@@ -1952,7 +1968,7 @@ function generateKaraokeFilters(segments, opts) {
 }
 
 function buildFilterChain(filterParts, timedFilters) {
-  const chain = [filterParts.scale, filterParts.crop];
+  const chain = Array.isArray(filterParts.pre) ? filterParts.pre.slice() : [filterParts.scale, filterParts.crop];
   if (timedFilters && timedFilters.length) {
     chain.push(...timedFilters);
   }
@@ -2671,6 +2687,7 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const originalEnd = Math.max(originalStart + 1, Number(payload.end || originalStart + 30));
   const end = isSectionSource ? originalEnd - originalStart : originalEnd;
   const cutDuration = end - start;
+  payload.duration = cutDuration;
   const filterParts = buildVideoFilter(payload);
   const audioFilter = buildAudioFilter({
     removeSilence: !!payload.removeSilence,
@@ -2703,17 +2720,18 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     }
   }
 
+  const preFilter = filterParts.pre.join(",");
   const filter = payload.captionStyle === "off"
-    ? [filterParts.scale, filterParts.crop].join(",")
+    ? preFilter
     : timedFilters.length
       ? (() => {
           const chain = buildFilterChain(filterParts, timedFilters);
           return chain.length > MAX_FILTER_CHARS
-            ? [filterParts.scale, filterParts.crop, ...generateAssStaticFilters(segments, genOpts)].join(",")
+            ? [preFilter, ...generateAssStaticFilters(segments, genOpts)].join(",")
             : chain;
         })()
       : [
-          filterParts.scale, filterParts.crop,
+          preFilter,
           `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
         ].join(",");
 
@@ -3656,6 +3674,7 @@ function handleExportBatch(req, res) {
               removeSilence: !!clipDef.removeSilence,
               denoise: !!clipDef.denoise,
               enhance: !!clipDef.enhance,
+              autoZoom: !!clipDef.autoZoom,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {
