@@ -1018,13 +1018,64 @@ if (captionTlScroller) {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.code !== "Space") return;
   const target = event.target;
   const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
   if (typing) return;
-  if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") {
+
+  const timelineVisible = captionTimelinePanel && captionTimelinePanel.style.display !== "none";
+
+  if (event.code === "Space") {
+    if (timelineVisible) {
+      event.preventDefault();
+      togglePreviewPlayback();
+    }
+    return;
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    if (event.code === "KeyS") {
+      event.preventDefault();
+      if (timelineVisible) {
+        saveCaptionTimeline();
+        showToast("Timeline caption disimpan.");
+      }
+    }
+    return;
+  }
+
+  const key = event.code;
+
+  if (key === "ArrowLeft" || key === "ArrowRight") {
+    if (previewVideo.src) {
+      event.preventDefault();
+      previewVideo.currentTime = Math.max(0, Math.min(previewVideo.duration || 0, previewVideo.currentTime + (key === "ArrowRight" ? 5 : -5)));
+    }
+    return;
+  }
+
+  if (key === "KeyB") {
     event.preventDefault();
-    togglePreviewPlayback();
+    exportSelectedClip();
+    return;
+  }
+
+  if (key === "KeyE") {
+    event.preventDefault();
+    $("#exportAllBtn").click();
+    return;
+  }
+
+  if (key === "KeyT") {
+    event.preventDefault();
+    applyTrim();
+    return;
+  }
+
+  if (key === "Digit1" || key === "Digit2" || key === "Digit3") {
+    const ratio = key === "Digit1" ? "portrait" : key === "Digit2" ? "wide" : "four5";
+    event.preventDefault();
+    setRatio(ratio);
+    showToast(`Layout: ${ratio}`);
   }
 });
 
