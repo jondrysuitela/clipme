@@ -2715,12 +2715,9 @@ function enqueueAndAwait(type, worker) {
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
-  const audioOnly = !!options.audioOnly;
-  const enriched = (!audioOnly && manifest.type === "youtube")
+  const enriched = manifest.type === "youtube"
     ? await ensureClipTranscript(projectDir, manifest, payload, children)
-    : (!audioOnly
-        ? await ensureClipTranscriptLocal(projectDir, manifest, payload, children)
-        : null);
+    : await ensureClipTranscriptLocal(projectDir, manifest, payload, children);
   if (enriched && (!payload.caption || /^(Edit caption|Caption otomatis)/i.test(payload.caption))) {
     payload.caption = enriched.caption;
   }
@@ -2739,8 +2736,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
 
   setProgress(58);
   const outputDir = options.outputDir || OUTPUT_DIR;
-  const ext = audioOnly ? "mp3" : "mp4";
-  const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.${ext}`;
+  const outputName = `clip-${String(payload.clipId || 1).padStart(2, "0")}-${Date.now()}.mp4`;
   const outputPath = path.join(outputDir, outputName);
   const isSectionSource = manifest.type === "youtube" && sourcePath.includes(`${path.sep}sections${path.sep}`);
   const start = isSectionSource ? 0 : Math.max(0, Number(payload.start || 0));
@@ -2749,27 +2745,6 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const end = isSectionSource ? originalEnd - originalStart : originalEnd;
   const cutDuration = end - start;
   payload.duration = cutDuration;
-
-  if (audioOnly) {
-    const audioFilter = buildAudioFilter({
-      removeSilence: !!payload.removeSilence,
-      denoise: !!payload.denoise,
-      enhance: !!payload.enhance
-    });
-    const args = ["-y"];
-    if (start > 0) args.push("-ss", String(start));
-    args.push("-i", sourcePath);
-    if (cutDuration) args.push("-t", String(cutDuration));
-    if (audioFilter) args.push("-af", audioFilter);
-    args.push("-vn", "-c:a", "libmp3lame", "-b:a", `${payload.audioBitrate || 128}k`, outputPath);
-    await run(FFMPEG, args, 300000, children);
-    setProgress(95);
-    return {
-      filename: outputName,
-      downloadUrl: `/outputs/${outputName}`,
-      audioOnly: true
-    };
-  }
 
   const filterParts = buildVideoFilter(payload);
   const audioFilter = buildAudioFilter({
@@ -3450,7 +3425,7 @@ async function handleExport(req, res) {
   const job = createJob("export", async (setProgress) => {
     const children = new Set();
     job.children = children;
-    return exportClip(payload, setProgress, children, { audioOnly: !!payload.audioOnly });
+    return exportClip(payload, setProgress, children);
   });
   sendJson(res, 202, { jobId: job.id, status: job.status, progress: job.progress });
 }

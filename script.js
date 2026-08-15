@@ -2417,41 +2417,6 @@ function addExportResult(item, title) {
   renderExports();
 }
 
-$("#exportMp3Btn").addEventListener("click", async () => {
-  if (!state.projectId) { showToast("Upload video dulu sebelum export."); return; }
-  if (!state.activeClip) { showToast("Tidak ada clip untuk di-export."); return; }
-  if (state.isExporting) return;
-
-  state.isExporting = true;
-  $("#exportMp3Btn").disabled = true;
-  $("#exportMp3Btn").textContent = "Exporting MP3...";
-
-  try {
-    const payload = {
-      projectId: state.projectId,
-      audioOnly: true,
-      ...exportClipPayloadFor(state.activeClip)
-    };
-    const response = await fetch("/api/export", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await response.json();
-    if (!response.ok && response.status !== 202) throw new Error(data.error || "Export MP3 gagal.");
-    if (!data.jobId) throw new Error("Server tidak mengembalikan job export.");
-    const result = await waitForJob(data.jobId);
-    addExportResult(result, `MP3 - Clip ${String(state.activeClip.id).padStart(2, "0")}`);
-    showToast(`MP3 selesai: ${result.filename}`);
-  } catch (err) {
-    showToast(err.message);
-  } finally {
-    state.isExporting = false;
-    $("#exportMp3Btn").disabled = false;
-    $("#exportMp3Btn").textContent = "Export MP3";
-  }
-});
-
 $("#exportCombinedBtn").addEventListener("click", async () => {
   const selectedIds = state.selectedClipIds;
   const targetClips = selectedIds.size > 0
