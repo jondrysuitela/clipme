@@ -151,7 +151,7 @@ Daftar perbaikan dari **Deep Forensic Audit** (read-only). Setiap item = 1 PR/co
 
 ### 3.10 Verifikasi kualitas export — `I-08`
 - Export video uji → periksa resolusi. Jika 360p karena player_client=android, evaluasi extractor fallback.
-- **Status:** [ ] Butuh uji manual export YouTube & cek resolusi output.
+- **Status:** [x] Resolusi sebelumnya 360p karena `YTDLP_EXTRACTOR_ARGS=youtube:player_client=android` (maks 360p). Diubah ke `youtube:player_client=android_vr,android` (fallback chain) — terverifikasi format 27–2160p. Format export dinaikkan `bv*[height<=720]` → `bv*[height<=1080]`. End-to-end export YouTube → MP4 **1080x1920** (commit `127f2e0`).
 
 ---
 
@@ -168,4 +168,4 @@ node --check server.js script.js electron/main.js clipme-caption-engine.js  -> O
 py_compile semua *.py di stt/ + stt-engine.py  (via .venv python) -> OK
 ```
 
-> Status: **SEMUA HIJAU & LENGKAP** (hasil 15 Agu 2026). Semua item 1.1–3.8 berstatus `[x]`. L-04 teratasi: bundle offline penuh dengan folder model datar. Tinggal build installer final via `npm run dist` bila perlu distribusi.
+> Status: **SEMUA HIJAU & LENGKAP** (hasil 15 Agu 2026). Semua item 1.1–3.10 berstatus `[x]`. L-04 teratasi: bundle offline penuh dengan folder model datar. Installer final `dist\Clipper Studio Setup 0.1.0.exe` (868.5 MB) terverifikasi silent-install.
