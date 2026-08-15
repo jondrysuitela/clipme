@@ -2061,16 +2061,22 @@ function generateAssStaticFilters(segments, opts) {
   return [`ass=filename=${escapedPath}`];
 }
 
-function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0 }) {
+function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0, filterComplex = "", extraInputs = [], mapSpecs = [] }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
   args.push("-i", input);
+  for (const extra of extraInputs) args.push("-i", extra);
   if (duration != null) args.push("-t", String(duration));
-  if (filterGraph) {
-    args.push("-vf", filterGraph);
-  }
-  if (audioFilter) {
-    args.push("-af", audioFilter);
+  if (filterComplex) {
+    args.push("-filter_complex", filterComplex);
+    for (const map of mapSpecs) args.push("-map", map);
+  } else {
+    if (filterGraph) {
+      args.push("-vf", filterGraph);
+    }
+    if (audioFilter) {
+      args.push("-af", audioFilter);
+    }
   }
   if (fps && Number(fps) > 0) {
     args.push("-r", String(fps));
@@ -2765,6 +2771,26 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   const watermark = buildWatermarkFilter(payload, filterParts.size);
   if (watermark) filter = [filter, watermark].join(",");
 
+  const bgMusicPath = payload.bgMusicPath ? path.resolve(payload.bgMusicPath) : "";
+  const bgMusicAllowed = bgMusicPath && bgMusicPath.startsWith(DATA_ROOT + path.sep) && fs.existsSync(bgMusicPath);
+  const bgVolume = Math.max(0, Math.min(1, Number(payload.bgMusicVolume) || 0.3));
+  const ducking = !!payload.ducking;
+
+  let filterComplex = "";
+  let extraInputs = [];
+  let mapSpecs = [];
+  if (bgMusicAllowed) {
+    const voiceChain = audioFilter ? `[0:a]${audioFilter}[voice]` : "[0:a]anull[voice]";
+    const bgChain = `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${bgVolume}[bg]`;
+    if (ducking) {
+      filterComplex = `[0:v]${filter}[v];${voiceChain};${bgChain};[bg][voice]sidechaincompress=threshold=0.02:ratio=8:attack=50:release=300[bgduck];[voice][bgduck]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`;
+    } else {
+      filterComplex = `[0:v]${filter}[v];${voiceChain};${bgChain};[voice][bg]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`;
+    }
+    extraInputs = [bgMusicPath];
+    mapSpecs = ["[v]", "[aout]"];
+  }
+
   await run(FFMPEG, buildFilterCommandArgs({
     input: sourcePath,
     start,
@@ -2775,7 +2801,10 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
     preset: sanitizePreset(payload.preset),
     crf: String(payload.crf || 23),
     audioBitrate: `${payload.audioBitrate || 128}k`,
-    fps: Number(payload.fps) || 0
+    fps: Number(payload.fps) || 0,
+    filterComplex,
+    extraInputs,
+    mapSpecs
   }), 300000, children);
 
   setProgress(95);
@@ -3633,6 +3662,65 @@ function handleOpenOutput(req, res) {
   sendJson(res, 200, { ok: true, folder: OUTPUT_DIR });
 }
 
+const BG_MUSIC_PATH = () => path.join(DATA_ROOT, "bgmusic.mp3");
+
+function handleBgMusicUpload(req, res) {
+  if (!/boundary=/i.test(req.headers["content-type"] || "")) {
+    sendJson(res, 400, { error: "Missing multipart boundary." });
+    return;
+  }
+  const id = crypto.randomUUID();
+  const rawPath = path.join(TMP_DIR, `bgmusic-${id}.raw`);
+  const ws = fs.createWriteStream(rawPath);
+  let total = 0;
+
+  (async () => {
+    try {
+      for await (const chunk of req) {
+        total += chunk.length;
+        if (total > 200 * 1024 * 1024) {
+          ws.destroy();
+          req.destroy();
+          throw new Error("File musik terlalu besar. Batas 200 MB.");
+        }
+        await writeStreamChunk(ws, chunk);
+      }
+      await closeWriteStream(ws);
+      const partDir = path.join(TMP_DIR, `bgmusic-parts-${id}`);
+      fs.mkdirSync(partDir, { recursive: true });
+      const parsed = await parseMultipartStreaming(rawPath, req.headers["content-type"], partDir);
+      const file = parsed.parts.music;
+      if (!file?.filename || !file.path || !file.size) {
+        fs.rmSync(partDir, { recursive: true, force: true });
+        fs.unlink(rawPath, () => {});
+        sendJson(res, 400, { error: "Upload musik tidak valid." });
+        return;
+      }
+      const ext = path.extname(file.filename).toLowerCase();
+      const safeExt = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"].includes(ext) ? ext : ".mp3";
+      const dest = path.join(DATA_ROOT, `bgmusic${safeExt}`);
+      try {
+        fs.renameSync(file.path, dest);
+      } catch {
+        fs.copyFileSync(file.path, dest);
+        fs.unlinkSync(file.path);
+      }
+      fs.rmSync(partDir, { recursive: true, force: true });
+      fs.unlink(rawPath, () => {});
+      for (const old of ["bgmusic.mp3", "bgmusic.wav", "bgmusic.m4a", "bgmusic.aac", "bgmusic.ogg", "bgmusic.flac", "bgmusic.opus"]) {
+        if (path.basename(dest) !== old) {
+          const oldPath = path.join(DATA_ROOT, old);
+          if (oldPath !== dest && fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch {} }
+        }
+      }
+      sendJson(res, 200, { ok: true, path: dest, name: file.filename });
+    } catch (err) {
+      fs.unlink(rawPath, () => {});
+      sendJson(res, 400, { error: err.message });
+    }
+  })();
+}
+
 function handleListQueue(req, res) {
   const list = [];
   try {
@@ -3724,6 +3812,9 @@ function handleExportBatch(req, res) {
               watermark: String(clipDef.watermark || ""),
               watermarkPosition: clipDef.watermarkPosition || "br",
               watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
+              bgMusicPath: clipDef.bgMusicPath || "",
+              bgMusicVolume: Number(clipDef.bgMusicVolume) || 0.3,
+              ducking: !!clipDef.ducking,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {
@@ -3954,6 +4045,7 @@ router
   .add("GET", "/api/exports", handleListExports)
   .add("DELETE", "/api/exports/:filename", handleDeleteExport)
   .add("POST", "/api/open-output", handleOpenOutput)
+  .add("POST", "/api/bgmusic", handleBgMusicUpload)
   .add("GET", "/api/queue", handleListQueue)
   .add("DELETE", "/api/jobs/:jobId", handleCancelJob)
   .add("HEAD", "/api/storage", (req, res) => {

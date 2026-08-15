@@ -46,6 +46,10 @@ const state = {
   watermark: "",
   watermarkPosition: "br",
   watermarkOpacity: 0.6,
+  bgMusicPath: "",
+  bgMusicName: "",
+  bgMusicVolume: 0.3,
+  ducking: false,
   sourceDuration: 0,
   exportRatios: ["portrait"]
 };
@@ -873,6 +877,9 @@ async function exportSelectedClip() {
       watermark: state.watermark,
       watermarkPosition: state.watermarkPosition,
       watermarkOpacity: state.watermarkOpacity,
+      bgMusicPath: state.bgMusicPath,
+      bgMusicVolume: state.bgMusicVolume,
+      ducking: state.ducking,
       ratio: currentRatio(),
       segments: exportSegments
     };
@@ -1744,6 +1751,32 @@ $("#audioBitrateSelect").addEventListener("change", (e) => { state.audioBitrate 
 $("#watermarkText").addEventListener("input", (e) => { state.watermark = e.target.value; });
 $("#watermarkPosition").addEventListener("change", (e) => { state.watermarkPosition = e.target.value; });
 $("#watermarkOpacity").addEventListener("input", (e) => { state.watermarkOpacity = Number(e.target.value) / 100; });
+$("#bgMusicVolume").addEventListener("input", (e) => { state.bgMusicVolume = Number(e.target.value) / 100; });
+$("#duckingToggle").addEventListener("change", (e) => { state.ducking = e.target.checked; });
+$("#bgMusicBtn").addEventListener("click", () => { $("#bgMusicFile").click(); });
+$("#bgMusicClear").addEventListener("click", () => {
+  state.bgMusicPath = "";
+  state.bgMusicName = "";
+  $("#bgMusicName").textContent = "Belum ada musik latar.";
+});
+$("#bgMusicFile").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("music", file);
+  try {
+    const r = await fetch("/api/bgmusic", { method: "POST", body: form });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Upload gagal");
+    state.bgMusicPath = j.path;
+    state.bgMusicName = j.name;
+    $("#bgMusicName").textContent = j.name;
+    showToast("Musik latar siap digunakan.");
+  } catch (err) {
+    showToast(err.message);
+  }
+  e.target.value = "";
+});
 
 $("#layoutSelect").addEventListener("change", (event) => {
   setRatio(event.target.value);
@@ -1925,6 +1958,9 @@ $("#exportAllBtn").addEventListener("click", async () => {
           watermark: state.watermark,
           watermarkPosition: state.watermarkPosition,
           watermarkOpacity: state.watermarkOpacity,
+          bgMusicPath: state.bgMusicPath,
+          bgMusicVolume: state.bgMusicVolume,
+          ducking: state.ducking,
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -2012,6 +2048,10 @@ function collectSettings() {
     watermark: state.watermark,
     watermarkPosition: state.watermarkPosition,
     watermarkOpacity: state.watermarkOpacity,
+    bgMusicPath: state.bgMusicPath,
+    bgMusicName: state.bgMusicName,
+    bgMusicVolume: state.bgMusicVolume,
+    ducking: state.ducking,
     exportRatios: state.exportRatios,
     captionStyle: style,
     captionSize: Number(captionSize.value) || 23,
@@ -2043,6 +2083,10 @@ function loadSettings() {
   if (typeof data.watermark === "string") state.watermark = data.watermark;
   if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
   if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
+  if (typeof data.bgMusicPath === "string") state.bgMusicPath = data.bgMusicPath;
+  if (typeof data.bgMusicName === "string") state.bgMusicName = data.bgMusicName;
+  if (data.bgMusicVolume != null) state.bgMusicVolume = Number(data.bgMusicVolume);
+  if (data.ducking != null) state.ducking = !!data.ducking;
   if (Array.isArray(data.exportRatios)) {
     const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
     if (valid.length) state.exportRatios = valid;
@@ -2059,6 +2103,9 @@ function loadSettings() {
   $("#watermarkText").value = state.watermark;
   $("#watermarkPosition").value = state.watermarkPosition;
   $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
+  $("#bgMusicVolume").value = String(Math.round(state.bgMusicVolume * 100));
+  $("#duckingToggle").checked = state.ducking;
+  if (state.bgMusicName) $("#bgMusicName").textContent = state.bgMusicName;
   $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
@@ -2084,6 +2131,8 @@ const settingsControls = [
   ["input", "#watermarkText"],
   ["change", "#watermarkPosition"],
   ["input", "#watermarkOpacity"],
+  ["input", "#bgMusicVolume"],
+  ["change", "#duckingToggle"],
   ["change", ".export-ratio-chk"],
   ["change", "#captionStyleSelect"],
   ["input", "#captionSize"],
@@ -2122,6 +2171,10 @@ function applyTemplateData(data) {
   if (typeof data.watermark === "string") state.watermark = data.watermark;
   if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
   if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
+  if (typeof data.bgMusicPath === "string") state.bgMusicPath = data.bgMusicPath;
+  if (typeof data.bgMusicName === "string") state.bgMusicName = data.bgMusicName;
+  if (data.bgMusicVolume != null) state.bgMusicVolume = Number(data.bgMusicVolume);
+  if (data.ducking != null) state.ducking = !!data.ducking;
   if (Array.isArray(data.exportRatios)) {
     const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
     if (valid.length) state.exportRatios = valid;
@@ -2138,6 +2191,9 @@ function applyTemplateData(data) {
   $("#watermarkText").value = state.watermark;
   $("#watermarkPosition").value = state.watermarkPosition;
   $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
+  $("#bgMusicVolume").value = String(Math.round(state.bgMusicVolume * 100));
+  $("#duckingToggle").checked = state.ducking;
+  if (state.bgMusicName) $("#bgMusicName").textContent = state.bgMusicName;
   $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
