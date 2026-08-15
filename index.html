@@ -212,6 +212,14 @@
             </div>
           </div>
           <div class="tab-panel" id="settingsTab">
+            <div class="field-label">Template preset</div>
+            <select id="templateSelect" class="inspector-input">
+              <option value="__default">Pilih template...</option>
+            </select>
+            <div class="template-actions">
+              <button class="ghost-button compact" id="saveTemplateBtn" type="button">Simpan template</button>
+              <button class="ghost-button compact" id="deleteTemplateBtn" type="button">Hapus</button>
+            </div>
             <div class="field-label">Caption size</div>
             <input type="range" id="captionSize" min="14" max="40" value="23" style="width:100%">
             <div class="field-label">Caption position</div>

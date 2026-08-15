@@ -3621,6 +3621,18 @@ function handleDeleteExport(req, res, params) {
   sendJson(res, 200, { ok: true });
 }
 
+function handleOpenOutput(req, res) {
+  if (!fs.existsSync(OUTPUT_DIR)) { sendJson(res, 404, { error: "Output folder belum ada" }); return; }
+  const open = process.platform === "win32"
+    ? { cmd: "explorer.exe", args: [OUTPUT_DIR] }
+    : process.platform === "darwin"
+      ? { cmd: "open", args: [OUTPUT_DIR] }
+      : { cmd: "xdg-open", args: [OUTPUT_DIR] };
+  const child = spawn(open.cmd, open.args, { detached: true, stdio: "ignore" });
+  child.unref();
+  sendJson(res, 200, { ok: true, folder: OUTPUT_DIR });
+}
+
 function handleListQueue(req, res) {
   const list = [];
   try {
@@ -3941,6 +3953,7 @@ router
   .add("DELETE", "/api/projects/:projectId", handleDeleteProject)
   .add("GET", "/api/exports", handleListExports)
   .add("DELETE", "/api/exports/:filename", handleDeleteExport)
+  .add("POST", "/api/open-output", handleOpenOutput)
   .add("GET", "/api/queue", handleListQueue)
   .add("DELETE", "/api/jobs/:jobId", handleCancelJob)
   .add("HEAD", "/api/storage", (req, res) => {

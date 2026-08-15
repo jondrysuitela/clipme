@@ -513,6 +513,21 @@ function renderExports() {
     row.appendChild(download);
     exportsList.appendChild(row);
   });
+
+  const openBtn = document.createElement("button");
+  openBtn.className = "secondary-button compact";
+  openBtn.textContent = "Buka folder output";
+  openBtn.addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/open-output", { method: "POST" });
+      const j = await r.json();
+      if (r.ok) showToast("Folder output dibuka di File Explorer.");
+      else showToast(j.error || "Gagal membuka folder.");
+    } catch {
+      showToast("Gagal membuka folder output.");
+    }
+  });
+  exportsList.appendChild(openBtn);
 }
 
 function showView(view) {
@@ -1984,9 +1999,9 @@ $("#clearExports").addEventListener("click", async () => {
 
 const SETTINGS_KEY = "clipperStudio.settings";
 
-function saveSettings() {
+function collectSettings() {
   const style = $("#captionStyleSelect") ? $("#captionStyleSelect").value : "bold";
-  const data = {
+  return {
     removeSilence: state.removeSilence,
     denoise: state.denoise,
     enhance: state.enhance,
@@ -2002,8 +2017,11 @@ function saveSettings() {
     captionSize: Number(captionSize.value) || 23,
     captionPosition: state.captionPosition || 0.76
   };
+}
+
+function saveSettings() {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(collectSettings()));
   } catch {}
 }
 
@@ -2076,6 +2094,103 @@ settingsControls.forEach(([eventName, sel]) => {
 });
 
 loadSettings();
+
+const TEMPLATES_KEY = "clipperStudio.templates";
+
+function loadTemplates() {
+  try {
+    return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveTemplates(templates) {
+  try {
+    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+  } catch {}
+}
+
+function applyTemplateData(data) {
+  state.removeSilence = !!data.removeSilence;
+  state.denoise = !!data.denoise;
+  state.enhance = !!data.enhance;
+  state.autoZoom = !!data.autoZoom;
+  if (Number(data.fps)) state.fps = Number(data.fps);
+  if (Number(data.crf)) state.crf = Number(data.crf);
+  if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
+  if (typeof data.watermark === "string") state.watermark = data.watermark;
+  if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
+  if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
+  if (Array.isArray(data.exportRatios)) {
+    const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
+    if (valid.length) state.exportRatios = valid;
+  }
+  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+
+  $("#enhanceRemoveSilence").checked = state.removeSilence;
+  $("#enhanceDenoise").checked = state.denoise;
+  $("#enhanceBoost").checked = state.enhance;
+  $("#autoZoomToggle").checked = state.autoZoom;
+  $("#fpsSelect").value = String(state.fps);
+  $("#qualitySelect").value = String(state.crf);
+  $("#audioBitrateSelect").value = String(state.audioBitrate);
+  $("#watermarkText").value = state.watermark;
+  $("#watermarkPosition").value = state.watermarkPosition;
+  $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
+  $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
+  if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
+  if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
+  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
+}
+
+function renderTemplateOptions() {
+  const select = $("#templateSelect");
+  select.innerHTML = '<option value="__default">Pilih template...</option>';
+  Object.entries(loadTemplates()).forEach(([name]) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+}
+
+$("#saveTemplateBtn").addEventListener("click", () => {
+  const name = window.prompt("Nama template:", "My template");
+  if (!name || !name.trim()) return;
+  const trimmed = name.trim();
+  const templates = loadTemplates();
+  templates[trimmed] = collectSettings();
+  saveTemplates(templates);
+  renderTemplateOptions();
+  $("#templateSelect").value = trimmed;
+  showToast(`Template "${trimmed}" disimpan.`);
+});
+
+$("#deleteTemplateBtn").addEventListener("click", () => {
+  const name = $("#templateSelect").value;
+  if (!name || name === "__default") return;
+  const templates = loadTemplates();
+  delete templates[name];
+  saveTemplates(templates);
+  renderTemplateOptions();
+  $("#templateSelect").value = "__default";
+  showToast(`Template "${name}" dihapus.`);
+});
+
+$("#templateSelect").addEventListener("change", (e) => {
+  const name = e.target.value;
+  if (!name || name === "__default") return;
+  const templates = loadTemplates();
+  const data = templates[name];
+  if (data) {
+    applyTemplateData(data);
+    saveSettings();
+    showToast(`Template "${name}" diterapkan.`);
+  }
+});
+
+renderTemplateOptions();
 renderClips();
 selectClip(clips[0]);
 loadProjects();

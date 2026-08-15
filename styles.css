@@ -1418,3 +1418,15 @@ input[type="range"] {
 .trim-dash {
   color: var(--muted);
 }
+
+.template-actions {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+.template-actions .ghost-button {
+  flex: 1;
+  min-height: 34px;
+  font-size: 12px;
+}
+
