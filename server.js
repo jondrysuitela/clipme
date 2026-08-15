@@ -1718,6 +1718,24 @@ function buildVideoFilter(payload) {
   return { scale: pre[0], crop: pre[pre.length - 1], pre, size, ratio: requested };
 }
 
+// Overlay a text watermark in a corner of the output frame.
+// - text: watermark string; empty disables the overlay
+// - position: "tl" | "tr" | "bl" | "br" (default br)
+// - opacity: 0..1 alpha (default 0.6)
+// - fontSize: px on the widest axis (default 28)
+function buildWatermarkFilter(payload, size) {
+  const text = String(payload.watermark || "").trim();
+  if (!text) return "";
+  const position = ["tl", "tr", "bl", "br"].includes(payload.watermarkPosition) ? payload.watermarkPosition : "br";
+  const opacity = Math.max(0, Math.min(1, Number(payload.watermarkOpacity) || 0.6));
+  const fontSize = Math.max(12, Math.round(Number(payload.watermarkFontSize) || Math.round(size.width * 0.026)));
+  const pad = Math.round(size.width * 0.03);
+  const alpha = Math.round(opacity * 255).toString(16).padStart(2, "0");
+  const x = position.includes("l") ? `${pad}` : `w-tw-${pad}`;
+  const y = position.includes("t") ? `${pad}` : `h-th-${pad}`;
+  return `drawtext=text='${ffmpegText(text)}':fontcolor=white@${Number(opacity)}:fontsize=${fontSize}:x=${x}:y=${y}:box=0:boxcolor=black@0.25:boxborderw=6`;
+}
+
 // Build an ffmpeg audio filter chain from payload enhancement flags.
 // - removeSilence: cut leading/trailing/short silences (viral-clip editing)
 // - denoise:       FFT denoise (afftdn) to clean up background hiss
@@ -2730,19 +2748,22 @@ async function exportClip(payload, setProgress = () => {}, children = null) {
   }
 
   const preFilter = filterParts.pre.join(",");
-  const filter = payload.captionStyle === "off"
-    ? preFilter
-    : timedFilters.length
-      ? (() => {
-          const chain = buildFilterChain(filterParts, timedFilters);
-          return chain.length > MAX_FILTER_CHARS
-            ? [preFilter, ...generateAssStaticFilters(segments, genOpts)].join(",")
-            : chain;
-        })()
-      : [
-          preFilter,
-          `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
-        ].join(",");
+  let filter;
+  if (payload.captionStyle === "off") {
+    filter = preFilter;
+  } else if (timedFilters.length) {
+    const chain = buildFilterChain(filterParts, timedFilters);
+    filter = chain.length > MAX_FILTER_CHARS
+      ? [preFilter, ...generateAssStaticFilters(segments, genOpts)].join(",")
+      : chain;
+  } else {
+    filter = [
+      preFilter,
+      `drawtext=text='${ffmpegText(payload.caption || "Caption")}':fontcolor=white:fontsize=${Math.round(filterParts.size.width * CAPTION_FONT_RATIO * (Number(payload.captionSize) / CAPTION_FONT_BASE || 1))}:x=(w-text_w)/2:y=${Math.round(filterParts.size.height * 0.76)}:box=0:line_spacing=10`
+    ].join(",");
+  }
+  const watermark = buildWatermarkFilter(payload, filterParts.size);
+  if (watermark) filter = [filter, watermark].join(",");
 
   await run(FFMPEG, buildFilterCommandArgs({
     input: sourcePath,
@@ -3688,6 +3709,9 @@ function handleExportBatch(req, res) {
               fps: Number(clipDef.fps) || 0,
               crf: Number(clipDef.crf) || 23,
               audioBitrate: Number(clipDef.audioBitrate) || 128,
+              watermark: String(clipDef.watermark || ""),
+              watermarkPosition: clipDef.watermarkPosition || "br",
+              watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {

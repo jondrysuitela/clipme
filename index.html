@@ -284,6 +284,15 @@
               <option value="128" selected>128 kbps</option>
               <option value="192">192 kbps</option>
             </select>
+            <div class="field-label">Watermark</div>
+            <input class="inspector-input" id="watermarkText" type="text" placeholder="Nama channel / brand (kosongkan = tanpa watermark)">
+            <select id="watermarkPosition" class="inspector-input">
+              <option value="br">Pojok kanan bawah</option>
+              <option value="bl">Pojok kiri bawah</option>
+              <option value="tr">Pojok kanan atas</option>
+              <option value="tl">Pojok kiri atas</option>
+            </select>
+            <label class="audio-opt">Opacity <input type="range" id="watermarkOpacity" min="10" max="100" value="60" style="flex:1"></label>
           </div>
         </div>
       </div>

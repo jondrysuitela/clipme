@@ -43,6 +43,9 @@ const state = {
   fps: 25,
   crf: 23,
   audioBitrate: 128,
+  watermark: "",
+  watermarkPosition: "br",
+  watermarkOpacity: 0.6,
   sourceDuration: 0,
   exportRatios: ["portrait"]
 };
@@ -845,6 +848,9 @@ async function exportSelectedClip() {
       fps: Number(state.fps) || 0,
       crf: Number(state.crf) || 23,
       audioBitrate: Number(state.audioBitrate) || 128,
+      watermark: state.watermark,
+      watermarkPosition: state.watermarkPosition,
+      watermarkOpacity: state.watermarkOpacity,
       ratio: currentRatio(),
       segments: exportSegments
     };
@@ -1662,6 +1668,9 @@ $("#autoZoomToggle").addEventListener("change", (e) => { state.autoZoom = e.targ
 $("#fpsSelect").addEventListener("change", (e) => { state.fps = Number(e.target.value) || 25; });
 $("#qualitySelect").addEventListener("change", (e) => { state.crf = Number(e.target.value) || 23; });
 $("#audioBitrateSelect").addEventListener("change", (e) => { state.audioBitrate = Number(e.target.value) || 128; });
+$("#watermarkText").addEventListener("input", (e) => { state.watermark = e.target.value; });
+$("#watermarkPosition").addEventListener("change", (e) => { state.watermarkPosition = e.target.value; });
+$("#watermarkOpacity").addEventListener("input", (e) => { state.watermarkOpacity = Number(e.target.value) / 100; });
 
 $("#layoutSelect").addEventListener("change", (event) => {
   setRatio(event.target.value);
@@ -1840,6 +1849,9 @@ $("#exportAllBtn").addEventListener("click", async () => {
           fps: Number(state.fps) || 0,
           crf: Number(state.crf) || 23,
           audioBitrate: Number(state.audioBitrate) || 128,
+          watermark: state.watermark,
+          watermarkPosition: state.watermarkPosition,
+          watermarkOpacity: state.watermarkOpacity,
           segments: captionSegmentsForClip(clip)
         }))
       })
