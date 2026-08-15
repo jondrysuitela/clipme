@@ -2873,18 +2873,66 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
       ? "bv*[height<=360]+ba/b[height<=360]/best[height<=360]/best"
       : "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best";
 
-    await run(YTDLP, [
+    const ytdlpBase = [
       "--no-playlist",
       "-f", format,
       "--merge-output-format", "mp4",
-      "--download-sections", section,
       "--extractor-args", YTDLP_EXTRACTOR_ARGS,
       "--retries", "10",
-      "--fragment-retries", "10",
-      ...(options.preview ? [] : ["--force-keyframes-at-cuts"]),
-      "-o", rawTemplate,
-      manifest.url
-    ], 300000, children);
+      "--fragment-retries", "10"
+    ];
+
+    let sectionOk = false;
+    try {
+      await run(YTDLP, [
+        ...ytdlpBase,
+        "--download-sections", section,
+        ...(options.preview ? [] : ["--force-keyframes-at-cuts"]),
+        "-o", rawTemplate,
+        manifest.url
+      ], 300000, children);
+      sectionOk = true;
+    } catch (err) {
+      // --download-sections uses ffmpeg for range requests; under YouTube's
+      // SABR experiment those URLs return 403 while a full download still works.
+      if (!/403|Forbidden/.test(String(err && err.message || err))) throw err;
+      const rawFull = path.join(sectionDir, `${suffix}-full-${clipId}.%(ext)s`);
+      await run(YTDLP, [
+        ...ytdlpBase,
+        "-o", rawFull,
+        manifest.url
+      ], 300000, children);
+      const fullFiles = fs.readdirSync(sectionDir)
+        .map((name) => path.join(sectionDir, name))
+        .filter((filePath) => [".mp4", ".webm", ".mkv"].includes(path.extname(filePath).toLowerCase()))
+        .filter((filePath) => path.basename(filePath).startsWith(`${suffix}-full-${clipId}`));
+      if (!fullFiles[0]) throw new Error("Gagal mengambil video dari YouTube (full download).");
+      const cutPath = path.join(sectionDir, `${suffix}-cut-${clipId}.mp4`);
+      await run(FFMPEG, [
+        "-y",
+        "-ss", String(start),
+        "-i", fullFiles[0],
+        "-t", String(Math.max(0, end - start)),
+        "-c", "copy",
+        cutPath
+      ], 300000, children);
+      for (const rawFile of fullFiles) { try { fs.unlinkSync(rawFile); } catch {} }
+      // Transcode the cut copy so the downstream filter stage has a consistent,
+      // seekable MP4 (same treatment as the successful section path below).
+      await run(FFMPEG, [
+        "-y",
+        "-i", cutPath,
+        "-c:v", "libx264",
+        "-preset", options.preview ? "ultrafast" : "veryfast",
+        "-crf", options.preview ? "35" : "23",
+        "-c:a", "aac",
+        "-b:a", options.preview ? "96k" : "128k",
+        "-movflags", "+faststart",
+        stablePath
+      ], 300000, children);
+      try { fs.unlinkSync(cutPath); } catch {}
+      return stablePath;
+    }
 
     const files = fs.readdirSync(sectionDir)
       .map((name) => path.join(sectionDir, name))
