@@ -3679,21 +3679,61 @@ async function handleAutoCaptions(req, res) {
   }
 
   const offset = clip.start;
-  const timed = (result.segments || []).map((s, idx) => {
-    const words = wordLevel.filter((w) => w.start >= Number(s.start || 0) - 0.02 && w.end <= Number(s.end || 0) + 0.02);
-    const text = words.length ? words.map((w) => w.text).join(" ") : String(s.text || "").trim();
-    const start = Math.max(0, Number(s.start || 0) - offset);
-    const end = Math.max(0, Number(s.end || 0) - offset);
-    const focusWords = (s.emphasis_words || []).map((w) => w.toLowerCase());
+  const timed = [];
+  let cursor = 0;
+  const helpersIsFiller = (word) => {
+    const hesitation = ["um", "uh", "hmm", "eh", "eee", "ehm", "anu"];
+    const w = String(word || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    return hesitation.includes(w);
+  };
+  const takeWords = (want, words) => {
+    if (!words.length) {
+      const picked = [];
+      let idx = Math.max(cursor, 0);
+      while (picked.length < want && idx < wordLevel.length) {
+        if (!helpersIsFiller(wordLevel[idx].text)) picked.push(wordLevel[idx]);
+        idx += 1;
+      }
+      cursor = idx;
+      return picked;
+    }
+    const first = words[0];
+    const firstIndex = wordLevel.indexOf(first);
+    const last = words[words.length - 1];
+    const lastIndex = wordLevel.indexOf(last);
+    if (firstIndex >= 0 && firstIndex < cursor) {
+      const picked = [];
+      let idx = Math.max(cursor, 0);
+      while (picked.length < want && idx < wordLevel.length) {
+        if (!helpersIsFiller(wordLevel[idx].text)) picked.push(wordLevel[idx]);
+        idx += 1;
+      }
+      cursor = idx;
+      return picked;
+    }
+    if (lastIndex >= 0) cursor = lastIndex + 1;
+    return words;
+  };
+  for (const s of (result.segments || [])) {
+    const fromAbs = Number(s.start) || 0;
+    const toAbs = Math.max(fromAbs + 0.1, Number(s.end) || (fromAbs + 1));
+    const want = Math.max(1, String(s.text || "").trim().split(/\s+/).filter(Boolean).length);
+    let words = wordLevel.filter((w) => w.start < toAbs && w.end > fromAbs);
+    words = takeWords(want, words);
+    if (!words.length) continue;
+    const text = words.map((w) => w.text).join(" ");
+    const start = Math.max(0, words[0].start - offset);
+    const end = Math.max(0, words[words.length - 1].end - offset);
+    const focusWords = (s.emphasis_words || []).map((w) => String(w).toLowerCase());
     const karaoke = words.map((w) => ({
       text: w.text,
       start: Math.max(0, w.start - offset),
       end: Math.max(0, w.end - offset),
       focus: focusWords.includes(w.text.toLowerCase())
     }));
-    return {
-      id: idx + 1,
-      speaker_id: s.speaker_id || words[0]?.speaker_id || "speaker_1",
+    timed.push({
+      id: timed.length + 1,
+      speaker_id: s.speaker_id || words[0].speaker_id || "speaker_1",
       start,
       end,
       text: text || " ",
@@ -3701,8 +3741,8 @@ async function handleAutoCaptions(req, res) {
       emphasis_words: s.emphasis_words || [],
       emotion: s.emotion || "neutral",
       karaoke
-    };
-  });
+    });
+  }
 
   const caption = instance.deriveCaption(timed.map((s) => ({ text: s.text })));
   const hook = instance.deriveHook(timed.map((s) => ({ text: s.text })));
