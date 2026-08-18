@@ -781,7 +781,7 @@ async function analyzeSpeakerForClip() {
   btn.disabled = true;
   const oldLabel = btn.textContent;
   btn.textContent = "Analyzing…";
-  if (meta) meta.textContent = "Analyzing speaker + face (energy + spectral — heavy Python call)…";
+  if (meta) meta.innerHTML = "Analyzing speaker + face...<br><i>(bisa memakan waktu tergantung durasi video & GPU)</i>";
   try {
     const res = await fetch("/api/localai/analyze", {
       method: "POST",
@@ -798,7 +798,7 @@ async function analyzeSpeakerForClip() {
         faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
         sourceW: previewVideo.videoWidth || 1920,
         sourceH: previewVideo.videoHeight || 1080,
-        targetAspect: currentRatio() || (9 / 16)
+        targetAspect: currentRatio() === "portrait" ? (9/16) : currentRatio() === "wide" ? (16/9) : currentRatio() === "square" ? 1 : (4/5)
       })
     });
     const data = await res.json();
@@ -809,11 +809,21 @@ async function analyzeSpeakerForClip() {
     const totalDur = (data.speakerTimeline && data.speakerTimeline.total_duration_ms) || 0;
     const faceCount = (data.faceTimeline && !data.faceTimeline.skipped) ? (data.faceTimeline.frames || []).length : 0;
     const backendSrc = (data.summary && data.summary.backend && data.summary.backend.speaker) || "energy";
-    if (meta) {
-      meta.textContent = `${segCount} speaker segments (${(totalDur / 1000).toFixed(1)}s via ${backendSrc}). ` +
-        `${(data.associations || []).length} crops${faceCount ? `, ${faceCount} face frames.` : ""}`;
+    
+    let dbgHtml = `<b>Speaker analysis:</b> ${segCount} segments (${(totalDur / 1000).toFixed(1)}s via ${backendSrc}).<br>`;
+    dbgHtml += `<b>Face frames:</b> ${faceCount}<br>`;
+    
+    if (data.associations && data.associations.length > 0) {
+      dbgHtml += `<br><b>Speaker ↔ Face Association:</b><br>`;
+      data.associations.forEach((a, i) => {
+        const s = (a.start_ms / 1000).toFixed(1);
+        const e = (a.end_ms / 1000).toFixed(1);
+        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id} → Face {x:${a.face.x}, y:${a.face.y}, conf:${a.face.confidence.toFixed(2)}}</div>`;
+      });
     }
-    showToast(`Speaker analysis: ${segCount} segments${faceCount ? ", facetrack frames" : ""}.`);
+
+    if (meta) meta.innerHTML = dbgHtml;
+    showToast(`Analisis selesai: ${segCount} segmen, ${faceCount} wajah.`);
   } catch (e) {
     if (meta) meta.textContent = `Error: ${e.message || "Analyze gagal"}`;
     showToast(e.message || "Analyze gagal");

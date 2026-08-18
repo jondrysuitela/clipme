@@ -325,18 +325,46 @@ async function analyzeFace(opts) {
 // closest to mid-screen of the active frame.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Debounce rapid speaker changes (Hysteresis)
+function smoothSpeakerTimeline(segments, minDurationMs = 800) {
+  if (!segments || segments.length === 0) return [];
+  const smoothed = [];
+  let current = { ...segments[0] };
+
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    const dur = seg.end_ms - seg.start_ms;
+    const gap = seg.start_ms - current.end_ms;
+
+    if (dur < minDurationMs || gap < 0 || seg.speaker_id === current.speaker_id) {
+      // Merge if too short, overlapping, or same speaker
+      current.end_ms = Math.max(current.end_ms, seg.end_ms);
+      current.confidence = (current.confidence + seg.confidence) / 2;
+    } else {
+      smoothed.push(current);
+      current = { ...seg };
+    }
+  }
+  smoothed.push(current);
+  return smoothed;
+}
+
 function associateSpeakerWithFace(speakerTimeline, faceTimeline, options = {}) {
   const sourceWidth = options.sourceWidth || 1920;
   const sourceHeight = options.sourceHeight || 1080;
   if (!faceTimeline || faceTimeline.skipped || !Array.isArray(faceTimeline.frames) || faceTimeline.frames.length === 0) {
-    return null; // no face data; cropping centered is the fallback
+    return []; // fallback if no face
   }
 
-  // Build a coarse timeline: for each speaker segment, what's the center of the active face?
+  const rawSegments = speakerTimeline.segments || [];
+  const smoothedSegments = smoothSpeakerTimeline(rawSegments, 800); // 0.8s hysteresis
+
   const associations = [];
-  for (const seg of speakerTimeline.segments || []) {
+  for (const seg of smoothedSegments) {
     const candidates = faceTimeline.frames.filter(f => f.t_ms >= seg.start_ms && f.t_ms <= seg.end_ms);
     if (candidates.length === 0) continue;
+    
+    // Cari frame dengan wajah paling dominan di segment ini
     const active = candidates.find(f => Array.isArray(f.faces) && f.faces.length === 1);
     let face;
     let confidence = 0.3;
@@ -344,7 +372,6 @@ function associateSpeakerWithFace(speakerTimeline, faceTimeline, options = {}) {
       face = active.faces[0];
       confidence = Math.max(0.4, active.faces[0].confidence || 0.6);
     } else {
-      // pick the largest face (heuristic: speaker occupies most frame area)
       const largest = candidates
         .flatMap(f => (f.faces || []).map(fc => ({ fc, t_ms: f.t_ms })))
         .sort((a, b) => (b.fc.w * b.fc.h) - (a.fc.w * a.fc.h))[0];
@@ -353,22 +380,34 @@ function associateSpeakerWithFace(speakerTimeline, faceTimeline, options = {}) {
       confidence = 0.3;
     }
 
+    // SMART FRAMING
+    const targetAspect = options.targetAspect || (9 / 16);
+    
+    // Fixed Crop dimensions based on source height to avoid FFmpeg crop width/height evaluation issues
+    let cropH = sourceHeight;
+    let cropW = Math.round(cropH * targetAspect);
+    if (cropW > sourceWidth) {
+      cropW = sourceWidth;
+      cropH = Math.round(cropW / targetAspect);
+    }
+
     const cx = face.x + face.w / 2;
     const cy = face.y + face.h / 2;
-    // Compute safe crop centered on face, respecting target aspect ratio
-    const aspect = options.targetAspect || (9 / 16);
-    const targetW = sourceWidth;
-    const targetH = Math.round(targetW / aspect);
-    const cropH = Math.min(targetH, Math.round(targetW * (face.h + face.h * 0.6) / sourceHeight));
-    const cropW = Math.min(targetW, Math.round(cropH * sourceWidth / sourceHeight));
-    const cropX = Math.max(0, Math.min(sourceWidth - cropW, Math.round(cx - cropW / 2)));
-    const cropY = Math.max(0, Math.min(sourceHeight - cropH, Math.round(cy - cropH / 2)));
+    
+    // Headroom: Wajah di sepertiga atas (33%), bukan di tengah (50%)
+    const cropX_ideal = cx - (cropW / 2);
+    const cropY_ideal = cy - (cropH * 0.33);
+
+    // Clamp to boundaries
+    const cropX = Math.max(0, Math.min(sourceWidth - cropW, cropX_ideal));
+    const cropY = Math.max(0, Math.min(sourceHeight - cropH, cropY_ideal));
+
     associations.push({
       start_ms: seg.start_ms,
       end_ms: seg.end_ms,
       speaker_id: seg.speaker_id,
-      face: { x: face.x, y: face.y, w: face.w, h: face.h, confidence: face.confidence || 0.6 },
-      crop: { x: cropX, y: cropY, w: cropW, h: cropH, cx, cy },
+      face: { x: face.x, y: face.y, w: face.w, h: face.h, confidence },
+      crop: { x: Math.round(cropX), y: Math.round(cropY), w: cropW, h: cropH, cx, cy },
       confidence
     });
   }
@@ -386,23 +425,30 @@ function associateSpeakerWithFace(speakerTimeline, faceTimeline, options = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Simpler & robust: encode the source per crop slice, then concat.
-function buildSpeakerCutFilter(associations, srcW, srcH, outW, outH) {
+// Build FFmpeg dynamic crop filter using nested if(between(t,...), X, Y)
+function buildSpeakerCutFilter(associations, srcW, srcH) {
   if (!associations || associations.length === 0) return null;
-  // Compose a single dynamic filter using non-overlapping time expressions.
-  // For non-overlapping associations this is a clean ffmpeg bg job.
-  const layers = associations.map((a, i) => {
-    const startSec = a.start_ms / 1000;
-    const endSec = a.end_ms / 1000;
-    const enable = `between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`;
-    const w = a.crop.w, hgt = a.crop.h, x = a.crop.x, y = a.crop.y;
-    return `crop=w=${w}:h=${hgt}:x=${x}:y=${y}:enable='${enable}'`;
-  });
-  layers.unshift(`scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black`);
-  return layers.join(",");
+  
+  // Karena FFmpeg crop w dan h dievaluasi sekali di awal, kita asumsikan 
+  // semua cropW dan cropH sama (diambil dari frame height penuh).
+  const w = associations[0].crop.w;
+  const h = associations[0].crop.h;
+
+  let xExpr = `(in_w-${w})/2`; // default center
+  let yExpr = `(in_h-${h})/2`;
+
+  // Build nested ifs backwards
+  for (let i = associations.length - 1; i >= 0; i--) {
+    const a = associations[i];
+    const s = (a.start_ms / 1000).toFixed(3);
+    const e = (a.end_ms / 1000).toFixed(3);
+    xExpr = `if(between(t,${s},${e}),${a.crop.x},${xExpr})`;
+    yExpr = `if(between(t,${s},${e}),${a.crop.y},${yExpr})`;
+  }
+
+  return `crop=${w}:${h}:'${xExpr}':'${yExpr}'`;
 }
 
-// For overlapping segments, the caller should produce one trimmed clip per
-// association and concat them via ffmpeg's concat demuxer.
 function buildConcatPlan(associations, srcW, srcH, outW, outH) {
   if (!associations || associations.length === 0) return [];
   return associations.map(a => ({
