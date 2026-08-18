@@ -168,4 +168,53 @@ node --check server.js script.js electron/main.js clipme-caption-engine.js  -> O
 py_compile semua *.py di stt/ + stt-engine.py  (via .venv python) -> OK
 ```
 
-> Status: **SEMUA HIJAU & LENGKAP** (hasil 15 Agu 2026). Semua item 1.1–3.10 berstatus `[x]`. L-04 teratasi: bundle offline penuh dengan folder model datar. Installer final `dist\Clipper Studio Setup 0.1.0.exe` (868.5 MB) terverifikasi silent-install.
+> Status: **SEMUA HIJAU & LENGKAP** (18 Agu 2026). Semua item 1.1–3.10 + 4.1–4.8 berstatus `[x]`. L-04 teratasi: bundle offline penuh dengan folder model datar. GPU acceleration: auto-detect NVIDIA GPU + CUDA + NVENC + fallback CPU.
+
+---
+
+## PHASE 4 — GPU/HARDWARE ACCELERATION
+
+### 4.1 Auto hardware detection — `G-01`
+- **Lokasi:** `clipme-hardware.js` (baru)
+- **Fitur:** Deteksi CPU (model + cores), GPU NVIDIA (via nvidia-smi), CUDA (via Python ctranslate2), NVENC (via ffmpeg -encoders). Cache 60 detik.
+- **Verifikasi:** `/api/system` mengembalikan `hardware.cpu`, `hardware.gpu`, `hardware.cuda`, `hardware.nvenc`.
+- **Status:** [x]
+
+### 4.2 Runtime selector — `G-02`
+- **Lokasi:** `clipme-hardware.js` (`resolveRuntime()`)
+- **Fitur:** Pilih device STT (cuda/cpu/auto) dan encoder video (h264_nvenc/libx264) berdasarkan hasil deteksi + env `CLIPFORCE_ACCEL` (auto/cpu/gpu).
+- **Status:** [x]
+
+### 4.3 STT device routing — `G-03`
+- **Lokasi:** `server.js` (`transcribeAudioWithLocalWhisper`, `handleSttTranscribe`)
+- **Perbaikan:** Ganti hardcode `--device cpu` jadi `resolveSttDevice()` (cuda saat GPU+CUDA tersedia, auto/CPU fallback). Python `stt/engine.py` & `stt/model.py` sudah support GPU auto-detection via `device: "auto"`.
+- **Verifikasi:** Saat GPU+CUDA ada → `--device cuda --compute-type float16`; Saat GPU saja → `--device auto` (Python auto-detect & fallback).
+- **Status:** [x]
+
+### 4.4 NVENC encoder — `G-04`
+- **Lokasi:** `server.js` (`buildFilterCommandArgs`, `exportClip`)
+- **Perbaikan:** Saat NVENC terdeteksi → `-c:v h264_nvenc -preset p4 -cq 23`; fallback `libx264` saat tidak ada.
+- **Verifikasi:** Export video dengan GPU → hasil encode pakai NVENC (lebih cepat, lebih rendah CPU).
+- **Status:** [x]
+
+### 4.5 Electron GPU rendering — `G-05`
+- **Lokasi:** `electron/main.js`
+- **Perbaikan:** Tambah `ignore-gpu-blocklist`, `enable-gpu-rasterization`, `VaapiVideoDecoder` saat `CLIPFORCE_ACCEL !== "cpu"`.
+- **Status:** [x]
+
+### 4.6 UI Local Engine panel — `G-06`
+- **Lokasi:** `index.html`, `script.js`, `styles.css`
+- **Perbaikan:** Ganti "CPU-ONLY" jadi panel `Runtime` (AUTO/CPU/GPU), `CPU` (model + cores), `GPU` (nama + VRAM / Not detected), `Accel` (STT/ENC status).
+- **Verifikasi:** Sidebar menampilkan hardware real-time, update tiap 15 detik.
+- **Status:** [x]
+
+### 4.7 Python check-cuda — `G-07`
+- **Lokasi:** `stt-engine.py` (subcommand `check-cuda`)
+- **Fitur:** Cek CUDA dari sisi Python via `ctranslate2.get_cuda_device_count()`. Output JSON `{available, device_count, devices, capability}`.
+- **Verifikasi:** `python stt-engine.py check-cuda --json` → valid JSON.
+- **Status:** [x]
+
+### 4.8 package.json bundling — `G-08`
+- **Lokasi:** `package.json`
+- **Perbaikan:** Tambah `clipme-hardware.js` ke `files` array.
+- **Status:** [x]

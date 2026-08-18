@@ -32,6 +32,7 @@
       "clipme-hook-engine.js",
       "clipme-caption-engine.js",
       "clipme-caption-prompt.js",
+      "clipme-hardware.js",
       "build/icon.png",
       "transcribe_faster_whisper.py",
       "stt-engine.py",

@@ -58,6 +58,52 @@ http://localhost:4173
 
 Gunakan hanya video yang memang boleh kamu download/proses. Jika video tidak punya subtitle/manual caption/auto caption dan tidak ada STT provider aktif, aplikasi tetap membuat clip dari durasi video sebagai fallback.
 
+## GPU / CPU Acceleration
+
+Clipper Studio secara otomatis mendeteksi hardware dan memilih runtime terbaik:
+
+| Komponen | CPU-only | NVIDIA GPU + CUDA | GPU tanpa CUDA |
+|----------|----------|-------------------|----------------|
+| **STT** (faster-whisper) | CPU (int8) | GPU (float16) | CPU (auto-fallback) |
+| **Video Encoding** | libx264 | h264_nvenc (NVENC) | h264_nvenc (NVENC) |
+| **UI Rendering** | Chromium CPU | Chromium GPU | Chromium GPU |
+
+### Mode Runtime
+
+| Mode | Deskripsi |
+|------|-----------|
+| `AUTO` (default) | Deteksi hardware otomatis → GPU jika kompatibel, CPU jika tidak |
+| `CPU` | Paksa semua komponen pakai CPU |
+| `GPU` | Paksa GPU (dengan fallback) |
+
+### Set mode manual
+
+```powershell
+$env:CLIPFORCE_ACCEL="cpu"    # force CPU
+$env:CLIPFORCE_ACCEL="gpu"    # force GPU
+$env:CLIPFORCE_ACCEL="auto"   # default
+node server.js
+```
+
+### Cek status hardware
+
+Panel `Local Engine` di sidebar menampilkan runtime, CPU, GPU, dan status acceleration.
+
+### Persyaratan GPU
+
+- **NVIDIA GPU** dengan driver yang mendukung CUDA 11.8+
+- **Python venv** dengan `faster-whisper` dan `ctranslate2` yang di-build dengan CUDA
+- **FFmpeg** dengan `h264_nvenc` encoder (biasanya sudah termasuk di build resmi)
+
+Untuk install venv dengan CUDA:
+```powershell
+.\\.venv\\Scripts\\python.exe -m pip install --upgrade pip
+.\\.venv\\Scripts\\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+.\\.venv\\Scripts\\python.exe -m pip install faster-whisper
+```
+
+## Speech-to-text
+
 ## Speech-to-text
 
 OpenAI:

@@ -2,6 +2,16 @@ const { app, BrowserWindow, shell } = require("electron");
 const path = require("node:path");
 const { startServer } = require("../server.js");
 
+// GPU acceleration: izinkan GPU rendering Chromium (kecuali user force CPU).
+// ignore-gpu-blocklist: browser tetap pake GPU meski terdaftar di blocklist.
+// enable-gpu-rasterization: GPU untuk rasterisasi (lebih cepat, lebih halus).
+const accel = String(process.env.CLIPFORCE_ACCEL || "").toLowerCase();
+if (accel !== "cpu") {
+  app.commandLine.appendSwitch("ignore-gpu-blocklist");
+  app.commandLine.appendSwitch("enable-gpu-rasterization");
+  app.commandLine.appendSwitch("enable-features", "VaapiVideoDecoder");
+}
+
 let mainWindow;
 let server;
 

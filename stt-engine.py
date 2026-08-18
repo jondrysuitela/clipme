@@ -95,6 +95,10 @@ def main():
     # models (detailed info)
     mp = sub.add_parser("models", help="Detailed model info")
 
+    # check-cuda (hardware probe — dipakai server.js untuk runtime selection)
+    cp2 = sub.add_parser("check-cuda", help="Check CUDA support in this Python runtime")
+    cp2.add_argument("--json", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -152,6 +156,39 @@ def main():
     if args.command == "models":
         models = ModelManager.list_supported()
         print(json.dumps(models, indent=2, ensure_ascii=False))
+        return
+
+    # ── Check CUDA ──
+    if args.command == "check-cuda":
+        result = {"available": False, "device_count": 0, "devices": [], "capability": ""}
+        try:
+            import ctranslate2
+            count = ctranslate2.get_cuda_device_count()
+            result["available"] = count > 0
+            result["device_count"] = count
+            if count > 0:
+                import torch
+                for i in range(count):
+                    name = torch.cuda.get_device_name(i)
+                    cap = torch.cuda.get_device_capability(i)
+                    result["devices"].append({"index": i, "name": name, "capability": f"{cap[0]}.{cap[1]}"})
+                    if i == 0:
+                        result["capability"] = f"{cap[0]}.{cap[1]}"
+        except ImportError:
+            # ctranslate2 or torch not installed — CUDA unavailable
+            pass
+        except Exception as e:
+            # ctranslate2 compiled without CUDA support
+            result["fallback"] = True
+            result["error"] = str(e)
+
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            if result["available"]:
+                print(f"CUDA ✓  ({result['device_count']} device(s): {', '.join(d['name'] for d in result['devices'])})")
+            else:
+                print("CUDA ✕  (not available in this Python runtime)")
         return
 
     # ── Load config ──

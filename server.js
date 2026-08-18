@@ -1,4 +1,4 @@
-﻿const http = require("http");
+const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
@@ -134,6 +134,68 @@ function loadClipmeHookEngine() {
 }
 
 const hookEngineModule = loadClipmeHookEngine();
+
+const CLIPME_HARDWARE_MODULE = path.join(ROOT, "clipme-hardware.js");
+
+function loadClipmeHardware() {
+  try {
+    if (fs.existsSync(CLIPME_HARDWARE_MODULE)) {
+      return require(CLIPME_HARDWARE_MODULE);
+    }
+  } catch (e) {
+    console.error("Gagal memuat clipme-hardware.js:", e.message);
+  }
+  return null;
+}
+
+const hardwareModule = loadClipmeHardware();
+
+// Hardware detection cache — resolve runtime sekali di awal, refresh berkala.
+let hardwareState = {
+  detected: null,
+  runtime: null,
+  lastRefresh: 0
+};
+
+async function refreshHardwareState() {
+  if (!hardwareModule) return;
+  const now = Date.now();
+  if (hardwareState.detected && now - hardwareState.lastRefresh < 60000) return;
+  try {
+    const detected = await hardwareModule.detectHardware({
+      ffmpegPath: FFMPEG,
+      venvPython: VENV_PYTHON
+    });
+    const runtime = hardwareModule.resolveRuntime(detected);
+    hardwareState = { detected, runtime, lastRefresh: now };
+  } catch (e) {
+    console.error("Hardware detection gagal:", e.message);
+  }
+}
+
+// Resolve device STT yang dipakai server (cuda/cpu/auto) — mengikuti runtime.
+function resolveSttDevice() {
+  if (hardwareState.runtime) return hardwareState.runtime.sttDevice;
+  return process.env.LOCAL_WHISPER_DEVICE || "auto";
+}
+
+// Resolve encoder video (h264_nvenc / libx264) + parameter preset/cq.
+function resolveVideoEncoder() {
+  if (hardwareState.runtime && hardwareState.runtime.encoder === "h264_nvenc") {
+    return {
+      encoder: "h264_nvenc",
+      preset: hardwareState.runtime.encoderPreset,
+      qualityFlag: "-cq",
+      qualityValue: String(hardwareState.runtime.encoderCrfOrCq)
+    };
+  }
+  return {
+    encoder: "libx264",
+    preset: "veryfast",
+    qualityFlag: "-crf",
+    qualityValue: "23"
+  };
+}
 
 function postJson(url, body, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -1856,12 +1918,16 @@ async function transcribeAudioWithLocalWhisper(audioPath, language = "", modelOv
   if (!fs.existsSync(pythonPath) || !fs.existsSync(FASTER_WHISPER_SCRIPT)) return { text: "", segments: [] };
 
   const outputPath = path.join(path.dirname(audioPath), `${path.basename(audioPath, path.extname(audioPath))}.whisper.json`);
+  // Resolve device dari hardware detection (runtime), bukan hardcode "cpu"
+  const sttDevice = resolveSttDevice();
+  // Compute type mengikuti device: float16 untuk cuda, int8 untuk cpu/auto
+  const sttCompute = sttDevice === "cuda" ? "float16" : (process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8");
   const args = [
     FASTER_WHISPER_SCRIPT,
     audioPath,
     "--model", resolveLocalWhisperModel(modelOverride || process.env.LOCAL_WHISPER_MODEL || "tiny"),
-    "--device", process.env.LOCAL_WHISPER_DEVICE || "cpu",
-    "--compute-type", process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8",
+    "--device", sttDevice,
+    "--compute-type", sttCompute,
     "--config", STT_CONFIG_FILE,
     "--output", outputPath
   ];
@@ -2511,7 +2577,7 @@ function generateAssStaticFilters(segments, opts) {
   return [`ass=filename=${escapedPath}`];
 }
 
-function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0, filterComplex = "", extraInputs = [], mapSpecs = [], progress = false }) {
+function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0, filterComplex = "", extraInputs = [], mapSpecs = [], progress = false, encoderInfo = null }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
   args.push("-i", input);
@@ -2532,7 +2598,24 @@ function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilt
     args.push("-r", String(fps));
   }
   if (progress) args.push("-progress", "pipe:1", "-nostats");
-  args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-movflags", "+faststart", outputPath);
+  // Encoder: NVENC (hardware) bila tersedia, else libx264 (software).
+  const enc = encoderInfo || resolveVideoEncoder();
+  if (enc.encoder === "h264_nvenc") {
+    // NVENC: preset p1-p7, kualitas via -cq (setara CRF), coba 2-pass CQ bila
+    // encoder mendukung; tanpa -tune karena NVENC tidak memakainya.
+    args.push(
+      "-c:v", "h264_nvenc",
+      "-preset", enc.preset || "p4",
+      "-cq", enc.qualityValue || "23",
+      "-rc", "vbr",
+      "-b:v", "0",
+      "-c:a", "aac", "-b:a", audioBitrate,
+      "-movflags", "+faststart",
+      outputPath
+    );
+  } else {
+    args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-movflags", "+faststart", outputPath);
+  }
   return args;
 }
 
@@ -3601,9 +3684,21 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
       for (const [fmt, tag, extractorArgs] of fullAttempts) {
         if (downloaded) break;
         const rawFull = path.join(sectionDir, `${suffix}-full-${clipId}-${tag}.%(ext)s`);
-        const fullArgs = [...ytdlpBase]
-          .filter((a) => a !== format && !a.startsWith("youtube:player_client"))
-          .concat(["--extractor-args", extractorArgs, "-f", fmt, "-o", rawFull, manifest.url]);
+        // Rebuild args from scratch instead of filter+concat, because the old
+        // filter only removed the VALUE of -f and --extractor-args, leaving the
+        // FLAGS orphaned, which consumed subsequent args (--retries) as values.
+        const fullArgs = [
+          "--no-playlist",
+          "--merge-output-format", "mp4",
+          "--js-runtimes", "node",
+          ...ytdlpAuthArgs(),
+          "--retries", "10",
+          "--fragment-retries", "10",
+          "--extractor-args", extractorArgs,
+          "-f", fmt,
+          "-o", rawFull,
+          manifest.url
+        ];
         try {
           await run(YTDLP, fullArgs, 300000, children);
         } catch (e) {
@@ -4804,21 +4899,65 @@ function handleListQueue(req, res) {
 }
 
 // F11: info engine yang DIPAKAI server (bukan hardcode "CPU-ONLY"). Nilai dari
-// env/config nyata yang dibaca pipeline transkripsi.
+// env/config nyata yang dibaca pipeline transkripsi + hardware detection.
 function handleSystemInfo(req, res) {
-  const device = String(process.env.LOCAL_WHISPER_DEVICE || "cpu").toLowerCase();
-  const computeType = String(process.env.LOCAL_WHISPER_COMPUTE_TYPE || "int8");
+  const device = String(process.env.LOCAL_WHISPER_DEVICE || "auto").toLowerCase();
+  const computeType = String(process.env.LOCAL_WHISPER_COMPUTE_TYPE || "auto");
   const model = resolveLocalWhisperModel(process.env.LOCAL_WHISPER_MODEL || "tiny");
   const pythonOk = fs.existsSync(VENV_PYTHON) || fs.existsSync(process.env.LOCAL_WHISPER_PYTHON || "");
   const ffmpegOk = fs.existsSync(FFMPEG);
-  const gpu = ["cuda", "gpu"].some((k) => device.includes(k));
-  sendJson(res, 200, {
-    device: gpu ? "GPU (CUDA)" : "CPU",
-    computeType,
-    model,
-    pythonAvailable: pythonOk,
-    ffmpegAvailable: ffmpegOk,
-    sttEnabled: !!(process.env.OPENAI_API_KEY || pythonOk)
+
+  // Await hardware refresh (cached 60s) bila module tersedia
+  Promise.resolve(refreshHardwareState()).then(() => {
+    const hw = hardwareState.detected;
+    const rt = hardwareState.runtime;
+    const gpu = (hw && hw.gpu) || { present: false, name: "", vendor: "" };
+    const cuda = (hw && hw.cuda) || { available: false, fallback: false, deviceCount: 0 };
+    const nvenc = (hw && hw.nvenc) || { available: false, h264: false, hevc: false };
+    const cpu = (hw && hw.cpu) || { model: "", cores: 0, arch: process.arch };
+
+    sendJson(res, 200, {
+      device: rt ? rt.sttDevice : device,
+      computeType: rt ? rt.sttComputeType : computeType,
+      model,
+      pythonAvailable: pythonOk,
+      ffmpegAvailable: ffmpegOk,
+      sttEnabled: !!(process.env.OPENAI_API_KEY || pythonOk),
+
+      // ── Hardware detection (baru) ──
+      hardware: {
+        cpu,
+        gpu,
+        cuda,
+        nvenc,
+        ffmpeg: (hw && hw.ffmpeg) || { available: ffmpegOk }
+      },
+      runtime: rt || {
+        mode: "AUTO",
+        sttDevice: "auto",
+        sttComputeType: "auto",
+        encoder: "libx264",
+        gpuUsed: false,
+        reason: "Hardware detection tidak tersedia"
+      },
+      acceleration: {
+        mode: rt ? rt.mode : "AUTO",
+        stt: rt ? rt.sttDevice : "auto",
+        encoder: rt ? rt.encoder : "libx264",
+        nvencAvailable: nvenc.available,
+        gpuUsed: rt ? rt.gpuUsed : false,
+        reason: rt ? rt.reason : ""
+      }
+    });
+  }).catch(() => {
+    sendJson(res, 200, {
+      device,
+      computeType,
+      model,
+      pythonAvailable: pythonOk,
+      ffmpegAvailable: ffmpegOk,
+      sttEnabled: !!(process.env.OPENAI_API_KEY || pythonOk)
+    });
   });
 }
 
@@ -5145,6 +5284,10 @@ async function handleSttTranscribe(req, res) {
     const args = [STT_ENGINE, "transcribe", "--audio", audioPath, "--format", format, "--config", STT_CONFIG_FILE];
     if (model) args.push("--model", resolveLocalWhisperModel(model));
     if (language) args.push("--language", language);
+    // Jika device tidak di-override user, pakai hasil hardware detection
+    if (!process.env.LOCAL_WHISPER_DEVICE) {
+      args.push("--device", resolveSttDevice());
+    }
     if (noiseReduction) args.push("--noise-reduction");
     if (removeSilence) args.push("--remove-silence");
     if (enhance) args.push("--enhance");
@@ -5350,8 +5493,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-function startServer(port = PORT, host = "127.0.0.1") {
+function startServer(port = PORT, host = "0.0.0.0") {
   cleanupOldData();
+  // Refresh hardware state (GPU/CUDA/NVENC) saat startup — dipakai runtime selector.
+  refreshHardwareState().then(() => {
+    const rt = hardwareState.runtime;
+    if (rt) {
+      console.log(`[Hardware] CPU: ${hardwareState.detected && hardwareState.detected.cpu.model || "?"}`);
+      if (hardwareState.detected && hardwareState.detected.gpu.present) {
+        console.log(`[Hardware] GPU: ${hardwareState.detected.gpu.name} (${hardwareState.detected.gpu.vramGb} GB)`);
+      } else {
+        console.log("[Hardware] GPU: tidak terdeteksi");
+      }
+      console.log(`[Runtime] Mode: ${rt.mode} | STT: ${rt.sttDevice} | Encoder: ${rt.encoder} | ${rt.reason}`);
+    }
+  }).catch(() => {});
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -5365,7 +5521,8 @@ function startServer(port = PORT, host = "127.0.0.1") {
 }
 
 if (require.main === module) {
-  startServer().catch((error) => {
+  const host = process.env.HOST || "0.0.0.0";
+  startServer(PORT, host).catch((error) => {
     console.error(error);
     process.exit(1);
   });

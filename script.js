@@ -679,21 +679,55 @@ function updateEngineStatus(jobs) {
 // F11: tampilkan konfigurasi engine NYATA dari server (device + model + tipe
 // komputasi), bukan label statis "CPU-ONLY". Update ulang tiap 15 detik.
 async function loadEngineCompute() {
-  const el = $("#engineCompute");
-  if (!el) return;
+  const set = (id, text, cls = "idle", title = "") => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `engine-value ${cls}`;
+    if (title) el.title = title;
+  };
   try {
     const res = await fetch("/api/system");
     if (!res.ok) throw new Error("bad status");
     const info = await res.json();
-    const model = String(info.model || "tiny").split(/[\\/]/).pop();
-    el.textContent = `${info.device} · ${model.toUpperCase()} · ${String(info.computeType || "int8").toUpperCase()}`;
-    el.className = `engine-value ${info.sttEnabled ? "ok" : "idle"}`;
-    el.title = info.sttEnabled
-      ? "STT engine tersedia"
-      : "STT tidak tersedia (python/venv/API key belum ada)";
+    const accel = info.acceleration || {};
+    const hw = info.hardware || {};
+    const gpu = hw.gpu || {};
+    const cuda = hw.cuda || {};
+    const nvenc = hw.nvenc || {};
+    const cpu = hw.cpu || {};
+    const rt = info.runtime || {};
+
+    const mode = String(rt.mode || accel.mode || "AUTO").toUpperCase();
+    set("engineRuntime", mode, mode === "GPU" ? "busy" : "ok", rt.reason || "");
+
+    const cpuLabel = cpu.model
+      ? `${cpu.model}${cpu.cores ? ` · ${cpu.cores} core` : ""}`.slice(0, 42)
+      : "✓ Available";
+    set("engineCpu", cpuLabel, "ok", `CPU: ${cpu.model || "?"} (${cpu.cores || "?"} core)`);
+
+    if (gpu.present) {
+      const gpuLabel = `${gpu.name}${gpu.vramGb ? ` · ${gpu.vramGb} GB` : ""}`.slice(0, 42);
+      const gpuCls = cuda.available ? "ok" : "busy";
+      const gpuTitle = cuda.available
+        ? `${gpu.name} — CUDA ✓ (${cuda.deviceCount} device)`
+        : `${gpu.name} terdeteksi, tapi Python runtime tidak punya CUDA — fallback CPU`;
+      set("engineGpu", gpuLabel, gpuCls, gpuTitle);
+    } else {
+      set("engineGpu", "— Not detected", "idle", "Tidak ada GPU terdeteksi — mode CPU");
+    }
+
+    const accelParts = [];
+    if (String(rt.sttDevice || "") === "cuda") accelParts.push("STT: GPU");
+    else if (String(rt.sttDevice || "") === "auto") accelParts.push("STT: AUTO");
+    else accelParts.push("STT: CPU");
+    accelParts.push(`ENC: ${nvenc.available ? "NVENC" : "CPU"}`);
+    set("engineAccel", accelParts.join(" · "), rt.gpuUsed ? "busy" : "ok", rt.reason || accel.reason || "");
   } catch {
-    el.textContent = "OFFLINE";
-    el.className = "engine-value idle";
+    set("engineRuntime", "OFFLINE", "idle");
+    set("engineCpu", "—", "idle");
+    set("engineGpu", "—", "idle");
+    set("engineAccel", "—", "idle");
   }
 }
 

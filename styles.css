@@ -250,6 +250,12 @@ button {
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.04em;
+  max-width: 70%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
 }
 
 .engine-value.ok { color: var(--ok); }

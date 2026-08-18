@@ -38,8 +38,20 @@
       <p class="sidebar-section-label">Local Engine</p>
       <div class="local-engine">
         <div class="engine-status-row">
-          <span class="engine-label">Compute</span>
-          <span class="engine-value idle" id="engineCompute">CPU-ONLY</span>
+          <span class="engine-label">Runtime</span>
+          <span class="engine-value idle" id="engineRuntime">AUTO</span>
+        </div>
+        <div class="engine-status-row">
+          <span class="engine-label">CPU</span>
+          <span class="engine-value ok" id="engineCpu">✓ Available</span>
+        </div>
+        <div class="engine-status-row">
+          <span class="engine-label">GPU</span>
+          <span class="engine-value idle" id="engineGpu">— Not detected</span>
+        </div>
+        <div class="engine-status-row">
+          <span class="engine-label">Accel</span>
+          <span class="engine-value idle" id="engineAccel">CPU</span>
         </div>
         <div class="engine-status-row">
           <span class="engine-label">Queue</span>
