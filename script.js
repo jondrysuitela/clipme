@@ -198,7 +198,9 @@ function restoreSnapshot(snap) {
   state.captionByClip = snap.captionByClip;
   state.activeClip = clips.find((clip) => clip.id === prevActiveId) || clips[0] || null;
   if (state.activeClip) {
-    state.liveSegments = (state.captionByClip[captionTimelineKey()] || []).map((s) => ({ ...s }));
+    // BUG FIX: Deep copy words array to prevent reference pollution during Undo/Redo
+    state.liveSegments = (state.captionByClip[captionTimelineKey()] || []).map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+    state.captionSegments = state.liveSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
   } else {
     state.liveSegments = [];
   }
@@ -1346,7 +1348,13 @@ async function loadPreviewClip() {
     if (data.transcriptError) {
       console.warn("Preview transcript:", data.transcriptError);
     }
-    state.liveSegments = Array.isArray(data.segments) ? data.segments : [];
+    
+    // BUG FIX: Pastikan liveSegments selalu mengambil data TERBARU dari data.segments (yang sudah ter-translate jika berbeda)
+    state.liveSegments = Array.isArray(data.segments) ? data.segments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []})) : [];
+    // Force sinkronisasi ke captionSegments juga
+    state.captionSegments = state.liveSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
+    state.captionByClip[captionTimelineKey()] = state.captionSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
+    
     state.liveActive = state.liveSegments.length > 0 && data.baked !== true && $("#captionStyleSelect").value !== "off";
     state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     previewVideo.src = data.previewUrl;
@@ -2483,14 +2491,12 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
     if (!segs.length) throw new Error("Auto caption tidak menghasilkan segmen.");
     showToast(`Auto caption siap: ${segs.length} segmen (${data.provider})`);
     $("#captionStatus").textContent = `${data.provider}: ${segs.length} segmen`;
-    state.liveSegments = segs.map((s) => ({
-      ...s,
-      words: Array.isArray(s.karaoke) ? s.karaoke : []
-    }));
+    // BUG FIX: Paksa sinkronisasi penuh antara liveSegments dan captionSegments agar UI dan Video Overlay tidak desync
     state.captionSegments = segs.map((s) => ({
       ...s,
-      words: Array.isArray(s.karaoke) ? s.karaoke : (Array.isArray(s.words) ? s.words : [])
+      words: Array.isArray(s.karaoke) ? s.karaoke.slice() : (Array.isArray(s.words) ? s.words.slice() : [])
     }));
+    state.liveSegments = state.captionSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
     state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
       ...s,
       words: Array.isArray(s.words) ? s.words.slice() : []
