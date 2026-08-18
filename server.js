@@ -5281,37 +5281,62 @@ async function handleLocalAIAnalyze(req, res) {
   }
   const sampleFps = Number(payload.sampleFps || 1);
   const speakerCutToggle = !!payload.speakerCut;
+
+  // F12 (Phase 5/19): wrap heavy analyze+associate into Job Queue so the HTTP
+  // request_thread is NOT blocked by face-tracking which can take seconds per
+  // clip. Client polls /api/jobs/:jobId via handleJob() — job.result holds the
+  // analysis payload when status === "done".
   try {
-    const t = await localAIModule.analyzeForSpeakerCut({
-      audioPath,
-      videoPath: fallback,
-      pythonPath: VENV_PYTHON,
-      speakerScript: SPEAKER_DETECT_PY,
-      faceScript: FACE_DETECT_PY,
-      ffmpegPath: FFMPEG,
-      modelsRoot: MODELS_ROOT,
-      sampleFps,
-      minSegmentMs: Number(payload.minSegmentMs || 300),
-      noiseDb: Number(payload.noiseDb || -35)
-    });
-    let associations = null;
-    if (speakerCutToggle) {
-      const faceTim = t.faceTimeline;
-      const srcW = Number(payload.sourceW || 1920);
-      const srcH = Number(payload.sourceH || 1080);
-      const targetAspect = Number(payload.targetAspect || 9/16);
-      associations = localAIModule.associateSpeakerWithFace(t.speakerTimeline, faceTim, {
-        sourceWidth: srcW, sourceHeight: srcH, targetAspect
+    const job = createJob("localai-analyze", async (setProgress, children) => {
+      setProgress(5);
+      const t = await localAIModule.analyzeForSpeakerCut({
+        audioPath,
+        videoPath: fallback,
+        pythonPath: VENV_PYTHON,
+        speakerScript: SPEAKER_DETECT_PY,
+        faceScript: FACE_DETECT_PY,
+        ffmpegPath: FFMPEG,
+        modelsRoot: MODELS_ROOT,
+        sampleFps,
+        minSegmentMs: Number(payload.minSegmentMs || 300),
+        noiseDb: Number(payload.noiseDb || -35)
       });
-    }
-    sendJson(res, 200, {
-      speakerTimeline: t.speakerTimeline,
-      faceTimeline: t.faceTimeline,
-      associations,
-      identity: t.identity,
-      summary: t.summary,
-      backend: t.summary ? t.summary.backend : { speaker: "ffmpeg+numpy", face: "skipped-no-backend" }
+      setProgress(85);
+      let associations = null;
+      if (speakerCutToggle) {
+        const faceTim = t.faceTimeline;
+        const srcW = Number(payload.sourceW || 1920);
+        const srcH = Number(payload.sourceH || 1080);
+        const targetAspect = Number(payload.targetAspect || 9 / 16);
+        associations = localAIModule.associateSpeakerWithFace(t.speakerTimeline, faceTim, {
+          sourceWidth: srcW,
+          sourceHeight: srcH,
+          targetAspect
+        });
+      }
+      setProgress(100);
+      const result = {
+        speakerTimeline: t.speakerTimeline,
+        faceTimeline: t.faceTimeline,
+        associations,
+        identity: t.identity,
+        summary: t.summary,
+        backend: t.summary ? t.summary.backend : { speaker: "ffmpeg+numpy", face: "skipped-no-backend" }
+      };
+      // Persist agar export pipeline dapat ambil tanpa re-analyze dan UI
+      // dapat reload hasil setelah refresh halaman.
+      try {
+        if (fs.existsSync(projectDir)) {
+          const localaiDir = path.join(projectDir, "localai");
+          fs.mkdirSync(localaiDir, { recursive: true });
+          fs.writeFileSync(path.join(localaiDir, `analyze-${job.id}.json`), JSON.stringify(result), "utf8");
+        }
+      } catch (e) {
+        console.error("Gagal persist analyze result:", e.message);
+      }
+      return result;
     });
+    sendJson(res, 202, { jobId: job.id, status: job.status, progress: job.progress });
   } catch (e) {
     sendJson(res, 500, { error: e.message || String(e) });
   }
