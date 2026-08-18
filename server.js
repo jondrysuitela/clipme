@@ -57,7 +57,7 @@ const FFPROBE = process.env.FFPROBE_PATH || path.join(BIN_DIR, "ffprobe.exe");
 const YTDLP_DEFAULT_EXTRACTOR_ARGS = "youtube:player_client=android_vr,ios,default,tv,-android_sdkless";
 // yt-dlp requires extractor-args in IE_KEY:ARGS form. Sanitize env value so a
 // stray value like "--retries 3" (which looks like a flag) can't break every
-// download â€” fall back to the known-good default in that case.
+// download — fall back to the known-good default in that case.
 function sanitizeExtractorArgs(value) {
   if (!value || typeof value !== "string") return YTDLP_DEFAULT_EXTRACTOR_ARGS;
   const trimmed = value.trim();
@@ -86,7 +86,7 @@ function friendlyYtDlpError(err) {
     return new Error("YouTube memblokir download (bot check). Set YTDLP_COOKIES=/path/cookies.txt atau YTDLP_COOKIES_FROM_BROWSER=chrome lalu restart server, atau coba lagi beberapa saat kemudian.");
   }
   if (/403|Forbidden/i.test(msg)) {
-    return new Error("YouTube menolak akses format video (HTTP 403) â€” kemungkinan video sedang kena eksperimen SABR/PO-token. Aplikasi sudah mencoba beberapa strategi (section, full download, format muxed). Jika tetap gagal, set YTDLP_COOKIES atau YTDLP_COOKIES_FROM_BROWSER (lihat README), atau gunakan video lain.");
+    return new Error("YouTube menolak akses format video (HTTP 403) — kemungkinan video sedang kena eksperimen SABR/PO-token. Aplikasi sudah mencoba beberapa strategi (section, full download, format muxed). Jika tetap gagal, set YTDLP_COOKIES atau YTDLP_COOKIES_FROM_BROWSER (lihat README), atau gunakan video lain.");
   }
   return err;
 }
@@ -395,7 +395,7 @@ const VENV_PYTHON = findVenvPython();
 const FASTER_WHISPER_SCRIPT = toUnpackedPath(path.join(ROOT, "transcribe_faster_whisper.py"));
 const STT_ENGINE = toUnpackedPath(path.join(ROOT, "stt-engine.py"));
 const STT_CONFIG_FILE = toUnpackedPath(path.join(ROOT, "stt-config.json"));
-// Models dibundel via extraResources ke <resources>/models â€” bukan app.asar.unpacked.
+// Models dibundel via extraResources ke <resources>/models — bukan app.asar.unpacked.
 // Di dev RESOURCE_ROOT === ROOT, jadi tetap mengarah ke models/<nama>.
 const MODELS_ROOT = path.join(RESOURCE_ROOT, "models");
 
@@ -772,7 +772,7 @@ function run(command, args, timeoutMs = 300000, childSink = null, onProgress = n
 
     const timer = setTimeout(() => {
       timedOut = true;
-      // Kill the whole process tree (taskkill /t) â€” child.kill() alone leaves
+      // Kill the whole process tree (taskkill /t) — child.kill() alone leaves
       // grandchildren orphaned (e.g. python shim -> python engine).
       killProcess(child);
       reject(new Error(`${command} timed out after ${timeoutMs}ms`));
@@ -978,7 +978,7 @@ function whisperLangToClipme(code) {
 
 function splitSentences(text) {
   return String(text || "")
-    .split(/(?<=[.!?à¥¤â€¦])\s+|\n+/)
+    .split(/(?<=[.!?…])\s+|\n+/)
     .map((s) => cleanCaptionText(s))
     .filter((s) => s.length > 1);
 }
@@ -1049,11 +1049,11 @@ function clipmeContextWarning(sentences, lang) {
   for (const tag of [lang, lang === "mix" ? "id" : "", lang === "mix" ? "en" : ""].filter(Boolean)) {
     const pronouns = CLIPME_WORDS[tag] && CLIPME_WORDS[tag].inits || [];
     if (pronouns.some((p) => new RegExp(`^${p}\\b`).test(first))) {
-      return "Opening uses a pronoun â€” viewer may need the prior context; ensure meaning stands alone.";
+      return "Opening uses a pronoun — viewer may need the prior context; ensure meaning stands alone.";
     }
   }
   const deictic = /(highlights|sebelumnya|earlier|tadi|back then)/i.test(first);
-  if (deictic) return "Opening references an earlier moment â€” verify context independence before publishing.";
+  if (deictic) return "Opening references an earlier moment — verify context independence before publishing.";
   if (/(\bitu\b|\binilah\b|this is|that (thing|one|is))\b/.test(first)) {
     return "Moderate: check the opening is self-explanatory without prior video.";
   }
@@ -1249,7 +1249,7 @@ function clipmeContextPenalty(sentences, lang) {
 
 function clipmeOverall(criteria, taken) {
   // PHASE 6: HOOK selection terpisah dari CLIP selection. Bobot hook dikurangi
-  // dari 20% â†’ 8% supaya ranking clip didominasi retention/value/story/payoff,
+  // dari 20% → 8% supaya ranking clip didominasi retention/value/story/payoff,
   // bukan sekadar hook ber-keyword. Hook tetap berperan sebagai gate (cap).
   const weighted =
     criteria.hook * 0.08 +
@@ -1465,7 +1465,7 @@ function clipmeQualityGates({ sentences, fullText, starterScore, hookType, lang,
 
   // noDeceptiveEdit: kata isi caption yang berasal dari sumber harus muncul
   // dalam urutan yang sama di sumber (subsequence). Kata template (CTA/lead)
-  // dilewati â€” hanya bagian kutipan sumber yang diperiksa urutannya.
+  // dilewati — hanya bagian kutipan sumber yang diperiksa urutannya.
   let si = 0;
   let subseq = true;
   for (const w of captionWords) {
@@ -1477,7 +1477,7 @@ function clipmeQualityGates({ sentences, fullText, starterScore, hookType, lang,
   const noDeceptiveEdit = subseq;
 
   // speakerIntact: dengan diarisasi real, kalimat caption tidak mencampur
-  // dua pembicara. Tanpa data speaker (belum ada diarisasi) â†’ tidak bisa
+  // dua pembicara. Tanpa data speaker (belum ada diarisasi) → tidak bisa
   // diverifikasi, jadi tidak ditandai curang (jujur vs salah-kaprah).
   let speakerIntact = true;
   if (Array.isArray(segments)) {
@@ -1629,9 +1629,9 @@ function clipmePayoffSentence(sentences, hits) {
 }
 
 function clipmeStoryStructure(sentences, hits) {
-  if (sentences.length >= 4 && hits.payoff >= 1) return "Hook â†’ Konteks â†’ Pengembangan â†’ Payoff";
-  if (hits.story >= 1) return "Hook â†’ Cerita â†’ Revelasi";
-  return "Hook â†’ Value â†’ Insight";
+  if (sentences.length >= 4 && hits.payoff >= 1) return "Hook → Konteks → Pengembangan → Payoff";
+  if (hits.story >= 1) return "Hook → Cerita → Revelasi";
+  return "Hook → Value → Insight";
 }
 
 function clipmeHookFulfilled(fullText, hookScore) {
@@ -1640,7 +1640,7 @@ function clipmeHookFulfilled(fullText, hookScore) {
 }
 
 function clippedForField(value, max) {
-  return String(value || "").length > max ? `${String(value).slice(0, max - 1)}â€¦` : String(value || "");
+  return String(value || "").length > max ? `${String(value).slice(0, max - 1)}—|` : String(value || "");
 }
 
 function analyzeTranscriptToClips(transcript, duration, targetLength = 90, language = "Indonesia") {
@@ -1689,7 +1689,7 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
     if (!overlaps && selected.length < 8) selected.push(candidate);
   }
 
-  // PHASE 9: diversity + semantic dedup â€” hindari hook yang mirip antar clip.
+  // PHASE 9: diversity + semantic dedup — hindari hook yang mirip antar clip.
   let diverse = selected.map((candidate) => ({
     ...candidate,
     hook: clippedForField(candidate.analysis.recommendedHook, 90),
@@ -1757,7 +1757,7 @@ function buildClips(duration, targetLength = 90) {
       title: titles[index],
       start,
       end,
-      // Fallback tanpa transcript: tidak ada skor asli â€” null + flag placeholder
+      // Fallback tanpa transcript: tidak ada skor asli — null + flag placeholder
       // supaya UI tidak menampilkan angka yang menyesatkan.
       score: null,
       placeholder: true,
@@ -1794,7 +1794,7 @@ function parseJson3Transcript(data) {
         eventWords: words.length ? words : undefined
       };
     })
-    .filter((item) => item.text && !/^â™ª+$/.test(item.text));
+    .filter((item) => item.text && !/^™a+$/.test(item.text));
 }
 
 function captionSources(info, preferredLanguage = "Indonesia") {
@@ -1828,7 +1828,7 @@ async function getTranscript(info, preferredLanguage) {
   }
   if (!transcript.length) return { segments: [], lang: "" };
 
-  // YouTube captions tersimpan dalam bahasa asli (mis. en) â€” terjemahkan ke
+  // YouTube captions tersimpan dalam bahasa asli (mis. en) — terjemahkan ke
   // bahasa target biar preview/export/timeline konsisten dengan pilihan user.
   // Kalau translate gagal (Argos tidak ada), tetap pakai transcript asli.
   const targetTag = clipmeLangTag(preferredLanguage);
@@ -1851,7 +1851,7 @@ async function getTranscript(info, preferredLanguage) {
         };
       }
     } catch {
-      // Abaikan â€” pakai caption asli jika terjemahan gagal.
+      // Abaikan — pakai caption asli jika terjemahan gagal.
     }
   }
   return { segments: transcript, lang: sourceTag };
@@ -1883,7 +1883,7 @@ function buildTranscriptClips(transcript, duration, targetLength = 90, language 
 async function transcribeAudioWithOpenAI(audioPath, language) {
   if (!process.env.OPENAI_API_KEY) return { text: "", segments: [] };
 
-  // NOTE: sengaja tidak mengirim field "language" â€” biarkan OpenAI auto-detect
+  // NOTE: sengaja tidak mengirim field "language" — biarkan OpenAI auto-detect
   // bahasa asli audio (sama seperti local whisper). Mengirim hint "id" untuk
   // audio berbahasa asing justru menurunkan kualitas transkripsi.
   const fields = {
@@ -2015,7 +2015,7 @@ async function translateTranscriptOffline(segments, fromCode, toCode, children =
       throw new Error(`Model terjemahan ${fromCode}->${toCode} belum tersedia di mesin ini. Jalankan: .venv\\Scripts\\python.exe stt-engine.py translate --text "Halo" --from ${fromCode} --to ${toCode} (butuh internet sekali untuk download model).`);
     }
     if (/internet|koneksi|network|Failed to/i.test(msg)) {
-      throw new Error("Download model terjemahan gagal â€” cek koneksi internet lalu coba lagi.");
+      throw new Error("Download model terjemahan gagal — cek koneksi internet lalu coba lagi.");
     }
     throw err;
   } finally {
@@ -2180,7 +2180,7 @@ async function detectContentCrop(sourcePath, start, duration, children = null) {
 // - denoise: FFT denoise (afftdn) to clean up background hiss
 // - enhance: dynamic loudness normalization + gentle compression
 // Returns "" when no enhancement requested.
-// NOTE: "remove silence" is NOT an audio-only filter â€” trimming just the audio
+// NOTE: "remove silence" is NOT an audio-only filter — trimming just the audio
 // stream desyncs it from the video (and from time-anchored captions). It is
 // handled in exportClip by cutting BOTH audio and video at the same silent
 // gaps (see detectSilenceIntervals + buildSilenceCutGraph).
@@ -2318,7 +2318,7 @@ function splitText(value, maxChars = 40) {
 }
 
 function escDrawtext(value) {
-  // Apostrof dan quote ascii tidak aman di dalam option `text='...'` â€”
+  // Apostrof dan quote ascii tidak aman di dalam option `text='...'` —
   // `\'` malah menutup string ditengah (mengakibatkan "No such filter").
   // Ganti ke karakter unicode yang tampil identik, hanya saat render.
   const safe = String(value || "")
@@ -2972,7 +2972,7 @@ async function handleUpload(req, res) {
 
   const sourcePath = path.join(projectDir, `source${safeExt}`);
   try {
-    // Move the streamed part file to its final location (same filesystem â†’ rename).
+    // Move the streamed part file to its final location (same filesystem → rename).
     fs.renameSync(file.path, sourcePath);
   } catch {
     try {
@@ -3378,14 +3378,14 @@ function writeExportInfo(outputDir, outputName, payload, manifest) {
 }
 
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
-  // Sanitasi terpusat â€” berlaku untuk semua jalur (single/batch/combined).
+  // Sanitasi terpusat — berlaku untuk semua jalur (single/batch/combined).
   payload.language = ["Indonesia", "English", "Mixed"].includes(payload.language) ? payload.language : "Indonesia";
   payload.captionStyle = sanitizeString(payload.captionStyle || "bold", 20);
   payload.fontFamily = String(payload.fontFamily || "Arial").slice(0, 40);
   payload.captionColor = sanitizeColor(payload.captionColor);
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
-  // Caption "off" atau segmen sudah dikirim client â†’ tidak perlu STT sama sekali.
+  // Caption "off" atau segmen sudah dikirim client → tidak perlu STT sama sekali.
   const captionDisabled = payload.captionStyle === "off";
   let enriched = null;
   if (!captionDisabled && !(Array.isArray(payload.segments) && payload.segments.length)) {
@@ -3565,7 +3565,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     mapSpecs,
     progress: true
   }), 300000, children, (encodePct) => {
-    // Encode adalah bagian terakhir (dari 58 â†’ 95). NaN/0 durasi â†’ lump.
+    // Encode adalah bagian terakhir (dari 58 → 95). NaN/0 durasi → lump.
     const t = Math.max(0, Math.min(1, Number.isFinite(cutDuration) && cutDuration > 0 ? encodePct / 100 : 1));
     setProgress(58 + Math.round(t * 37));
   });
@@ -4096,7 +4096,7 @@ async function downloadLocalAudioSection(projectDir, clip, children = null) {
 
   return singleFlight(`audio:${outputPath}`, async () => {
     if (fs.existsSync(outputPath)) return outputPath;
-    // Cek dulu apakah video benar-benar punya stream audio â€” ffmpeg CRASH (exit -6)
+    // Cek dulu apakah video benar-benar punya stream audio — ffmpeg CRASH (exit -6)
     // bila diminta mengekstrak audio dari video tanpa audio; lebih baik error jelas.
     try {
       const probeOut = execFileSync(FFPROBE, [
@@ -4108,7 +4108,7 @@ async function downloadLocalAudioSection(projectDir, clip, children = null) {
       ], { encoding: "utf8" });
       const audioCodec = String(probeOut || "").trim();
       if (!audioCodec) {
-        throw new Error("Video ini tidak memiliki audio â€” STT tidak bisa berjalan. Gunakan video lain atau matikan auto caption.");
+        throw new Error("Video ini tidak memiliki audio — STT tidak bisa berjalan. Gunakan video lain atau matikan auto caption.");
       }
     } catch (probeErr) {
       if (probeErr.message && probeErr.message.includes("tidak memiliki audio")) throw probeErr;
@@ -4139,7 +4139,7 @@ async function transcribeClipWithCacheLocal(projectDir, manifest, payload, child
 async function ensureClipTranscriptLocal(projectDir, manifest, payload, children = null, onProgress = null) {
   if (process.env.CLIPFORGE_ON_DEMAND_STT === "0") return null;
   if (!process.env.OPENAI_API_KEY && !fs.existsSync(VENV_PYTHON)) return null;
-  // Client sudah kirim segmen caption â†’ STT tidak perlu dijalankan lagi.
+  // Client sudah kirim segmen caption → STT tidak perlu dijalankan lagi.
   if (Array.isArray(payload.segments) && payload.segments.length) return null;
 
   const cached = clipTranscriptCacheRead(projectDir, payload);
@@ -4151,7 +4151,7 @@ async function ensureClipTranscriptLocal(projectDir, manifest, payload, children
 async function ensureClipTranscript(projectDir, manifest, payload, children = null, onProgress = null) {
   if (process.env.CLIPFORGE_ON_DEMAND_STT === "0") return null;
   if (!process.env.OPENAI_API_KEY && !fs.existsSync(VENV_PYTHON)) return null;
-  // Client sudah kirim segmen caption â†’ STT tidak perlu dijalankan lagi.
+  // Client sudah kirim segmen caption → STT tidak perlu dijalankan lagi.
   if (Array.isArray(payload.segments) && payload.segments.length) return null;
 
   const clip = clipPayloadToClip(payload);
@@ -4162,7 +4162,7 @@ async function ensureClipTranscript(projectDir, manifest, payload, children = nu
     if (fs.existsSync(fullTranscriptPath)) {
       let fullTranscript = JSON.parse(fs.readFileSync(fullTranscriptPath, "utf8"));
       // Terjemahkan transcript asli ke bahasa target bila perlu (project lama
-      // dibuat sebelum fix translate di getTranscript â€” transcript.json masih
+      // dibuat sebelum fix translate di getTranscript — transcript.json masih
       // bahasa asli). Konsisten dengan timeline/preview.
       const srcTag = manifest.transcriptLanguage || "";
       const targetTag = clipmeLangTag(payload.language || "Indonesia");
@@ -4181,7 +4181,7 @@ async function ensureClipTranscript(projectDir, manifest, payload, children = nu
             }));
           }
         } catch {
-          // Abaikan â€” pakai transcript asli jika terjemahan gagal.
+          // Abaikan — pakai transcript asli jika terjemahan gagal.
         }
       }
       const clipSegments = fullTranscript.filter(
@@ -4423,7 +4423,7 @@ async function handleAutoCaptions(req, res) {
             }));
           }
         } catch {
-          // Abaikan â€” pakai transcript asli jika terjemahan gagal.
+          // Abaikan — pakai transcript asli jika terjemahan gagal.
         }
       }
       segments = fullTranscript.filter((s) => s.end > clip.start && s.start < clip.end);
@@ -4540,7 +4540,7 @@ async function handleAutoCaptions(req, res) {
     let words;
     // Kata dari LLM TIDAK dipercaya mentah: hanya dipakai yang benar-benar
     // cocok dengan wordLevel STT (teks + overlap waktu). Sisanya diambil dari
-    // kata nyata â€” mencegah karaoke meleset akibat timestamp karangan model.
+    // kata nyata — mencegah karaoke meleset akibat timestamp karangan model.
     const windowWords = wordLevel.filter((w) => w.start < toAbs && w.end > fromAbs);
     if (Array.isArray(s.words) && s.words.length) {
       const wanted = new Set(String(s.text || "").toLowerCase().split(/\s+/).filter(Boolean));
