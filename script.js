@@ -1329,15 +1329,24 @@ async function loadPreviewClip() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Preview gagal.");
 
-    if (data.transcript?.caption) {
-      captionInput.value = data.transcript.caption;
-      captionBox.textContent = `"${data.transcript.caption}"`;
-      renderStaticCaption();
-      state.activeClip.caption = data.transcript.caption;
-      if (data.transcript.hook) {
+    if (data.transcript?.caption || (data.segments && data.segments.length > 0)) {
+      // Prioritize segments text over basic transcript caption to ensure translated version shows up
+      const combinedCaption = data.segments && data.segments.length > 0 ? 
+        data.segments.map(s => s.text).join(" ").trim().slice(0, 155) : 
+        data.transcript?.caption;
+        
+      if (combinedCaption) {
+          captionInput.value = combinedCaption;
+          captionBox.textContent = `"${combinedCaption}"`;
+          state.activeClip.caption = combinedCaption;
+      }
+      
+      if (data.transcript?.hook) {
         hookInput.value = data.transcript.hook;
         state.activeClip.hook = data.transcript.hook;
       }
+      
+      renderStaticCaption();
       renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     }
 
@@ -1885,14 +1894,21 @@ $("#translateBtn").addEventListener("click", async () => {
     state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     renderCaptionTimeline();
     // Refresh preview: live caption saat play/pause dan caption box statis saat idle.
-    updateLiveCaption();
+    
     const combined = state.captionSegments.map((s) => s.text).join(" ").trim().slice(0, 155);
     if (combined) {
+      // 1. Update text input box
       captionInput.value = combined;
+      // 2. Update visual static box
       captionBox.textContent = `"${combined}"`;
-      renderStaticCaption();
+      // 3. IMPORTANT: Update global state!
       if (state.activeClip) state.activeClip.caption = combined;
     }
+    
+    // Force re-render overlay and static captions
+    renderStaticCaption();
+    updateLiveCaption();
+    
     renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     showToast(`Terjemahan selesai (${changedCount}/${translated.length} segmen berubah). Klik "Simpan Perubahan" untuk menyimpan.`);
   } catch (err) {
