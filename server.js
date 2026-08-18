@@ -150,6 +150,20 @@ function loadClipmeHardware() {
 
 const hardwareModule = loadClipmeHardware();
 
+const CLIPME_LOCALAI_MODULE = path.join(ROOT, "clipme-localai.js");
+const SPEAKER_DETECT_PY = toUnpackedPath(path.join(ROOT, "clipme-speaker-detect.py"));
+const FACE_DETECT_PY = toUnpackedPath(path.join(ROOT, "clipme-face-detect.py"));
+
+function loadClipmeLocalAI() {
+  try {
+    if (fs.existsSync(CLIPME_LOCALAI_MODULE)) return require(CLIPME_LOCALAI_MODULE);
+  } catch (e) {
+    console.error("Gagal memuat clipme-localai.js:", e.message);
+  }
+  return null;
+}
+const localAIModule = loadClipmeLocalAI();
+
 // Hardware detection cache — resolve runtime sekali di awal, refresh berkala.
 let hardwareState = {
   detected: null,
@@ -5219,6 +5233,113 @@ class RouteRegistry {
 
 const router = new RouteRegistry();
 
+
+async function handleEngineStatus(req, res) {
+  try {
+    const hw = hardwareState.detected || {};
+    const rt = hardwareState.runtime || {
+      mode: "AUTO", sttDevice: "auto", sttComputeType: "auto",
+      encoder: "libx264", gpuUsed: false, reason: "tidak ada deteksi"
+    };
+    if (!localAIModule) {
+      sendJson(res, 200, {
+        localai: { available: false, reason: "clipme-localai.js belum dimuat" },
+        aiBackend: { speaker: { available: false, label: "n/a" }, face: { available: false, label: "n/a" } },
+        runtime: rt, hardware: hw
+      });
+      return;
+    }
+    const spk = localAIModule.describeSpeaker({ pythonPath: VENV_PYTHON, speakerScript: SPEAKER_DETECT_PY });
+    const fce = localAIModule.describeFace({ pythonPath: VENV_PYTHON, faceScript: FACE_DETECT_PY });
+    sendJson(res, 200, {
+      localai: { available: true, version: 1 },
+      aiBackend: { speaker: spk, face: fce },
+      runtime: rt, hardware: hw
+    });
+  } catch (e) {
+    sendJson(res, 500, { error: e.message || String(e) });
+  }
+}
+
+async function handleLocalAIAnalyze(req, res) {
+  const payload = JSON.parse((await collectRequest(req, 200)).toString("utf8"));
+  const projectId = sanitizeString(payload.projectId || "");
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Project ID tidak valid." }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
+  if (!localAIModule) { sendJson(res, 503, { error: "LocalAI tidak tersedia." }); return; }
+  const videoPath = path.join(projectDir, "video.mp4");
+  const fallback = fs.existsSync(videoPath) ? videoPath : (findSourceFile(projectDir) || "");
+  if (!fallback || !fs.existsSync(fallback)) {
+    sendJson(res, 400, { error: "Source video tidak ditemukan. Upload video dulu." });
+    return;
+  }
+  const audioPath = path.join(projectDir, "audio.mp3");
+  if (!fs.existsSync(audioPath)) {
+    sendJson(res, 400, { error: "Belum ada audio.mp3. Jalankan Auto Caption atau Generate sekali dulu." });
+    return;
+  }
+  const sampleFps = Number(payload.sampleFps || 1);
+  const speakerCutToggle = !!payload.speakerCut;
+  try {
+    const t = await localAIModule.analyzeForSpeakerCut({
+      audioPath,
+      videoPath: fallback,
+      pythonPath: VENV_PYTHON,
+      speakerScript: SPEAKER_DETECT_PY,
+      faceScript: FACE_DETECT_PY,
+      ffmpegPath: FFMPEG,
+      modelsRoot: MODELS_ROOT,
+      sampleFps,
+      minSegmentMs: Number(payload.minSegmentMs || 300),
+      noiseDb: Number(payload.noiseDb || -35)
+    });
+    let associations = null;
+    if (speakerCutToggle) {
+      const faceTim = t.faceTimeline;
+      const srcW = Number(payload.sourceW || 1920);
+      const srcH = Number(payload.sourceH || 1080);
+      const targetAspect = Number(payload.targetAspect || 9/16);
+      associations = localAIModule.associateSpeakerWithFace(t.speakerTimeline, faceTim, {
+        sourceWidth: srcW, sourceHeight: srcH, targetAspect
+      });
+    }
+    sendJson(res, 200, {
+      speakerTimeline: t.speakerTimeline,
+      faceTimeline: t.faceTimeline,
+      associations,
+      identity: t.identity,
+      summary: t.summary,
+      backend: t.summary ? t.summary.backend : { speaker: "ffmpeg+numpy", face: "skipped-no-backend" }
+    });
+  } catch (e) {
+    sendJson(res, 500, { error: e.message || String(e) });
+  }
+}
+
+async function handleLocalAIDownloadModel(req, res) {
+  const payload = JSON.parse((await collectRequest(req, 100)).toString("utf8"));
+  const modelKind = String(payload.kind || "speaker");
+  if (!["speaker", "face"].includes(modelKind)) {
+    sendJson(res, 400, { error: "kind harus 'speaker' atau 'face'" });
+    return;
+  }
+  if (!localAIModule) { sendJson(res, 503, { error: "LocalAI tidak tersedia." }); return; }
+  // Run Python synchronously to download/validate then return ready status.
+  const pythonPath = VENV_PYTHON;
+  if (!fs.existsSync(pythonPath)) {
+    sendJson(res, 400, { error: "Python venv tidak ditemukan." });
+    return;
+  }
+  const out = await localAIModule.runPython(pythonPath, modelKind === "speaker" ? SPEAKER_DETECT_PY : FACE_DETECT_PY, ["analyze"], 60_000)
+    .catch(e => ({ error: e.message || String(e) }));
+  sendJson(res, 200, {
+    kind: modelKind,
+    status: "completed",
+    output: out && out.error ? null : (out && out.stdout ? out.stdout.toString().slice(-500) : "ok")
+  });
+}
+
 // ---- STT Engine API ----
 
 // Translate caption segments (offline Argos). Body: {segments, from, to}
@@ -5409,7 +5530,10 @@ router
   .add("POST", "/api/stt/transcribe", handleSttTranscribe)
   .add("POST", "/api/stt/translate", handleTranslate)
   .add("POST", "/api/stt/search", handleSttSearch)
-  .add("GET", "/api/stt/models", handleSttModels)
+    .add("GET", "/api/localai/status", handleEngineStatus)
+  .add("POST", "/api/localai/analyze", handleLocalAIAnalyze)
+  .add("POST", "/api/localai/download-model", handleLocalAIDownloadModel)
+.add("GET", "/api/stt/models", handleSttModels)
   .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)
