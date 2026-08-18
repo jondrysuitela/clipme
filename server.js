@@ -5493,7 +5493,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-function startServer(port = PORT, host = "0.0.0.0") {
+function startServer(port = PORT, host = "127.0.0.1") {
   cleanupOldData();
   // Refresh hardware state (GPU/CUDA/NVENC) saat startup — dipakai runtime selector.
   refreshHardwareState().then(() => {
@@ -5521,7 +5521,8 @@ function startServer(port = PORT, host = "0.0.0.0") {
 }
 
 if (require.main === module) {
-  const host = process.env.HOST || "0.0.0.0";
+  // Default 127.0.0.1 (secure local-only). Set HOST=0.0.0.0 untuk LAN/preview.
+  const host = process.env.HOST || "127.0.0.1";
   startServer(PORT, host).catch((error) => {
     console.error(error);
     process.exit(1);

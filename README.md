@@ -79,9 +79,9 @@ Clipper Studio secara otomatis mendeteksi hardware dan memilih runtime terbaik:
 ### Set mode manual
 
 ```powershell
-$env:CLIPFORCE_ACCEL="cpu"    # force CPU
-$env:CLIPFORCE_ACCEL="gpu"    # force GPU
-$env:CLIPFORCE_ACCEL="auto"   # default
+$env:CLIPFORGE_ACCEL="cpu"    # force CPU
+$env:CLIPFORGE_ACCEL="gpu"    # force GPU
+$env:CLIPFORGE_ACCEL="auto"   # default
 node server.js
 ```
 

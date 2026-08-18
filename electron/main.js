@@ -5,7 +5,7 @@ const { startServer } = require("../server.js");
 // GPU acceleration: izinkan GPU rendering Chromium (kecuali user force CPU).
 // ignore-gpu-blocklist: browser tetap pake GPU meski terdaftar di blocklist.
 // enable-gpu-rasterization: GPU untuk rasterisasi (lebih cepat, lebih halus).
-const accel = String(process.env.CLIPFORCE_ACCEL || "").toLowerCase();
+const accel = String(process.env.CLIPFORGE_ACCEL || "").toLowerCase();
 if (accel !== "cpu") {
   app.commandLine.appendSwitch("ignore-gpu-blocklist");
   app.commandLine.appendSwitch("enable-gpu-rasterization");

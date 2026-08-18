@@ -148,7 +148,9 @@ function detectCudaViaPython(venvPython) {
   const result = { available: false, deviceCount: 0, fallback: false };
   if (!venvPython || !fs.existsSync(venvPython)) return result;
 
-  const sttEngine = path.join(path.dirname(venvPython), "..", "stt-engine.py");
+  // Find stt-engine.py: project layout is <root>/.venv/Scripts/python.exe + <root>/stt-engine.py,
+  // jadi naik DUA level (Scripts/.venv/) bukan satu agar path-nya bener.
+  const sttEngine = path.join(path.dirname(path.dirname(venvPython)), "stt-engine.py");
   // Fallback: try relative to ROOT if not found near venv
   const enginePath = fs.existsSync(sttEngine)
     ? sttEngine

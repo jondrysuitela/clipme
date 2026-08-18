@@ -161,26 +161,50 @@ def main():
     # ── Check CUDA ──
     if args.command == "check-cuda":
         result = {"available": False, "device_count": 0, "devices": [], "capability": ""}
+        ctranslate2 = None
+        torch = None
         try:
-            import ctranslate2
-            count = ctranslate2.get_cuda_device_count()
-            result["available"] = count > 0
-            result["device_count"] = count
-            if count > 0:
-                import torch
-                for i in range(count):
-                    name = torch.cuda.get_device_name(i)
-                    cap = torch.cuda.get_device_capability(i)
-                    result["devices"].append({"index": i, "name": name, "capability": f"{cap[0]}.{cap[1]}"})
-                    if i == 0:
-                        result["capability"] = f"{cap[0]}.{cap[1]}"
+            import ctranslate2 as _ct
+            ctranslate2 = _ct
         except ImportError:
-            # ctranslate2 or torch not installed — CUDA unavailable
             pass
+        if ctranslate2 is None:
+            # ctranslate2 not installed — CUDA unavailable
+            print(json.dumps(result, indent=2) if getattr(args, "json", False) else "CUDA ✕  (ctranslate2 not installed)")
+            return
+        try:
+            count = ctranslate2.get_cuda_device_count()
         except Exception as e:
             # ctranslate2 compiled without CUDA support
             result["fallback"] = True
             result["error"] = str(e)
+            print(json.dumps(result, indent=2) if getattr(args, "json", False) else "CUDA ✕  (ctranslate2 tanpa CUDA)")
+            return
+        if count == 0:
+            print(json.dumps(result, indent=2) if getattr(args, "json", False) else "CUDA ✕  (no GPU detected)")
+            return
+        # CUDA detected via ctranslate2. Verify torch works too (needed for full pipeline).
+        try:
+            import torch as _t
+            torch = _t
+        except ImportError:
+            # ctranslate2 reports CUDA but torch missing — can't actually use GPU.
+            result["fallback"] = True
+            result["error"] = "ctranslate2 has CUDA but torch not installed"
+            print(json.dumps(result, indent=2) if getattr(args, "json", False) else "CUDA ✕  (torch not installed)")
+            return
+        result["available"] = True
+        result["device_count"] = count
+        for i in range(count):
+            try:
+                name = torch.cuda.get_device_name(i)
+                cap = torch.cuda.get_device_capability(i)
+                result["devices"].append({"index": i, "name": name, "capability": f"{cap[0]}.{cap[1]}"})
+                if i == 0:
+                    result["capability"] = f"{cap[0]}.{cap[1]}"
+            except Exception as e:
+                result["devices"].append({"index": i, "name": f"GPU {i}", "capability": "?", "error": str(e)})
+        print(json.dumps(result, indent=2) if getattr(args, "json", False) else f"CUDA ✓  ({count} device(s))")
 
         if getattr(args, "json", False):
             print(json.dumps(result, indent=2))
