@@ -34,6 +34,7 @@
       "clipme-caption-prompt.js",
       "clipme-hardware.js",
       "build/icon.png",
+      "build/icon.ico",
       "transcribe_faster_whisper.py",
       "stt-engine.py",
       "stt-config.json",
