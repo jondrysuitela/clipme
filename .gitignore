@@ -17,3 +17,4 @@ CACHEDIR.TAG
 *.log
 server.out.log
 .ffmpeg-fallback
+bgmusic.mp3
