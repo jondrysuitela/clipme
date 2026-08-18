@@ -173,6 +173,9 @@ let hardwareState = {
   runtime: null,
   lastRefresh: 0
 };
+// Once NVENC fails at runtime, keep this process on CPU. Retrying a known-dead
+// encoder for every clip only creates more zero-byte outputs and noisy errors.
+let nvencRuntimeDisabled = false;
 
 async function refreshHardwareState() {
   if (!hardwareModule) return;
@@ -198,7 +201,7 @@ function resolveSttDevice() {
 
 // Resolve encoder video (h264_nvenc / libx264) + parameter preset/cq.
 function resolveVideoEncoder() {
-  if (hardwareState.runtime && hardwareState.runtime.encoder === "h264_nvenc") {
+  if (!nvencRuntimeDisabled && hardwareState.runtime && hardwareState.runtime.encoder === "h264_nvenc") {
     return {
       encoder: "h264_nvenc",
       preset: hardwareState.runtime.encoderPreset,
@@ -212,6 +215,38 @@ function resolveVideoEncoder() {
     qualityFlag: "-crf",
     qualityValue: "23"
   };
+}
+
+function isNvencRuntimeFailure(error) {
+  const message = String(error && error.message || error || "");
+  return /nvcuda(?:\.dll)?|h264_nvenc|nvenc|cuda_error|cannot (?:load|init).*cuda|no capable devices|openencodesession|driver does not support|error while opening encoder|operation not permitted/i.test(message);
+}
+
+async function runWithNvencCpuFallback(encoderInfo, runAttempt, onFallback = () => {}) {
+  try {
+    return await runAttempt(false);
+  } catch (error) {
+    if (!encoderInfo || encoderInfo.encoder !== "h264_nvenc" || !isNvencRuntimeFailure(error)) {
+      throw error;
+    }
+    await onFallback(error);
+    return runAttempt(true);
+  }
+}
+
+function disableNvencForSession(error) {
+  nvencRuntimeDisabled = true;
+  if (hardwareState.detected && hardwareState.detected.nvenc) {
+    hardwareState.detected.nvenc.available = false;
+    hardwareState.detected.nvenc.runtimeFailed = true;
+  }
+  if (hardwareState.runtime) {
+    hardwareState.runtime.encoder = "libx264";
+    hardwareState.runtime.encoderPreset = "veryfast";
+    hardwareState.runtime.nvencAvailable = false;
+    hardwareState.runtime.gpuUsed = hardwareState.runtime.sttDevice === "cuda";
+    hardwareState.runtime.reason = `NVENC runtime gagal; encoding fallback ke CPU (${String(error && error.message || error || "unknown error").split("\n")[0]})`;
+  }
 }
 
 function postJson(url, body, headers = {}) {
@@ -2591,6 +2626,21 @@ function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilt
   return args;
 }
 
+async function runFilteredEncodeWithFallback(commandOptions, timeoutMs, children, onProgress) {
+  const encoderInfo = resolveVideoEncoder();
+  const runAttempt = (forceCpu) => run(FFMPEG, buildFilterCommandArgs({
+    ...commandOptions,
+    encoderInfo,
+    forceCpu
+  }), timeoutMs, children, onProgress);
+
+  return runWithNvencCpuFallback(encoderInfo, runAttempt, (error) => {
+    console.warn("[Encoder] NVENC gagal saat export; retry otomatis dengan libx264 (CPU).");
+    disableNvencForSession(error);
+    try { fs.rmSync(commandOptions.outputPath, { force: true }); } catch {}
+  });
+}
+
 // Normalize a segment's word timestamps to ABSOLUTE timeline coordinates.
 // Word timestamps are clip- or segment-relative (legacy edited files, client
 // state) when they sit well below the segment start; absolute STT/auto-caption
@@ -3382,6 +3432,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   if (!sourcePath) {
     throw new Error("Source video tidak ditemukan.");
   }
+  const analysisSourceIsClipSection = sourcePath.includes(`${path.sep}sections${path.sep}`);
 
   setProgress(58);
   const outputDir = options.outputDir || outputSubdir(payload.projectId);
@@ -3418,7 +3469,9 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     if (shouldExtractAudio) {
       setProgress(22);
       await run(FFMPEG, [
-        "-y", "-i", videoFilePath, "-ss", String(originalStart), "-t", String(cutDuration),
+        "-y", "-i", videoFilePath,
+        "-ss", String(analysisSourceIsClipSection ? 0 : originalStart),
+        "-t", String(cutDuration),
         "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", audioAnalysisPath
       ], 300000, children, (p) => setProgress(22 + Math.round(p / 100 * 5)));
     }
@@ -3430,7 +3483,9 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
       speakerScript: SPEAKER_DETECT_PY, faceScript: FACE_DETECT_PY, ffmpegPath: FFMPEG, modelsRoot: MODELS_ROOT,
       sampleFps: 1, minSegmentMs: 300, noiseDb: -35,
       enableFaceTracking: payload.faceTrack, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
-      targetAspect: resolveRatio(payload.ratio)
+      targetAspect: resolveRatio(payload.ratio),
+      faceStartSeconds: analysisSourceIsClipSection ? 0 : originalStart,
+      faceDurationSeconds: cutDuration
     };
 
     const analyzePayloadHash = crypto.createHash('sha1').update(JSON.stringify(analyzeJobPayload)).digest('hex');
@@ -3443,6 +3498,11 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
       setProgress(30);
       const analyzeJob = createJob("localai-analyze", async (p, c) => {
         const t = await localAIModule.analyzeForSpeakerCut(analyzeJobPayload, p, c);
+        t.associations = localAIModule.associateSpeakerWithFace(t.speakerTimeline, t.faceTimeline, {
+          sourceWidth: sourceVideoWidth,
+          sourceHeight: sourceVideoHeight,
+          targetAspect: resolveRatio(payload.ratio)
+        });
         const localaiDir = path.join(projectDir, "localai");
         fs.mkdirSync(localaiDir, { recursive: true });
         fs.writeFileSync(localaiCachePath, JSON.stringify(t), "utf8");
@@ -3454,10 +3514,14 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     setProgress(55);
 
     if (analyzeResult && analyzeResult.associations && analyzeResult.associations.length > 0) {
-      const crop = localAIModule.pickClipSpeakerCrop(analyzeResult.associations, originalStart * 1000, originalEnd * 1000);
-      if (crop) {
-        speakerCutFilter = `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`;
-      }
+      // Input seeking resets filter timestamps to zero. Associations are also
+      // clip-relative, so FFmpeg and the CSS preview now switch faces at the
+      // same exact boundaries instead of choosing one static dominant crop.
+      speakerCutFilter = localAIModule.buildSpeakerCutFilter(
+        analyzeResult.associations,
+        sourceVideoWidth,
+        sourceVideoHeight
+      );
     }
   }
 
@@ -3493,11 +3557,9 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
 
   let filter;
   if (speakerCutFilter) {
-    if (filterParts.pre && filterParts.pre.length > 0) {
-      filterParts.pre = [...(contentCrop ? [`crop=${contentCrop.w}:${contentCrop.h}:${contentCrop.x}:${contentCrop.y}`] : []), speakerCutFilter, filterParts.scale, filterParts.crop];
-    } else {
-      filterParts.pre = [speakerCutFilter, filterParts.scale, filterParts.crop];
-    }
+    // Face coordinates are measured in the original source coordinate space,
+    // therefore this crop must run before any black-bar/content crop.
+    filterParts.pre = [speakerCutFilter, filterParts.scale, filterParts.crop];
   }
   const preFilter = filterParts.pre.join(",");
 
@@ -3521,7 +3583,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const watermark = buildWatermarkFilter(payload, filterParts.size);
   if (watermark) filter = [filter, watermark].join(",");
 
-  await run(FFMPEG, buildFilterCommandArgs({
+  await runFilteredEncodeWithFallback({
     input: sourcePath,
     start,
     duration: cutDuration,
@@ -3532,7 +3594,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     audioBitrate: `${sanitizeAudioBitrate(payload.audioBitrate)}k`,
     fps: sanitizeFps(payload.fps),
     progress: true
-  }), 300000, children, (encodePct) => {
+  }, 300000, children, (encodePct) => {
     // Encode adalah bagian terakhir (dari 58 → 95). NaN/0 durasi → lump.
     const t = Math.max(0, Math.min(1, Number.isFinite(cutDuration) && cutDuration > 0 ? encodePct / 100 : 1));
     setProgress(58 + Math.round(t * 37));
@@ -5027,6 +5089,8 @@ function handleExportBatch(req, res) {
               watermark: String(clipDef.watermark || ""),
               watermarkPosition: clipDef.watermarkPosition || "br",
               watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
+              speakerCut: !!clipDef.speakerCut,
+              faceTrack: !!clipDef.faceTrack,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {
@@ -5102,6 +5166,8 @@ async function handleExportCombined(req, res) {
             watermark: String(clipDef.watermark || ""),
             watermarkPosition: clipDef.watermarkPosition || "br",
             watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
+            speakerCut: !!clipDef.speakerCut,
+            faceTrack: !!clipDef.faceTrack,
             segments: clipDef.segments || []
           };
           const myIndex = index;
@@ -5233,40 +5299,43 @@ async function handleLocalAIAnalyze(req, res) {
   const projectDir = path.join(UPLOAD_DIR, projectId);
   if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
   if (!localAIModule) { sendJson(res, 503, { error: "LocalAI tidak tersedia." }); return; }
-  const videoPath = path.join(projectDir, "video.mp4");
-  let fallback = fs.existsSync(videoPath) ? videoPath : (findSourceFile(projectDir) || "");
-  if (!fallback) {
-    const manifest = readProjectManifest(projectDir);
-    if (manifest.type === "youtube") {
-      try {
-        fallback = await downloadYouTubeSection(projectDir, manifest, payload, { preview: true });
-      } catch (e) {
-        sendJson(res, 400, { error: "Gagal mengunduh bagian video untuk analisis: " + e.message });
-        return;
-      }
-    } else {
-      sendJson(res, 400, { error: "Source video tidak ditemukan. Upload video dulu." });
-      return;
-    }
-  }
-  const audioPath = path.join(projectDir, "audio.mp3");
-  if (!fs.existsSync(audioPath)) {
-    sendJson(res, 400, { error: "Belum ada audio.mp3. Jalankan Auto Caption atau Generate sekali dulu." });
-    return;
-  }
-  const sampleFps = Number(payload.sampleFps || 1);
-  const speakerCutToggle = !!payload.speakerCut;
 
-  // F12 (Phase 5/19): wrap heavy analyze+associate into Job Queue so the HTTP
-  // request_thread is NOT blocked by face-tracking which can take seconds per
-  // clip. Client polls /api/jobs/:jobId via handleJob() — job.result holds the
-  // analysis payload when status === "done".
+  const manifest = readProjectManifest(projectDir);
+  const clip = clipPayloadToClip(payload);
+  const sampleFps = Math.max(1, Math.min(5, Number(payload.sampleFps || 1)));
+  const speakerCutEnabled = !!payload.speakerCut;
+  const targetAspect = Math.max(0.1, Math.min(4, Number(payload.targetAspect || 9 / 16)));
+
+  // Heavy extraction + face analysis stays in the queue. Both speaker and face
+  // timelines are generated from the selected clip window and therefore share
+  // clip-relative timestamps (0..duration), which the CSS preview can consume
+  // directly for local files as well as downloaded YouTube sections.
   try {
     const job = createJob("localai-analyze", async (setProgress, children) => {
       setProgress(5);
-      const t = await localAIModule.analyzeForSpeakerCut({
+      let videoPath = findSourceFile(projectDir) || "";
+      let videoIsClipSection = false;
+      if (manifest.type === "youtube") {
+        videoPath = await downloadYouTubeSection(projectDir, manifest, payload, { preview: true }, children);
+        videoIsClipSection = true;
+      }
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        throw new Error("Source video tidak ditemukan. Upload atau preview video dulu.");
+      }
+
+      setProgress(18);
+      const audioPath = manifest.type === "youtube"
+        ? await downloadYouTubeAudioSection(projectDir, manifest.url, clip, children)
+        : await downloadLocalAudioSection(projectDir, clip, children);
+      const sourceProbe = await probeVideo(videoPath);
+      const sourceWidth = Math.max(1, Number(sourceProbe.width || payload.sourceW || manifest.probe?.width || 1920));
+      const sourceHeight = Math.max(1, Number(sourceProbe.height || payload.sourceH || manifest.probe?.height || 1080));
+      const clipDuration = Math.max(0.1, clip.end - clip.start);
+
+      setProgress(30);
+      const analysis = await localAIModule.analyzeForSpeakerCut({
         audioPath,
-        videoPath: fallback,
+        videoPath,
         pythonPath: VENV_PYTHON,
         speakerScript: SPEAKER_DETECT_PY,
         faceScript: FACE_DETECT_PY,
@@ -5274,46 +5343,50 @@ async function handleLocalAIAnalyze(req, res) {
         modelsRoot: MODELS_ROOT,
         sampleFps,
         minSegmentMs: Number(payload.minSegmentMs || 300),
-        noiseDb: Number(payload.noiseDb || -35)
+        noiseDb: Number(payload.noiseDb || -35),
+        faceStartSeconds: videoIsClipSection ? 0 : clip.start,
+        faceDurationSeconds: clipDuration
       });
+
       setProgress(85);
-      let associations = null;
-      if (speakerCutToggle) {
-        const faceTim = t.faceTimeline;
-        const srcW = Number(payload.sourceW || 1920);
-        const srcH = Number(payload.sourceH || 1080);
-        const targetAspect = Number(payload.targetAspect || 9 / 16);
-        associations = localAIModule.associateSpeakerWithFace(t.speakerTimeline, faceTim, {
-          sourceWidth: srcW,
-          sourceHeight: srcH,
-          targetAspect
-        });
+      const associations = speakerCutEnabled
+        ? localAIModule.associateSpeakerWithFace(analysis.speakerTimeline, analysis.faceTimeline, {
+            sourceWidth,
+            sourceHeight,
+            targetAspect
+          })
+        : [];
+      const result = {
+        speakerTimeline: analysis.speakerTimeline,
+        faceTimeline: analysis.faceTimeline,
+        associations,
+        identity: analysis.identity,
+        summary: analysis.summary,
+        backend: analysis.summary
+          ? analysis.summary.backend
+          : { speaker: "ffmpeg+numpy", face: "skipped-no-backend" },
+        source: {
+          width: sourceWidth,
+          height: sourceHeight,
+          timeline: "clip",
+          clipStart: clip.start,
+          clipEnd: clip.end
+        }
+      };
+
+      try {
+        const localaiDir = path.join(projectDir, "localai");
+        fs.mkdirSync(localaiDir, { recursive: true });
+        fs.writeFileSync(path.join(localaiDir, `analyze-${job.id}.json`), JSON.stringify(result), "utf8");
+      } catch (error) {
+        console.error("Gagal persist analyze result:", error.message);
       }
       setProgress(100);
-      const result = {
-        speakerTimeline: t.speakerTimeline,
-        faceTimeline: t.faceTimeline,
-        associations,
-        identity: t.identity,
-        summary: t.summary,
-        backend: t.summary ? t.summary.backend : { speaker: "ffmpeg+numpy", face: "skipped-no-backend" }
-      };
-      // Persist agar export pipeline dapat ambil tanpa re-analyze dan UI
-      // dapat reload hasil setelah refresh halaman.
-      try {
-        if (fs.existsSync(projectDir)) {
-          const localaiDir = path.join(projectDir, "localai");
-          fs.mkdirSync(localaiDir, { recursive: true });
-          fs.writeFileSync(path.join(localaiDir, `analyze-${job.id}.json`), JSON.stringify(result), "utf8");
-        }
-      } catch (e) {
-        console.error("Gagal persist analyze result:", e.message);
-      }
       return result;
     });
     sendJson(res, 202, { jobId: job.id, status: job.status, progress: job.progress });
-  } catch (e) {
-    sendJson(res, 500, { error: e.message || String(e) });
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || String(error) });
   }
 }
 
@@ -5500,7 +5573,7 @@ async function handleSttModels(req, res) {
 
 // Only these exact web assets are served from the project root.
 // Media (upload/preview/output) is served through dedicated /media/, /sections/, /outputs/ routes.
-const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/build/icon.png"]);
+const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/build/icon.png"]);
 
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -5652,4 +5725,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { startServer };
+module.exports = {
+  startServer,
+  _test: {
+    isNvencRuntimeFailure,
+    runWithNvencCpuFallback,
+    buildFilterCommandArgs
+  }
+};

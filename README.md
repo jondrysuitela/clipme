@@ -67,8 +67,9 @@ Cara kerjanya:
 1. Deteksi speaker berbasis energy + spectral clustering (NO ground-truth). Speaker timeline dianalisis dari audio dengan ffmpeg silencedetect + astats sebagai fallback universal — tanpa dependency wajib untuk dijalankan.
 2. Face detection lokal optional (no model download). Bilamana `opencv-python` / `mediapipe` terpasang, [NN model](https://opencv.org/) (YuNet, ~340KB) auto-download selesai di `./models/face/`.
 3. Speaker↔face association tanpa persistent tracking: pilih frame di interval speaker yang paling mungkin berisi wajah, lalu crop weighted face ke tengah scene. Untuk satu-speaker aktif, hasil stabil.
+4. Setelah **Analyze Speaker Cut**, preview menerapkan crop secara real-time lewat CSS pan/zoom (tanpa render ulang FFmpeg). Timeline yang sama dipakai oleh filter crop dinamis saat export agar perpindahan wajah konsisten.
 
-Output JSON: `{ speakerTimeline, faceTimeline?, associations?, identity }`.
+Output JSON: `{ speakerTimeline, faceTimeline?, associations?, identity, source }`.
 
 Pipeline 100% offline (no cloud). Optimalkan CLIPFORGE_ACCEL ambiance `auto|cpu|gpu`:
 
@@ -105,8 +106,10 @@ Clipper Studio secara otomatis mendeteksi hardware dan memilih runtime terbaik:
 | Komponen | CPU-only | NVIDIA GPU + CUDA | GPU tanpa CUDA |
 |----------|----------|-------------------|----------------|
 | **STT** (faster-whisper) | CPU (int8) | GPU (float16) | CPU (auto-fallback) |
-| **Video Encoding** | libx264 | h264_nvenc (NVENC) | h264_nvenc (NVENC) |
+| **Video Encoding** | libx264 | h264_nvenc (NVENC) | NVENC bila runtime valid, selain itu libx264 |
 | **UI Rendering** | Chromium CPU | Chromium GPU | Chromium GPU |
+
+Saat startup, aplikasi tidak hanya membaca daftar encoder FFmpeg: satu frame uji benar-benar di-encode untuk memastikan driver NVIDIA/`nvcuda.dll` bisa dipakai. Jika NVENC masih gagal saat export, proses otomatis menghapus output kosong dan mengulang sekali dengan `libx264` (CPU); export berikutnya tetap memakai CPU selama sesi tersebut.
 
 ### Mode Runtime
 

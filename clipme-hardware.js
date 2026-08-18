@@ -41,6 +41,20 @@ function runSync(cmd, args, timeout = 8000) {
   }
 }
 
+function commandSucceeds(cmd, args, timeout = 8000) {
+  try {
+    execFileSync(cmd, args, {
+      encoding: "utf8",
+      timeout,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function which(cmd) {
   // Check PATH for the given executable
   const paths = (process.env.PATH || "").split(path.delimiter);
@@ -185,14 +199,33 @@ function detectCudaViaPython(venvPython) {
 // ── NVENC Detection via ffmpeg ──
 
 function detectNvenc(ffmpegPath) {
-  const result = { h264: false, hevc: false, available: false };
+  const result = {
+    h264: false,
+    hevc: false,
+    compiled: false,
+    runtimeTested: false,
+    available: false,
+  };
   if (!ffmpegPath || !fs.existsSync(ffmpegPath)) return result;
 
   try {
     const out = runSync(ffmpegPath, ["-hide_banner", "-encoders"], 10000);
     result.h264 = out.includes("h264_nvenc");
     result.hevc = out.includes("hevc_nvenc");
-    result.available = result.h264 || result.hevc;
+    result.compiled = result.h264 || result.hevc;
+    if (!result.h264) return result;
+
+    // `ffmpeg -encoders` only says the binary was COMPILED with NVENC. It does
+    // not prove that the NVIDIA driver / nvcuda.dll is available at runtime.
+    // Encode one tiny synthetic frame so AUTO mode never selects a dead NVENC.
+    result.runtimeTested = true;
+    result.available = commandSucceeds(ffmpegPath, [
+      "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04",
+      "-frames:v", "1", "-an",
+      "-c:v", "h264_nvenc",
+      "-f", "null", "-"
+    ], 15000);
   } catch {
     // ffmpeg failed
   }

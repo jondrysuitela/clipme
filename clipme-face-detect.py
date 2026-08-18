@@ -4,6 +4,7 @@ clipme-face-detect.py — Face detection backend
 
 Subcommands:
     analyze --video FILE [--sample-fps N] [--models-root DIR]
+            [--start-seconds N] [--duration-seconds N]
 
 Output: JSON {
   "schema_version": 1,
@@ -62,29 +63,36 @@ def ensure_model(models_root: str) -> dict:
         return {"ok": False, "source": "download-failed", "error": str(e)}
 
 
-def sample_frames(video_path: str, sample_fps: int) -> list:
-    """Extract frames from video at given fps. Yields (t_ms, np_array BGR)."""
+def sample_frames(video_path: str, sample_fps: int, start_seconds: float = 0,
+                  duration_seconds: float = 0) -> list:
+    """Extract frames from a source window, returning clip-relative timestamps."""
     try:
         import cv2  # type: ignore
-        import numpy as np  # type: ignore
     except Exception:
         return []
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return []
     video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) * 1000 / (video_fps or 1))
-    step_frames = max(1, int(round(video_fps / sample_fps)))
+    total_frames = max(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
+    start_frame = max(0, int(round(max(0, start_seconds) * video_fps)))
+    end_frame = total_frames
+    if duration_seconds and duration_seconds > 0:
+        end_frame = min(total_frames or (start_frame + int(duration_seconds * video_fps)),
+                        start_frame + max(1, int(round(duration_seconds * video_fps))))
+    if start_frame:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    step_frames = max(1, int(round(video_fps / max(1, sample_fps))))
     frames = []
-    idx = 0
-    while True:
+    idx = start_frame
+    while end_frame <= 0 or idx < end_frame:
         ok = cap.grab()
         if not ok:
             break
-        if idx % step_frames == 0:
+        if (idx - start_frame) % step_frames == 0:
             ok, frame = cap.retrieve()
             if ok:
-                t_ms = int((idx / video_fps) * 1000) if video_fps > 0 else 0
+                t_ms = int(((idx - start_frame) / video_fps) * 1000) if video_fps > 0 else 0
                 frames.append((t_ms, frame))
         idx += 1
     cap.release()
@@ -168,14 +176,15 @@ def detect_opencv_dnn(frames, deploy_path, model_path, conf=DEFAULT_CONFIDENCE, 
     return out
 
 
-def analyze_video(video_path: str, models_root: str, sample_fps: int) -> dict:
-    """Run face detection; pick best backend available."""
+def analyze_video(video_path: str, models_root: str, sample_fps: int,
+                  start_seconds: float = 0, duration_seconds: float = 0) -> dict:
+    """Run face detection for a source window; timestamps start at zero."""
     if not Path(video_path).exists():
         return {"schema_version": SCHEMA_VERSION, "source": "error",
                 "fps": sample_fps, "frames": [], "error": f"video not found: {video_path}"}
 
     info = ensure_model(models_root)
-    frames = sample_frames(video_path, sample_fps)
+    frames = sample_frames(video_path, sample_fps, start_seconds, duration_seconds)
     if not frames:
         # opencv-python may not be installed
         return {"schema_version": SCHEMA_VERSION, "source": "skipped-no-backend",
@@ -210,8 +219,16 @@ def main():
     a.add_argument("--video", required=True)
     a.add_argument("--sample-fps", type=int, default=DEFAULT_SAMPLE_FPS)
     a.add_argument("--models-root", default="models")
+    a.add_argument("--start-seconds", type=float, default=0)
+    a.add_argument("--duration-seconds", type=float, default=0)
     args = p.parse_args()
-    out = analyze_video(args.video, args.models_root, args.sample_fps)
+    out = analyze_video(
+        args.video,
+        args.models_root,
+        args.sample_fps,
+        args.start_seconds,
+        args.duration_seconds
+    )
     print(json.dumps(out))
 
 
