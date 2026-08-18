@@ -12,7 +12,7 @@
   "scripts": {
     "start": "node server.js",
     "desktop": "electron .",
-    "test": "node phase2-test.js && node phase3-test.js && node phase4a-test.js && node phase4b-test.js && node phase5-test.js && node phase6-test.js && node phase7-test.js",
+    "test": "node phase2-test.js && node phase3-test.js && node phase4a-test.js && node phase4b-test.js && node phase5-test.js && node phase6-test.js && node phase7-test.js && node cut-to-face-test.js && node encoder-fallback-test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
@@ -35,6 +35,7 @@
       "clipme-caption-prompt.js",
       "clipme-hardware.js",
       "clipme-localai.js",
+      "clipme-cut-to-face.js",
       "transcribe_faster_whisper.py",
       "stt-engine.py",
       "clipme-speaker-detect.py",

@@ -46,7 +46,8 @@ const state = {
   exportRatios: ["portrait"],
   history: [],
   historyIndex: -1,
-  sttModel: ""
+  sttModel: "",
+  facePreviewByClip: Object.create(null)
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -74,6 +75,7 @@ const captionFontSelect = $("#captionFontSelect");
 const captionColorInput = $("#captionColor");
 const previewFrame = $("#previewFrame");
 const previewVideo = $("#previewVideo");
+const cutToFacePreviewBadge = $("#cutToFacePreviewBadge");
 const uploadStatus = $("#uploadStatus");
 const toast = $("#toast");
 const clipTime = $("#clipTime");
@@ -273,6 +275,7 @@ function applyTrim(opts = {}) {
   $("#clipRange").textContent = clipRange(clip);
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   state.previewClipKey = "";
+  resetPreviewFaceTransform();
   if (state.sourceUrl && Number.isFinite(clip.start)) previewVideo.currentTime = clip.start;
   showToast(`Clip dipangkas: ${formatTime(start)} - ${formatTime(end)}`);
 }
@@ -289,12 +292,126 @@ function setRatio(token) {
   $$(".segmented button").forEach((item) => {
     item.classList.toggle("active", item.dataset.ratio === ratio);
   });
+  updatePreviewFaceTransform();
 }
 
 function currentRatio() {
   if (previewFrame.classList.contains("wide")) return "wide";
   if (previewFrame.classList.contains("four5")) return "four5";
   return "portrait";
+}
+
+function facePreviewKey(clip = state.activeClip) {
+  if (!clip || !state.projectId) return "";
+  const startMs = Math.round((Number(clip.start) || 0) * 1000);
+  const endMs = Math.round((Number(clip.end) || 0) * 1000);
+  return `${state.projectId}:${clip.id}:${startMs}:${endMs}`;
+}
+
+function cutToFacePreviewEnabled() {
+  return Boolean(document.getElementById("speakerCutToggle")?.checked);
+}
+
+function previewUsesClipRelativeMedia() {
+  const source = String(previewVideo.currentSrc || previewVideo.src || "");
+  return Boolean(state.youtubeUrl) || /\/sections\//.test(source);
+}
+
+function resetPreviewFaceTransform() {
+  const alreadyReset = !previewFrame.classList.contains("cut-to-face-active")
+    && !previewVideo.style.transform
+    && !cutToFacePreviewBadge?.classList.contains("visible");
+  if (alreadyReset) return;
+  previewVideo.style.transition = "none";
+  previewFrame.classList.remove("cut-to-face-active");
+  previewVideo.style.removeProperty("transform");
+  void previewVideo.offsetWidth;
+  previewVideo.style.removeProperty("transition");
+  if (cutToFacePreviewBadge) {
+    cutToFacePreviewBadge.textContent = "";
+    cutToFacePreviewBadge.classList.remove("visible");
+  }
+}
+
+function registerFacePreviewAnalysis(key, data) {
+  if (!key || !data || !window.ClipmeCutToFace) return;
+  const source = data.source || {};
+  const sourceWidth = Math.max(1, Number(source.width || data.sourceWidth || previewVideo.videoWidth || 1));
+  const sourceHeight = Math.max(1, Number(source.height || data.sourceHeight || previewVideo.videoHeight || 1));
+  state.facePreviewByClip[key] = {
+    associations: Array.isArray(data.associations) ? data.associations : [],
+    sourceWidth,
+    sourceHeight,
+    timeline: source.timeline || "clip",
+    preparedRatio: "",
+    preparedAssociations: []
+  };
+}
+
+function updatePreviewFaceTransform() {
+  const engine = window.ClipmeCutToFace;
+  const analysis = state.facePreviewByClip[facePreviewKey()];
+  if (!engine || !cutToFacePreviewEnabled() || !analysis || !analysis.associations.length) {
+    resetPreviewFaceTransform();
+    return;
+  }
+
+  const ratio = currentRatio();
+  if (analysis.preparedRatio !== ratio) {
+    analysis.preparedRatio = ratio;
+    analysis.preparedAssociations = engine.prepareAssociations(
+      analysis.associations,
+      analysis.sourceWidth,
+      analysis.sourceHeight,
+      engine.ratioValue(ratio)
+    );
+  }
+  if (!analysis.preparedAssociations.length) {
+    resetPreviewFaceTransform();
+    return;
+  }
+
+  const mediaTime = Number(previewVideo.currentTime) || 0;
+  const clipStart = Number(state.activeClip && state.activeClip.start) || 0;
+  const timelineSeconds = analysis.timeline === "source"
+    ? mediaTime
+    : mediaTime - (previewUsesClipRelativeMedia() ? 0 : clipStart);
+  const active = timelineSeconds >= 0
+    ? engine.findActiveAssociation(analysis.preparedAssociations, timelineSeconds * 1000)
+    : null;
+  const crop = active
+    ? active.crop
+    : engine.centerCrop(analysis.sourceWidth, analysis.sourceHeight, engine.ratioValue(ratio));
+  const transform = engine.cropTransform(
+    crop,
+    analysis.sourceWidth,
+    analysis.sourceHeight,
+    previewFrame.clientWidth,
+    previewFrame.clientHeight
+  );
+
+  if (!previewFrame.classList.contains("cut-to-face-active")) {
+    // Prime with the same center crop as object-fit: cover before animating to
+    // the face. This prevents a one-frame stretched flash on first activation.
+    const centerTransform = engine.cropTransform(
+      engine.centerCrop(analysis.sourceWidth, analysis.sourceHeight, engine.ratioValue(ratio)),
+      analysis.sourceWidth,
+      analysis.sourceHeight,
+      previewFrame.clientWidth,
+      previewFrame.clientHeight
+    );
+    previewVideo.style.transition = "none";
+    previewFrame.classList.add("cut-to-face-active");
+    previewVideo.style.transform = centerTransform.css;
+    void previewVideo.offsetWidth;
+    previewVideo.style.removeProperty("transition");
+  }
+  previewVideo.style.transform = transform.css;
+  if (cutToFacePreviewBadge) {
+    const speaker = active && active.speaker_id ? ` · ${active.speaker_id}` : " · CENTER";
+    cutToFacePreviewBadge.textContent = `CUT-TO-FACE${speaker}`;
+    cutToFacePreviewBadge.classList.add("visible");
+  }
 }
 
 function selectedExportRatios() {
@@ -328,6 +445,7 @@ function renderEmptyClips(message) {
   previewVideo.removeAttribute("src");
   previewVideo.controls = false;
   previewFrame.classList.remove("has-video");
+  resetPreviewFaceTransform();
 }
 
 function setActiveClipOrEmpty(clip) {
@@ -550,6 +668,7 @@ function selectClip(clip) {
 
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   syncTrimHandles();
+  updatePreviewFaceTransform();
 }
 
 function showToast(message) {
@@ -773,6 +892,21 @@ async function analyzeSpeakerForClip() {
   const btn = $("#analyzeSpeakerBtn");
   const meta = $("#speakerTimelineMeta");
   if (!btn) return;
+
+  const requestedProjectId = state.projectId;
+  const requestedClip = {
+    id: state.activeClip.id,
+    start: Number(state.activeClip.start) || 0,
+    end: Number(state.activeClip.end) || 0
+  };
+  const requestedKey = facePreviewKey(state.activeClip);
+  const requestedRatio = currentRatio();
+  const speakerToggle = document.getElementById("speakerCutToggle");
+  if (speakerToggle && !speakerToggle.checked) {
+    speakerToggle.checked = true;
+    saveSettings();
+  }
+
   btn.disabled = true;
   const oldLabel = btn.textContent;
   btn.textContent = "Analyzing…";
@@ -782,45 +916,66 @@ async function analyzeSpeakerForClip() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: state.projectId,
-        clipId: state.activeClip.id,
-        start: state.activeClip.start,
-        end: state.activeClip.end,
+        projectId: requestedProjectId,
+        clipId: requestedClip.id,
+        start: requestedClip.start,
+        end: requestedClip.end,
         sampleFps: 1,
         minSegmentMs: 300,
         noiseDb: -35,
-        speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+        speakerCut: true,
         faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
-        sourceW: previewVideo.videoWidth || 1920,
-        sourceH: previewVideo.videoHeight || 1080,
-        targetAspect: currentRatio() === "portrait" ? (9/16) : currentRatio() === "wide" ? (16/9) : currentRatio() === "square" ? 1 : (4/5)
+        sourceW: previewVideo.videoWidth || 0,
+        sourceH: previewVideo.videoHeight || 0,
+        targetAspect: window.ClipmeCutToFace
+          ? window.ClipmeCutToFace.ratioValue(requestedRatio)
+          : 9 / 16
       })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Analyze gagal");
+    let data = await res.json();
+    if (!res.ok && res.status !== 202) throw new Error(data.error || "Analyze gagal");
+    if (res.status === 202) {
+      if (!data.jobId) throw new Error("Server tidak mengembalikan job analisis.");
+      if (meta) meta.textContent = "Cut-to-Face sedang dianalisis di background…";
+      data = await waitForJob(data.jobId);
+    }
+    if (!data) throw new Error("Hasil analisis kosong.");
+
     localAiState.lastTimeline = data.speakerTimeline;
     localAiState.lastAnalysisAtMs = Date.now();
+    registerFacePreviewAnalysis(requestedKey, data);
+    if (facePreviewKey() === requestedKey) updatePreviewFaceTransform();
+
     const segCount = (data.speakerTimeline && data.speakerTimeline.segments || []).length;
     const totalDur = (data.speakerTimeline && data.speakerTimeline.total_duration_ms) || 0;
     const faceCount = (data.faceTimeline && !data.faceTimeline.skipped) ? (data.faceTimeline.frames || []).length : 0;
+    const associationCount = Array.isArray(data.associations) ? data.associations.length : 0;
     const backendSrc = (data.summary && data.summary.backend && data.summary.backend.speaker) || "energy";
-    
+
     let dbgHtml = `<b>Speaker analysis:</b> ${segCount} segments (${(totalDur / 1000).toFixed(1)}s via ${backendSrc}).<br>`;
     dbgHtml += `<b>Face frames:</b> ${faceCount}<br>`;
-    
-    if (data.associations && data.associations.length > 0) {
-      dbgHtml += `<br><b>Speaker ↔ Face Association:</b><br>`;
-      data.associations.forEach((a, i) => {
+
+    if (associationCount > 0) {
+      dbgHtml += `<br><b>CSS Cut-to-Face preview aktif (${associationCount} cuts):</b><br>`;
+      data.associations.forEach((a) => {
         const s = (a.start_ms / 1000).toFixed(1);
         const e = (a.end_ms / 1000).toFixed(1);
-        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id} → Face {x:${a.face.x}, y:${a.face.y}, conf:${a.face.confidence.toFixed(2)}}</div>`;
+        const confidence = Number(a.face && a.face.confidence);
+        const confidenceText = Number.isFinite(confidence) ? confidence.toFixed(2) : "-";
+        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id || "speaker"} → Face {x:${a.face?.x ?? "-"}, y:${a.face?.y ?? "-"}, conf:${confidenceText}}</div>`;
       });
+    } else {
+      dbgHtml += "<br><b>Cut-to-Face:</b> wajah aktif belum ditemukan; preview tetap center-crop.";
     }
 
     if (meta) meta.innerHTML = dbgHtml;
-    showToast(`Analisis selesai: ${segCount} segmen, ${faceCount} wajah.`);
+    uploadStatus.textContent = `${clips.length} clips ready`;
+    showToast(associationCount
+      ? `Cut-to-Face aktif: ${associationCount} perpindahan siap dipreview.`
+      : "Analisis selesai, tetapi tidak ada wajah yang bisa diikuti.");
   } catch (e) {
     if (meta) meta.textContent = `Error: ${e.message || "Analyze gagal"}`;
+    resetPreviewFaceTransform();
     showToast(e.message || "Analyze gagal");
   } finally {
     btn.disabled = false;
@@ -1023,6 +1178,8 @@ function showView(view) {
 
 function setLocalPreview(file) {
   if (state.sourceUrl) URL.revokeObjectURL(state.sourceUrl);
+  state.facePreviewByClip = Object.create(null);
+  resetPreviewFaceTransform();
   state.sourceUrl = URL.createObjectURL(file);
   state.sourceName = file.name.replace(/\.[^.]+$/, "");
   previewVideo.src = state.sourceUrl;
@@ -1071,6 +1228,8 @@ async function uploadToBackend(file) {
 
 function loadProject(data) {
   state.projectId = data.id;
+  state.facePreviewByClip = Object.create(null);
+  resetPreviewFaceTransform();
   state.sourceUrl = data.previewUrl || "";
   state.previewClipKey = "";
   state.selectedClipIds = new Set();
@@ -1436,6 +1595,8 @@ async function exportSelectedClip() {
       watermark: state.watermark,
       watermarkPosition: state.watermarkPosition,
       watermarkOpacity: state.watermarkOpacity,
+      speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+      faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
       ratio: exportRatio,
       segments: exportSegments
     };
@@ -1551,8 +1712,17 @@ $("#playClip").addEventListener("click", playSelectedClip);
 
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
-previewVideo.addEventListener("play", () => { if (state.liveActive) updateLiveCaption(); });
-previewVideo.addEventListener("pause", () => { if (state.liveActive) updateLiveCaption(); });
+previewVideo.addEventListener("timeupdate", updatePreviewFaceTransform);
+previewVideo.addEventListener("loadedmetadata", updatePreviewFaceTransform);
+previewVideo.addEventListener("seeked", updatePreviewFaceTransform);
+previewVideo.addEventListener("play", () => {
+  if (state.liveActive) updateLiveCaption();
+  updatePreviewFaceTransform();
+});
+previewVideo.addEventListener("pause", () => {
+  if (state.liveActive) updateLiveCaption();
+  updatePreviewFaceTransform();
+});
 previewVideo.addEventListener("ended", () => {
   liveCaption.innerHTML = "";
   liveCaption.style.display = "none";
@@ -1560,6 +1730,13 @@ previewVideo.addEventListener("ended", () => {
 });
 previewVideo.addEventListener("seeked", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
 previewVideo.addEventListener("timeupdate", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
+
+if (typeof ResizeObserver === "function") {
+  const facePreviewResizeObserver = new ResizeObserver(() => updatePreviewFaceTransform());
+  facePreviewResizeObserver.observe(previewFrame);
+} else {
+  window.addEventListener("resize", updatePreviewFaceTransform);
+}
 
 function togglePreviewPlayback() {
   if (!state.projectId) { showToast("Analyze URL dulu sebelum preview."); return; }
@@ -2780,6 +2957,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
           watermark: state.watermark,
           watermarkPosition: state.watermarkPosition,
           watermarkOpacity: state.watermarkOpacity,
+          speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+          faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -2847,6 +3026,8 @@ function exportClipPayloadFor(clip) {
     watermark: state.watermark,
     watermarkPosition: state.watermarkPosition,
     watermarkOpacity: state.watermarkOpacity,
+    speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+    faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     segments: captionSegmentsForClip(clip)
   };
 }
@@ -3134,6 +3315,13 @@ loadEngineCompute();
 syncUndoRedoButtons();
 const analyzeSpeakerBtn = document.getElementById("analyzeSpeakerBtn");
 if (analyzeSpeakerBtn) analyzeSpeakerBtn.addEventListener("click", analyzeSpeakerForClip);
+const speakerCutToggle = document.getElementById("speakerCutToggle");
+if (speakerCutToggle) {
+  speakerCutToggle.addEventListener("change", () => {
+    if (speakerCutToggle.checked) updatePreviewFaceTransform();
+    else resetPreviewFaceTransform();
+  });
+}
 const downloadModelBtn = document.getElementById("downloadModelBtn");
 if (downloadModelBtn) downloadModelBtn.addEventListener("click", downloadLocalAIModel);
 loadLocalAIStatus();

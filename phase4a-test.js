@@ -94,7 +94,7 @@ for (const [label, input, expected] of durationCases) {
 
   // ---------- M-03 serveStatic ----------
   await t("M-03: allowlist exists and contains only web assets", () => {
-    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js", "\/build\/icon.png"\]\)/.test(serverSrc)) {
+    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js", "\/clipme-cut-to-face.js", "\/build\/icon.png"\]\)/.test(serverSrc)) {
       throw new Error("PUBLIC_WEB_FILES allowlist mismatch");
     }
   });
@@ -111,7 +111,7 @@ for (const [label, input, expected] of durationCases) {
   if (!srv) srv = await boot();
 
   // Allowed web assets
-  for (const p of ["/", "/index.html", "/styles.css", "/script.js"]) {
+  for (const p of ["/", "/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js"]) {
     await t(`M-03 allowed: ${p} -> 200`, async () => {
       const r = await get(srv.port, p);
       if (r.status !== 200) throw new Error(`expected 200, got ${r.status}`);

@@ -304,12 +304,19 @@ async function analyzeFace(opts) {
     return { schema_version: 1, source: "skipped-no-backend", fps: sampleFps, frames: [], skipped: true };
   }
   try {
-    const out = await runPython(pythonPath, faceScript, [
+    const args = [
       "analyze",
       "--video", videoPath,
       "--sample-fps", String(sampleFps),
       "--models-root", opts.modelsRoot || MODEL_DIR
-    ], 900000);
+    ];
+    if (Number(opts.startSeconds) > 0) {
+      args.push("--start-seconds", String(Number(opts.startSeconds)));
+    }
+    if (Number(opts.durationSeconds) > 0) {
+      args.push("--duration-seconds", String(Number(opts.durationSeconds)));
+    }
+    const out = await runPython(pythonPath, faceScript, args, 900000);
     return { ...out.json, source: "opencv-or-mediapipe" };
   } catch (e) {
     return { schema_version: 1, source: "skipped-error", fps: sampleFps, frames: [], error: String(e.message || e), skipped: true };
@@ -530,11 +537,20 @@ module.exports = {
       audioPath, videoPath = audioPath,
       pythonPath, speakerScript, faceScript,
       ffmpegPath, modelsRoot = MODEL_DIR,
-      sampleFps = 1, minSegmentMs = 250, noiseDb = -35
+      sampleFps = 1, minSegmentMs = 250, noiseDb = -35,
+      faceStartSeconds = 0, faceDurationSeconds = 0
     } = opts;
 
     const speakerTimeline = await analyzeSpeaker({ audioPath, pythonPath, speakerScript, ffmpegPath, minSegmentMs, noiseDb });
-    const faceTimeline = await analyzeFace({ videoPath, pythonPath, faceScript, sampleFps, modelsRoot });
+    const faceTimeline = await analyzeFace({
+      videoPath,
+      pythonPath,
+      faceScript,
+      sampleFps,
+      modelsRoot,
+      startSeconds: faceStartSeconds,
+      durationSeconds: faceDurationSeconds
+    });
 
     return {
       speakerTimeline,
