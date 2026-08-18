@@ -322,11 +322,6 @@
             <label class="audio-opt"><input type="checkbox" class="export-ratio-chk" data-ratio="wide"> 16:9 (wide)</label>
             <label class="audio-opt"><input type="checkbox" class="export-ratio-chk" data-ratio="four5"> 4:5</label>
             <div class="caption-hint">Centang satu atau lebih rasio. Export akan membuat satu MP4 per rasio.</div>
-            <div class="field-label">Audio enhancement</div>
-            <label class="audio-opt"><input type="checkbox" id="enhanceRemoveSilence"> Hilangkan jeda diam</label>
-            <label class="audio-opt"><input type="checkbox" id="enhanceDenoise"> Kurangi noise</label>
-            <label class="audio-opt"><input type="checkbox" id="enhanceBoost"> Perkuat suara (normalisasi)</label>
-            <div class="caption-hint">Opsional: jeda diam dipotong, noise di-filter, volume dinormalisasi saat export.</div>
             <div class="field-label">Frame rate</div>
             <select id="fpsSelect" class="inspector-input">
               <option value="24">24 fps</option>
@@ -355,15 +350,6 @@
               <option value="tl">Pojok kiri atas</option>
             </select>
             <label class="audio-opt">Opacity <input type="range" id="watermarkOpacity" min="10" max="100" value="60" style="flex:1"></label>
-            <div class="field-label">Background music</div>
-            <div class="template-actions">
-              <button class="ghost-button compact" id="bgMusicBtn" type="button">Pilih musik...</button>
-              <button class="ghost-button compact" id="bgMusicClear" type="button">Hapus</button>
-            </div>
-            <div class="caption-hint" id="bgMusicName">Belum ada musik latar.</div>
-            <label class="audio-opt">Volume musik <input type="range" id="bgMusicVolume" min="0" max="100" value="30" style="flex:1"></label>
-            <label class="audio-opt"><input type="checkbox" id="duckingToggle"> Volume ducking (musik mengecil saat ada suara)</label>
-            <input type="file" id="bgMusicFile" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" hidden>
             <div class="field-label">Model STT (offline)</div>
             <select id="sttModelSelect" class="inspector-input">
               <option value="">Auto (default)</option>

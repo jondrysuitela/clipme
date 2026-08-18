@@ -1822,56 +1822,94 @@ function captionSources(info, preferredLanguage = "Indonesia") {
   };
   const preferred = languageMap[preferredLanguage] || languageMap.Indonesia;
 
+  const sources = [];
   for (const lang of preferred) {
     for (const collection of [info.subtitles || {}, info.automatic_captions || {}]) {
       const formats = collection[lang] || [];
       const json3 = formats.find((item) => item.ext === "json3");
-      if (json3?.url) return { url: json3.url, lang };
+      if (json3?.url) sources.push({ url: json3.url, lang });
     }
   }
-
-  return null;
+  return sources;
 }
 
 async function getTranscript(info, preferredLanguage) {
-  const source = captionSources(info, preferredLanguage);
-  if (!source) return { segments: [], lang: "" };
-
-  let transcript = [];
-  try {
-    transcript = parseJson3Transcript(await getJson(source.url));
-  } catch {
-    return { segments: [], lang: "" };
-  }
-  if (!transcript.length) return { segments: [], lang: "" };
-
-  // YouTube captions tersimpan dalam bahasa asli (mis. en) — terjemahkan ke
-  // bahasa target biar preview/export/timeline konsisten dengan pilihan user.
-  // Kalau translate gagal (Argos tidak ada), tetap pakai transcript asli.
-  const targetTag = clipmeLangTag(preferredLanguage);
-  const sourceTag = source.lang;
-  if (targetTag && sourceTag && sourceTag !== targetTag && ["id", "en"].includes(sourceTag)) {
+  // Iterasi SEMUA kandidat bahasa, jangan berhenti di bahasa pertama: URL
+  // timedtext untuk bahasa yang tidak tersedia return halaman HTML (parse gagal),
+  // padahal bahasa berikutnya (mis. en) masih valid dan bisa dipakai.
+  const sources = captionSources(info, preferredLanguage);
+  for (const source of sources) {
+    let transcript = [];
     try {
-      const translated = await translateTranscriptOffline(
-        transcript.map((s) => ({ start: s.start, end: s.end, text: s.text })),
-        sourceTag,
-        targetTag
-      );
-      if (Array.isArray(translated)) {
-        return {
-          segments: transcript.map((s, i) => ({
-            start: s.start,
-            end: s.end,
-            text: translated[i] && translated[i].text ? translated[i].text : s.text
-          })),
-          lang: targetTag
-        };
-      }
+      const body = await getJson(source.url);
+      if (!body || !Array.isArray(body.events)) continue;
+      transcript = parseJson3Transcript(body);
     } catch {
-      // Abaikan — pakai caption asli jika terjemahan gagal.
+      continue;
+    }
+    if (!transcript.length) continue;
+
+    // YouTube captions tersimpan dalam bahasa asli (mis. en) — terjemahkan ke
+    // bahasa target biar preview/export/timeline konsisten dengan pilihan user.
+    // Kalau translate gagal (Argos tidak ada), tetap pakai transcript asli.
+    const targetTag = clipmeLangTag(preferredLanguage);
+    const sourceTag = source.lang;
+    if (targetTag && sourceTag && sourceTag !== targetTag && ["id", "en"].includes(sourceTag)) {
+      try {
+        const translated = await translateTranscriptOffline(
+          transcript.map((s) => ({ start: s.start, end: s.end, text: s.text })),
+          sourceTag,
+          targetTag
+        );
+        if (Array.isArray(translated)) {
+          return {
+            segments: transcript.map((s, i) => ({
+              start: s.start,
+              end: s.end,
+              text: translated[i] && translated[i].text ? translated[i].text : s.text
+            })),
+            lang: targetTag
+          };
+        }
+      } catch {
+        // Abaikan — pakai caption asli jika terjemahan gagal.
+      }
+    }
+    return { segments: transcript, lang: sourceTag };
+  }
+  return { segments: [], lang: "" };
+}
+
+// Ambil transcript YouTube dari caption resmi/otomatis (timedtext) via metadata.
+// Kunci anti-403 SABR/PO-token: TIDAK ada format video yang didownload, hanya
+// info JSON + subtitle URL. Dipakai sebagai fallback caption-first sebelum STT.
+async function fetchYouTubeTranscript(videoUrl, preferredLanguage) {
+  const clientFallbacks = [
+    YTDLP_EXTRACTOR_ARGS,
+    "youtube:player_client=default",
+    "youtube:player_client=web_embedded",
+    "youtube:player_client=tv_embedded"
+  ];
+  for (const extractorArgs of clientFallbacks) {
+    try {
+      const { stdout } = await run(YTDLP, [
+        "--no-playlist",
+        "--no-warnings",
+        "--dump-single-json",
+        "--skip-download",
+        "--js-runtimes", "node",
+        "--extractor-args", extractorArgs,
+        ...ytdlpAuthArgs(),
+        videoUrl
+      ], 120000, null);
+      const info = JSON.parse(stdout);
+      const fetched = await getTranscript(info, preferredLanguage);
+      if (fetched.segments.length) return fetched;
+    } catch {
+      // client berikutnya
     }
   }
-  return { segments: transcript, lang: sourceTag };
+  return { segments: [], lang: "" };
 }
 
 function clipCaption(segments) {
@@ -2191,89 +2229,6 @@ async function detectContentCrop(sourcePath, start, duration, children = null) {
     }
   } catch {}
   return box;
-}
-
-// Build an ffmpeg audio filter chain from payload enhancement flags.
-// - denoise: FFT denoise (afftdn) to clean up background hiss
-// - enhance: dynamic loudness normalization + gentle compression
-// Returns "" when no enhancement requested.
-// NOTE: "remove silence" is NOT an audio-only filter — trimming just the audio
-// stream desyncs it from the video (and from time-anchored captions). It is
-// handled in exportClip by cutting BOTH audio and video at the same silent
-// gaps (see detectSilenceIntervals + buildSilenceCutGraph).
-function buildAudioFilter({ denoise, enhance }) {
-  const parts = [];
-  if (denoise) {
-    parts.push("afftdn=nf=-25");
-  }
-  if (enhance) {
-    parts.push("dynaudnorm=f=200:g=15:p=0.9,acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=6dB");
-  }
-  return parts.join(",");
-}
-
-// Detect silent gaps inside a clip window. Runs ffmpeg's silencedetect on the
-// audio only (fast) and returns the non-silent "keep" intervals, relative to
-// the clip window (0..duration), i.e. the parts that must survive the cut.
-// Returns null when nothing meaningful would be removed.
-async function detectSilenceIntervals(sourcePath, start, duration, children = null) {
-  const args = ["-nostdin", "-hide_banner"];
-  if (start > 0) args.push("-ss", String(start));
-  args.push("-i", sourcePath);
-  if (duration > 0) args.push("-t", String(duration));
-  args.push("-af", "silencedetect=noise=-40dB:d=0.4");
-  args.push("-f", "null", "-");
-  let res;
-  try {
-    res = await run(FFMPEG, args, 180000, children);
-  } catch {
-    return null;
-  }
-  const silStarts = [];
-  const silEnds = [];
-  const re = /silence_start:\s*([\d.]+)|silence_end:\s*([\d.]+)/g;
-  let m;
-  while ((m = re.exec(res.stderr))) {
-    if (m[1] != null) silStarts.push(parseFloat(m[1]));
-    if (m[2] != null) silEnds.push(parseFloat(m[2]));
-  }
-  const n = Math.max(silStarts.length, silEnds.length);
-  const keeps = [];
-  let cur = 0;
-  for (let i = 0; i < n; i++) {
-    const s = silStarts[i] != null ? silStarts[i] : (silEnds[i] != null ? silEnds[i] : cur);
-    const e = silEnds[i] != null ? silEnds[i] : (silStarts[i] != null ? silStarts[i] : cur);
-    if (s > cur + 0.05) keeps.push([cur, s]);
-    cur = Math.max(cur, e);
-  }
-  if (cur < duration - 0.05) keeps.push([cur, duration]);
-  const kept = keeps.filter(([a, b]) => b - a >= 0.5);
-  const keptTotal = kept.reduce((sum, [a, b]) => sum + (b - a), 0);
-  if (!kept.length || duration - keptTotal < 0.2) return null;
-  return { keeps: kept, keptTotal };
-}
-
-// Given the keep intervals, build a time map that translates an original
-// clip-relative timestamp into the shortened (silence-cut) timeline.
-function buildSilenceTimeMap(keeps) {
-  const cum = [];
-  let acc = 0;
-  for (const [a, b] of keeps) {
-    cum.push(acc);
-    acc += (b - a);
-  }
-  const total = acc;
-  return {
-    total,
-    map(t) {
-      if (t <= keeps[0][0]) return Math.max(0, t);
-      for (let i = 0; i < keeps.length; i++) {
-        const [a, b] = keeps[i];
-        if (t <= b) return cum[i] + Math.max(0, t - a);
-      }
-      return total;
-    }
-  };
 }
 
 const CAPTION_FONT_RATIO = 0.07;
@@ -3509,57 +3464,12 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   // Detect & remove baked-in black bars from the source window before cropping.
   const contentCrop = await detectContentCrop(sourcePath, start, cutDuration, children);
   const filterParts = buildVideoFilter(payload, contentCrop);
-  const audioFilter = buildAudioFilter({
-    denoise: !!payload.denoise,
-    enhance: !!payload.enhance
-  });
-
-  const bgMusicPath = payload.bgMusicPath ? path.resolve(payload.bgMusicPath) : "";
-  const bgMusicAllowed = bgMusicPath && bgMusicPath.startsWith(DATA_ROOT + path.sep) && fs.existsSync(bgMusicPath);
-  const bgVolume = Math.max(0, Math.min(1, Number(payload.bgMusicVolume) || 0.3));
-  const ducking = !!payload.ducking;
-
   const segments = payload.captionStyle !== "off"
     ? resolveExportSegments(payload, projectDir, manifest)
     : [];
   const clipStart = Math.max(0, Number(payload.start || 0));
 
-  // "Hilangkan jeda diam": cut BOTH audio and video at the same silent gaps so
-  // the two streams (and time-anchored captions) stay in sync. Skipped when a
-  // background music mix is active (it already needs its own filter_complex).
-  let silenceKeeps = null;
-  let silenceMap = null;
-  if (payload.removeSilence && !bgMusicAllowed) {
-    const plan = await detectSilenceIntervals(sourcePath, start, cutDuration, children);
-    if (plan) {
-      silenceKeeps = plan.keeps;
-      silenceMap = buildSilenceTimeMap(plan.keeps);
-    }
-  }
-
-  // Re-time caption segments (and word timestamps) onto the shortened
-  // silence-cut timeline so the burned captions stay glued to the audio/video.
-  const exportSegments = silenceMap
-    ? segments
-        .map((s) => {
-          const ns = {
-            ...s,
-            start: silenceMap.map(s.start - clipStart) + clipStart,
-            end: silenceMap.map(s.end - clipStart) + clipStart,
-            words: (Array.isArray(s.words) ? s.words : []).map((w) => {
-              const ws = Number(w.start);
-              const we = Number(w.end);
-              return {
-                ...w,
-                start: Number.isFinite(ws) ? silenceMap.map(ws - clipStart) + clipStart : null,
-                end: Number.isFinite(we) ? silenceMap.map(we - clipStart) + clipStart : null
-              };
-            })
-          };
-          return ns;
-        })
-        .filter((s) => s.end > s.start)
-    : segments;
+  const exportSegments = segments;
 
   let timedFilters = [];
   let genOpts = null;
@@ -3611,50 +3521,16 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const watermark = buildWatermarkFilter(payload, filterParts.size);
   if (watermark) filter = [filter, watermark].join(",");
 
-  let filterComplex = "";
-  let extraInputs = [];
-  let mapSpecs = [];
-  if (silenceKeeps) {
-    // Trim the same keep-intervals out of BOTH streams, concatenate, then apply
-    // the normal video/audio chains on top. A/V stay perfectly in sync.
-    const parts = [];
-    const n = silenceKeeps.length;
-    silenceKeeps.forEach(([ka, kb], i) => {
-      parts.push(`[0:v]trim=start=${ka.toFixed(3)}:end=${kb.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`);
-      parts.push(`[0:a]atrim=start=${ka.toFixed(3)}:end=${kb.toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
-    });
-    const vin = silenceKeeps.map((_, i) => `[v${i}][a${i}]`).join("");
-    parts.push(`${vin}concat=n=${n}:v=1:a=1[vc][ac]`);
-    parts.push(`[vc]${filter}[v]`);
-    parts.push(`[ac]${audioFilter || "anull"}[a]`);
-    filterComplex = parts.join(";");
-    mapSpecs = ["[v]", "[a]"];
-  } else if (bgMusicAllowed) {
-    const voiceChain = audioFilter ? `[0:a]${audioFilter}[voice]` : "[0:a]anull[voice]";
-    const bgChain = `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${bgVolume}[bg]`;
-    if (ducking) {
-      filterComplex = `[0:v]${filter}[v];${voiceChain};${bgChain};[bg][voice]sidechaincompress=threshold=0.02:ratio=8:attack=50:release=300[bgduck];[voice][bgduck]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`;
-    } else {
-      filterComplex = `[0:v]${filter}[v];${voiceChain};${bgChain};[voice][bg]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`;
-    }
-    extraInputs = [bgMusicPath];
-    mapSpecs = ["[v]", "[aout]"];
-  }
-
   await run(FFMPEG, buildFilterCommandArgs({
     input: sourcePath,
     start,
     duration: cutDuration,
     filterGraph: filter,
-    audioFilter,
     outputPath,
     preset: sanitizePreset(payload.preset),
     crf: String(sanitizeCrf(payload.crf)),
     audioBitrate: `${sanitizeAudioBitrate(payload.audioBitrate)}k`,
     fps: sanitizeFps(payload.fps),
-    filterComplex,
-    extraInputs,
-    mapSpecs,
     progress: true
   }), 300000, children, (encodePct) => {
     // Encode adalah bagian terakhir (dari 58 → 95). NaN/0 durasi → lump.
@@ -4329,6 +4205,38 @@ async function ensureClipTranscript(projectDir, manifest, payload, children = nu
   const cached = clipTranscriptCacheRead(projectDir, payload);
   if (cached) return cached;
 
+  // YouTube tanpa transcript tersimpan: coba caption resmi/auto dulu (timedtext,
+  // tanpa download format video) — anti-403 SABR/PO-token sebelum turun ke STT.
+  if (manifest.type === "youtube") {
+    try {
+      const fetched = await fetchYouTubeTranscript(manifest.url, payload.language || "Indonesia");
+      if (fetched.segments.length) {
+        fs.writeFileSync(path.join(projectDir, "transcript.json"), JSON.stringify(fetched.segments, null, 2));
+        writeProjectManifest(projectDir, {
+          ...manifest,
+          transcriptPath: "transcript.json",
+          transcriptProvider: "youtube-captions",
+          transcriptLanguage: fetched.lang || ""
+        });
+        const clipSegments = fetched.segments.filter(
+          (seg) => seg.end > clip.start && seg.start < clip.end
+        );
+        if (clipSegments.length >= 2) {
+          const caption = clipCaption(clipSegments);
+          return {
+            provider: "youtube-captions",
+            caption,
+            hook: clipHook(caption, 0),
+            start: clip.start,
+            end: clip.end
+          };
+        }
+      }
+    } catch {
+      // Abaikan — lanjut ke STT.
+    }
+  }
+
   return transcribeClipWithCache(projectDir, manifest, payload, children, onProgress);
 }
 
@@ -4524,36 +4432,61 @@ async function handleAutoCaptions(req, res) {
 
   const clip = clipPayloadToClip(payload);
   let segments = [];
+  let fullTranscript = null;
 
   if (manifest.transcriptPath) {
     const fullPath = path.join(projectDir, manifest.transcriptPath);
-    if (fs.existsSync(fullPath)) {
-      let fullTranscript = JSON.parse(fs.readFileSync(fullPath, "utf8"));
-      // Terjemahkan transcript asli bila bahasanya berbeda dari target (konsisten
-      // dengan getTranscript). Project lama yang transcript.json-nya masih bahasa
-      // asli juga di-translate di sini.
-      const srcTag = manifest.transcriptLanguage || "";
-      const targetTag = clipmeLangTag(payload.language || "Indonesia");
-      if (srcTag && targetTag && srcTag !== targetTag && ["id", "en"].includes(srcTag)) {
-        try {
-          const translated = await translateTranscriptOffline(
-            fullTranscript.map((s) => ({ start: s.start, end: s.end, text: s.text })),
-            srcTag,
-            targetTag
-          );
-          if (Array.isArray(translated)) {
-            fullTranscript = fullTranscript.map((s, i) => ({
-              start: s.start,
-              end: s.end,
-              text: translated[i] && translated[i].text ? translated[i].text : s.text
-            }));
-          }
-        } catch {
-          // Abaikan — pakai transcript asli jika terjemahan gagal.
-        }
+    if (fs.existsSync(fullPath)) fullTranscript = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+  }
+
+  // YouTube tanpa transcript tersimpan: ambil caption resmi/auto dulu. Ini TIDAK
+  // mendownload format video sama sekali, jadi tetap jalan walau semua client
+  // media kena 403 (eksperimen SABR/PO-token). Hasil disimpan ke transcript.json
+  // agar clip berikutnya langsung terpakai.
+  if (!fullTranscript && manifest.type === "youtube") {
+    try {
+      const fetched = await fetchYouTubeTranscript(manifest.url, payload.language || "Indonesia");
+      if (fetched.segments.length) {
+        fs.writeFileSync(path.join(projectDir, "transcript.json"), JSON.stringify(fetched.segments, null, 2));
+        writeProjectManifest(projectDir, {
+          ...manifest,
+          transcriptPath: "transcript.json",
+          transcriptProvider: "youtube-captions",
+          transcriptLanguage: fetched.lang || ""
+        });
+        fullTranscript = fetched.segments;
       }
-      segments = fullTranscript.filter((s) => s.end > clip.start && s.start < clip.end);
+    } catch {
+      // Abaikan — lanjut ke STT.
     }
+  }
+
+  if (fullTranscript) {
+    let transcript = fullTranscript;
+    // Terjemahkan transcript asli bila bahasanya berbeda dari target (konsisten
+    // dengan getTranscript). Project lama yang transcript.json-nya masih bahasa
+    // asli juga di-translate di sini.
+    const srcTag = manifest.transcriptLanguage || "";
+    const targetTag = clipmeLangTag(payload.language || "Indonesia");
+    if (srcTag && targetTag && srcTag !== targetTag && ["id", "en"].includes(srcTag)) {
+      try {
+        const translated = await translateTranscriptOffline(
+          transcript.map((s) => ({ start: s.start, end: s.end, text: s.text })),
+          srcTag,
+          targetTag
+        );
+        if (Array.isArray(translated)) {
+          transcript = transcript.map((s, i) => ({
+            start: s.start,
+            end: s.end,
+            text: translated[i] && translated[i].text ? translated[i].text : s.text
+          }));
+        }
+      } catch {
+        // Abaikan — pakai transcript asli jika terjemahan gagal.
+      }
+    }
+    segments = transcript.filter((s) => s.end > clip.start && s.start < clip.end);
   }
 
   if (!segments.length) {
@@ -4950,65 +4883,6 @@ function handleOpenOutput(req, res) {
   sendJson(res, 200, { ok: true, folder: OUTPUT_DIR });
 }
 
-const BG_MUSIC_PATH = () => path.join(DATA_ROOT, "bgmusic.mp3");
-
-function handleBgMusicUpload(req, res) {
-  if (!/boundary=/i.test(req.headers["content-type"] || "")) {
-    sendJson(res, 400, { error: "Missing multipart boundary." });
-    return;
-  }
-  const id = crypto.randomUUID();
-  const rawPath = path.join(TMP_DIR, `bgmusic-${id}.raw`);
-  const ws = fs.createWriteStream(rawPath);
-  let total = 0;
-
-  (async () => {
-    try {
-      for await (const chunk of req) {
-        total += chunk.length;
-        if (total > 200 * 1024 * 1024) {
-          ws.destroy();
-          req.destroy();
-          throw new Error("File musik terlalu besar. Batas 200 MB.");
-        }
-        await writeStreamChunk(ws, chunk);
-      }
-      await closeWriteStream(ws);
-      const partDir = path.join(TMP_DIR, `bgmusic-parts-${id}`);
-      fs.mkdirSync(partDir, { recursive: true });
-      const parsed = await parseMultipartStreaming(rawPath, req.headers["content-type"], partDir);
-      const file = parsed.parts.music;
-      if (!file?.filename || !file.path || !file.size) {
-        fs.rmSync(partDir, { recursive: true, force: true });
-        fs.unlink(rawPath, () => {});
-        sendJson(res, 400, { error: "Upload musik tidak valid." });
-        return;
-      }
-      const ext = path.extname(file.filename).toLowerCase();
-      const safeExt = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"].includes(ext) ? ext : ".mp3";
-      const dest = path.join(DATA_ROOT, `bgmusic${safeExt}`);
-      try {
-        fs.renameSync(file.path, dest);
-      } catch {
-        fs.copyFileSync(file.path, dest);
-        fs.unlinkSync(file.path);
-      }
-      fs.rmSync(partDir, { recursive: true, force: true });
-      fs.unlink(rawPath, () => {});
-      for (const old of ["bgmusic.mp3", "bgmusic.wav", "bgmusic.m4a", "bgmusic.aac", "bgmusic.ogg", "bgmusic.flac", "bgmusic.opus"]) {
-        if (path.basename(dest) !== old) {
-          const oldPath = path.join(DATA_ROOT, old);
-          if (oldPath !== dest && fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch {} }
-        }
-      }
-      sendJson(res, 200, { ok: true, path: dest, name: file.filename });
-    } catch (err) {
-      fs.unlink(rawPath, () => {});
-      sendJson(res, 400, { error: err.message });
-    }
-  })();
-}
-
 function handleListQueue(req, res) {
   const list = [];
   const terminalCutoff = Date.now() - 10 * 60 * 1000;
@@ -5156,18 +5030,12 @@ function handleExportBatch(req, res) {
               captionSize: clipDef.captionSize || 23,
               fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
               captionColor: clipDef.captionColor || "",
-              removeSilence: !!clipDef.removeSilence,
-              denoise: !!clipDef.denoise,
-              enhance: !!clipDef.enhance,
               fps: sanitizeFps(clipDef.fps),
               crf: sanitizeCrf(clipDef.crf),
               audioBitrate: sanitizeAudioBitrate(clipDef.audioBitrate),
               watermark: String(clipDef.watermark || ""),
               watermarkPosition: clipDef.watermarkPosition || "br",
               watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
-              bgMusicPath: clipDef.bgMusicPath || "",
-              bgMusicVolume: Number(clipDef.bgMusicVolume) || 0.3,
-              ducking: !!clipDef.ducking,
               segments: clipDef.segments || []
             };
             exportClip(payload, (p) => {
@@ -5237,18 +5105,12 @@ async function handleExportCombined(req, res) {
             captionSize: clipDef.captionSize || 23,
             fontFamily: clipDef.fontFamily || "Arial", captionPosition: clipDef.captionPosition || 0.76,
             captionColor: clipDef.captionColor || "",
-            removeSilence: !!clipDef.removeSilence,
-            denoise: !!clipDef.denoise,
-            enhance: !!clipDef.enhance,
             fps: sanitizeFps(clipDef.fps),
             crf: sanitizeCrf(clipDef.crf),
             audioBitrate: sanitizeAudioBitrate(clipDef.audioBitrate),
             watermark: String(clipDef.watermark || ""),
             watermarkPosition: clipDef.watermarkPosition || "br",
             watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
-            bgMusicPath: clipDef.bgMusicPath || "",
-            bgMusicVolume: Number(clipDef.bgMusicVolume) || 0.3,
-            ducking: !!clipDef.ducking,
             segments: clipDef.segments || []
           };
           const myIndex = index;
@@ -5679,7 +5541,6 @@ router
   .add("GET", "/api/exports", handleListExports)
   .add("DELETE", /^\/api\/exports\/(.+)$/, (req, res, m) => handleDeleteExport(req, res, { filename: m[1] }))
   .add("POST", "/api/open-output", handleOpenOutput)
-  .add("POST", "/api/bgmusic", handleBgMusicUpload)
   .add("GET", "/api/queue", handleListQueue)
   .add("GET", "/api/system", handleSystemInfo)
   .add("DELETE", "/api/jobs/:jobId", handleCancelJob)
