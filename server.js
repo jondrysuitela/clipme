@@ -50,11 +50,14 @@ const FFPROBE = process.env.FFPROBE_PATH || path.join(BIN_DIR, "ffprobe.exe");
 // YouTube's SABR-only streaming experiment (yt-dlp#12482) makes several clients
 // return 403 on range/segment requests. Excluding android_sdkless keeps stable
 // non-SABR URLs. Client order balances resilience AND resolution:
-//   android_vr  -> up to 4K, rarely bot-checked (some SABR 403s, handled below)
-//   ios         -> up to 1080p, rarely bot-checked
-//   default     -> full format ladder (best resolution)
-//   tv          -> safest vs bot-check but caps ~720p, so kept as last resort
-const YTDLP_DEFAULT_EXTRACTOR_ARGS = "youtube:player_client=android_vr,ios,default,tv,-android_sdkless";
+//   android_vr   -> up to 4K, rarely bot-checked (some SABR 403s, handled below)
+//   ios          -> up to 1080p, rarely bot-checked
+//   default      -> full format ladder (best resolution)
+//   tv           -> safest vs bot-check but caps ~720p, so kept as last resort
+//   web_embedded / tv_embedded -> muxed-only clients, very stable vs SABR 403s;
+//                 they union extra (non-SABR) formats into the ladder without
+//                 lowering the top resolution.
+const YTDLP_DEFAULT_EXTRACTOR_ARGS = "youtube:player_client=android_vr,ios,default,tv,web_embedded,tv_embedded,-android_sdkless";
 // yt-dlp requires extractor-args in IE_KEY:ARGS form. Sanitize env value so a
 // stray value like "--retries 3" (which looks like a flag) can't break every
 // download — fall back to the known-good default in that case.
@@ -3691,7 +3694,10 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
         [format, "dash", YTDLP_EXTRACTOR_ARGS],
         ["18/best[height<=360]/best", "muxed", YTDLP_EXTRACTOR_ARGS],
         ["18/best[height<=360]/best", "muxed-default", "youtube:player_client=default"],
-        ["18/best[height<=360]/best", "muxed-mweb", "youtube:player_client=mweb"]
+        ["18/best[height<=360]/best", "muxed-mweb", "youtube:player_client=mweb"],
+        ["18/best[height<=360]/best", "muxed-webembedded", "youtube:player_client=web_embedded"],
+        ["18/best[height<=360]/best", "muxed-tvembedded", "youtube:player_client=tv_embedded"],
+        ["18/best[height<=360]/best", "muxed-android", "youtube:player_client=android"]
       ];
       let fullErr = err;
       let downloaded = false;
@@ -3938,35 +3944,66 @@ async function downloadYouTubeAudioSection(projectDir, videoUrl, clip, children 
       ], 300000, children);
     } catch (err) {
       // Same SABR 403 workaround as the video path: full download then local cut.
+      // The full-download retry MUST vary the player client — reusing the same
+      // extractor args repeats the same blocked client and 403s again.
       if (!/403|Forbidden/.test(String(err && err.message || err))) throw friendlyYtDlpError(err);
-      const rawFull = path.join(audioDir, `raw-full-${clipId}.%(ext)s`);
-      await run(YTDLP, [
-        ...ytdlpBase,
-        "-o", rawFull,
-        videoUrl
-      ], 300000, children).catch((e) => { throw friendlyYtDlpError(e); });
-      const fullFile = fs.readdirSync(audioDir)
-        .map((name) => path.join(audioDir, name))
-        .filter((filePath) => path.basename(filePath).startsWith(`raw-full-${clipId}`))
-        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
-      if (!fullFile) throw new Error("Gagal mengambil audio full dari YouTube.");
-      const tmpCut = path.join(audioDir, `cut-${clipId}.mp3`);
-      await run(FFMPEG, [
-        "-y",
-        "-ss", String(clip.start),
-        "-i", fullFile,
-        "-t", String(Math.max(0, clip.end - clip.start)),
-        "-vn",
-        "-ar", "16000",
-        "-ac", "1",
-        "-b:a", "48k",
-        tmpCut
-      ], 300000, children);
-      for (const file of fs.readdirSync(audioDir).filter((name) => name.startsWith(`raw-full-${clipId}`))) {
-        try { fs.unlinkSync(path.join(audioDir, file)); } catch {}
+      const fullAttempts = [
+        ["ba/best", "dash", YTDLP_EXTRACTOR_ARGS],
+        ["18/ba/best", "muxed-default", "youtube:player_client=default"],
+        ["18/ba/best", "muxed-mweb", "youtube:player_client=mweb"],
+        ["18/ba/best", "muxed-webembedded", "youtube:player_client=web_embedded"],
+        ["18/ba/best", "muxed-tvembedded", "youtube:player_client=tv_embedded"],
+        ["18/ba/best", "muxed-android", "youtube:player_client=android"],
+        ["ba/best", "android-music", "youtube:player_client=android_music"],
+        ["ba/best", "ios", "youtube:player_client=ios"]
+      ];
+      let fullErr = err;
+      let downloaded = false;
+      for (const [fmt, tag, extractorArgs] of fullAttempts) {
+        if (downloaded) break;
+        const rawFull = path.join(audioDir, `raw-full-${clipId}-${tag}.%(ext)s`);
+        const fullArgs = [
+          "--no-playlist",
+          "--js-runtimes", "node",
+          "--extractor-args", extractorArgs,
+          ...ytdlpAuthArgs(),
+          "--retries", "10",
+          "--fragment-retries", "10",
+          "-f", fmt,
+          "-o", rawFull,
+          videoUrl
+        ];
+        try {
+          await run(YTDLP, fullArgs, 300000, children);
+        } catch (e) {
+          fullErr = e;
+          continue;
+        }
+        const fullFile = fs.readdirSync(audioDir)
+          .map((name) => path.join(audioDir, name))
+          .filter((filePath) => path.basename(filePath).startsWith(`raw-full-${clipId}-${tag}`))
+          .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+        if (!fullFile) { fullErr = new Error("Gagal mengambil audio full dari YouTube."); continue; }
+        downloaded = true;
+        const tmpCut = path.join(audioDir, `cut-${clipId}.mp3`);
+        await run(FFMPEG, [
+          "-y",
+          "-ss", String(clip.start),
+          "-i", fullFile,
+          "-t", String(Math.max(0, clip.end - clip.start)),
+          "-vn",
+          "-ar", "16000",
+          "-ac", "1",
+          "-b:a", "48k",
+          tmpCut
+        ], 300000, children);
+        for (const file of fs.readdirSync(audioDir).filter((name) => name.startsWith(`raw-full-${clipId}-${tag}`))) {
+          try { fs.unlinkSync(path.join(audioDir, file)); } catch {}
+        }
+        try { fs.renameSync(tmpCut, outputPath); } catch { fs.copyFileSync(tmpCut, outputPath); fs.unlinkSync(tmpCut); }
+        return outputPath;
       }
-      try { fs.renameSync(tmpCut, outputPath); } catch { fs.copyFileSync(tmpCut, outputPath); fs.unlinkSync(tmpCut); }
-      return outputPath;
+      throw friendlyYtDlpError(fullErr);
     }
 
     const rawFile = fs.readdirSync(audioDir)
