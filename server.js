@@ -3682,21 +3682,12 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
           .filter((filePath) => path.basename(filePath).startsWith(`${suffix}-full-${clipId}-${tag}`));
         if (!fullFiles[0]) { fullErr = new Error("Gagal mengambil video dari YouTube (full download)."); continue; }
         downloaded = true;
-        const cutPath = path.join(sectionDir, `${suffix}-cut-${clipId}.mp4`);
+        // Direct transcode from the full file with accurate seeking to avoid A/V desync
         await run(FFMPEG, [
           "-y",
           "-ss", String(start),
           "-i", fullFiles[0],
           "-t", String(Math.max(0, end - start)),
-          "-c", "copy",
-          cutPath
-        ], 300000, children);
-        for (const rawFile of fullFiles) { try { fs.unlinkSync(rawFile); } catch {} }
-        // Transcode the cut copy so the downstream filter stage has a consistent,
-        // seekable MP4 (same treatment as the successful section path below).
-        await run(FFMPEG, [
-          "-y",
-          "-i", cutPath,
           "-c:v", "libx264",
           "-preset", options.preview ? "ultrafast" : "veryfast",
           "-crf", options.preview ? "35" : "23",
@@ -3705,7 +3696,7 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
           "-movflags", "+faststart",
           stablePath
         ], 300000, children);
-        try { fs.unlinkSync(cutPath); } catch {}
+        for (const rawFile of fullFiles) { try { fs.unlinkSync(rawFile); } catch {} }
         return stablePath;
       }
       throw friendlyYtDlpError(fullErr);
@@ -5243,10 +5234,20 @@ async function handleLocalAIAnalyze(req, res) {
   if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
   if (!localAIModule) { sendJson(res, 503, { error: "LocalAI tidak tersedia." }); return; }
   const videoPath = path.join(projectDir, "video.mp4");
-  const fallback = fs.existsSync(videoPath) ? videoPath : (findSourceFile(projectDir) || "");
-  if (!fallback || !fs.existsSync(fallback)) {
-    sendJson(res, 400, { error: "Source video tidak ditemukan. Upload video dulu." });
-    return;
+  let fallback = fs.existsSync(videoPath) ? videoPath : (findSourceFile(projectDir) || "");
+  if (!fallback) {
+    const manifest = readProjectManifest(projectDir);
+    if (manifest.type === "youtube") {
+      try {
+        fallback = await downloadYouTubeSection(projectDir, manifest, payload, { preview: true });
+      } catch (e) {
+        sendJson(res, 400, { error: "Gagal mengunduh bagian video untuk analisis: " + e.message });
+        return;
+      }
+    } else {
+      sendJson(res, 400, { error: "Source video tidak ditemukan. Upload video dulu." });
+      return;
+    }
   }
   const audioPath = path.join(projectDir, "audio.mp3");
   if (!fs.existsSync(audioPath)) {

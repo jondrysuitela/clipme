@@ -151,15 +151,20 @@
               <div class="live-caption" id="liveCaption"></div>
             </div>
           </div>
-          <div class="timeline">
-            <span id="clipTime" class="tl-label">00:00 - 00:00</span>
-            <div class="timeline-track" id="progressTrack">
-              <span id="progressBar" class="progress-fill" style="width:0%"></span>
-              <span id="trimHandleStart" class="trim-handle trim-handle-start" title="Seret untuk ubah awal clip"></span>
-              <span id="trimHandleEnd" class="trim-handle trim-handle-end" title="Seret untuk ubah akhir clip"></span>
+            <div class="timeline">
+              <span id="clipTime" class="tl-label">00:00 - 00:00</span>
+              <div class="timeline-tracks-container" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                <div class="timeline-track" id="progressTrack">
+                  <span id="progressBar" class="progress-fill" style="width:0%"></span>
+                  <span id="trimHandleStart" class="trim-handle trim-handle-start" title="Seret untuk ubah awal clip"></span>
+                  <span id="trimHandleEnd" class="trim-handle trim-handle-end" title="Seret untuk ubah akhir clip"></span>
+                </div>
+                <div class="speaker-track" id="speakerTrack" style="display:none; height: 6px; position: relative; border-radius: 4px; background: var(--line);">
+                  <!-- Speaker segments will be injected here -->
+                </div>
+              </div>
+              <span id="progressText" class="tl-label tl-status">Ready</span>
             </div>
-            <span id="progressText" class="tl-label tl-status">Ready</span>
-          </div>
           <div class="transport-row">
             <span id="clipRange">00:00 - 00:90</span>
             <div class="transport-controls">
@@ -168,8 +173,7 @@
               <input class="trim-input" id="trimEnd" type="text" inputmode="numeric" placeholder="00:30">
               <button class="ghost-button compact" id="applyTrim" type="button">Apply</button>
               <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
-              <button class="ghost-button compact" id="muteToggle" type="button" title="Mute/unmute">Mute</button>
-              <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
+                            <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
               <select id="fillerModeSelect" class="inspector-input" style="max-width:130px" title="Mode filter kata pengisi (filler)">
                 <option value="aggressive" selected>Filler: Aggressive</option>
                 <option value="light">Filler: Light</option>

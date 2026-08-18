@@ -833,12 +833,10 @@ async function downloadLocalAIModel() {
   btn.disabled = true;
   btn.textContent = "Downloading…";
   try {
-    const form = new URLSearchParams();
-    form.set("kind", "face"); // face detection bundled model; speaker uses Energy(no download)
     const res = await fetch("/api/localai/download-model", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form.toString()
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "face" })
     });
     const data = await res.json();
     if (!res.ok || (data && data.error)) throw new Error((data && data.error) || "Download gagal");
@@ -1534,13 +1532,6 @@ $("#generateButton").addEventListener("click", async () => {
 
 $("#playClip").addEventListener("click", playSelectedClip);
 
-$("#muteToggle").addEventListener("click", () => {
-  previewVideo.muted = !previewVideo.muted;
-  $("#muteToggle").textContent = previewVideo.muted ? "Unmute" : "Mute";
-});
-previewVideo.addEventListener("volumechange", () => {
-  $("#muteToggle").textContent = previewVideo.muted ? "Unmute" : "Mute";
-});
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
 previewVideo.addEventListener("play", () => { if (state.liveActive) updateLiveCaption(); });
