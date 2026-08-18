@@ -2549,7 +2549,7 @@ function generateAssStaticFilters(segments, opts) {
   return [`ass=filename=${escapedPath}`];
 }
 
-function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0, filterComplex = "", extraInputs = [], mapSpecs = [], progress = false, encoderInfo = null }) {
+function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilter, outputPath, preset = "veryfast", crf = "23", audioBitrate = "128k", fps = 0, filterComplex = "", extraInputs = [], mapSpecs = [], progress = false, encoderInfo = null, forceCpu = false }) {
   const args = ["-y"];
   if (start != null && Number(start) > 0) args.push("-ss", String(start));
   args.push("-i", input);
@@ -2572,7 +2572,7 @@ function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilt
   if (progress) args.push("-progress", "pipe:1", "-nostats");
   // Encoder: NVENC (hardware) bila tersedia, else libx264 (software).
   const enc = encoderInfo || resolveVideoEncoder();
-  if (enc.encoder === "h264_nvenc") {
+  if (!forceCpu && enc.encoder === "h264_nvenc") {
     // NVENC: preset p1-p7, kualitas via -cq (setara CRF), coba 2-pass CQ bila
     // encoder mendukung; tanpa -tune karena NVENC tidak memakainya.
     args.push(
