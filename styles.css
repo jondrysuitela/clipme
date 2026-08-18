@@ -1830,6 +1830,44 @@ input[type="range"] {
   color: var(--accent);
 }
 
+/* AI Engine panel — LocalAI status rows */
+.ai-engine-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #101417;
+  margin-bottom: 16px;
+}
+.ai-status-rows {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+.ai-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+}
+.ai-status-row > span:first-child {
+  color: var(--muted-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.ai-status-val {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: right;
+}
+.ai-status-val.ok { color: var(--ok); }
+.ai-status-val.busy { color: var(--accent); }
+.ai-status-val.idle { color: var(--queued); }
+.ai-status-val.error { color: var(--danger); }
+
 /* ---- Selection & scrollbar polish ---- */
 ::selection {
   background: color-mix(in srgb, var(--accent) 40%, transparent);

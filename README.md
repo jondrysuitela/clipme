@@ -60,6 +60,46 @@ Gunakan hanya video yang memang boleh kamu download/proses. Jika video tidak pun
 
 ## GPU / CPU Acceleration
 
+Fitur opsional LocalAI untuk speaker cut / cut-to-face otomatis. Active by default — List dibuat dengan bantuan `clipme-localai.js` + `clipme-speaker-detect.py` + `clipme-face-detect.py`.
+
+Cara kerjanya:
+
+1. Deteksi speaker berbasis energy + spectral clustering (NO ground-truth). Speaker timeline dianalisis dari audio dengan ffmpeg silencedetect + astats sebagai fallback universal — tanpa dependency wajib untuk dijalankan.
+2. Face detection lokal optional (no model download). Bilamana `opencv-python` / `mediapipe` terpasang, [NN model](https://opencv.org/) (YuNet, ~340KB) auto-download selesai di `./models/face/`.
+3. Speaker↔face association tanpa persistent tracking: pilih frame di interval speaker yang paling mungkin berisi wajah, lalu crop weighted face ke tengah scene. Untuk satu-speaker aktif, hasil stabil.
+
+Output JSON: `{ speakerTimeline, faceTimeline?, associations?, identity }`.
+
+Pipeline 100% offline (no cloud). Optimalkan CLIPFORGE_ACCEL ambiance `auto|cpu|gpu`:
+
+```powershell
+$env:CLIPFORGE_ACCEL="auto"   # default
+$env:CLIPFORGE_ACCEL="cpu"    # force CPU
+$env:CLIPFORGE_ACCEL="gpu"    # coba pakai GPU kalau tersedia
+```
+
+## Local Stack
+
+- **clipme-localai.js**: Node provider abstraction dengan 2 backend tier (energy + real pyannote).
+- **clipme-speaker-detect.py**: Python analyzer speaker diarization. 3-level fallback: `pyannote.audio` (jauh terbaik), `numpy spectral clustering`, ffmpeg silencedetect (selalu).
+- **clipme-face-detect.py**: Python analyzer face detection. 3-level fallback: `MediaPipe`, `OpenCV DNN (YuNet)` + auto-download model ringan, atau graceful-skip kalau keduanya nggak ada.
+
+UI Panel "AI Engine" di Inspector > Settings tab expose:
+
+- Panel toggle "Speaker Cut" + "Face tracking" (checkbox).
+- 4 status row (Speaker / Face / Runtime / Backend) yang real-time.
+- 2 tombol: "Analyze Speaker Cut" (POST /api/localai/analyze) + "Download Models" (POST /api/localai/download-model).
+
+Endpoints ada di server.js:
+
+- `GET /api/localai/status` → returns `{ aiBackend: { speaker, face }, runtime, hardware }`.
+- `POST /api/localai/analyze` → returns speakerTimeline + faces + associations.
+- `POST /api/localai/download-model` → trigger face model auto-download.
+
+Cache: `analyzeForSpeakerCut()` caching by sha256(audioPath) + sha256(videoPath). Re-run di clip yang sama nggak re-run pipeline.
+
+## GPU / CPU Acceleration
+
 Clipper Studio secara otomatis mendeteksi hardware dan memilih runtime terbaik:
 
 | Komponen | CPU-only | NVIDIA GPU + CUDA | GPU tanpa CUDA |

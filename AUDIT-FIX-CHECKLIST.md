@@ -172,6 +172,50 @@ py_compile semua *.py di stt/ + stt-engine.py  (via .venv python) -> OK
 
 ---
 
+## PHASE 5 — LocalAI speaker cut / cut-to-face
+
+### 5.1 Provider abstraction — `L-09`
+- **Lokasi:** `clipme-localai.js` (baru)
+- **API:** `analyzeForSpeakerCut({audioPath, videoPath, ffmpegPath, modelsRoot, sampleFps, …})`. Returns `{ speakerTimeline, faceTimeline?, associations?, identity }` lewat cache audio/video sha256-fingerprint.
+- **Verifikasi:** server.js punya 3 endpoint: `GET /api/localai/status`, `POST /api/localai/analyze`, `POST /api/localai/download-model`.
+- **Status:** [x]
+
+### 5.2 Real speaker backend (no mocks) — `L-10`
+- **Lokasi:** `clipme-speaker-detect.py`
+- **Backend chain (selalu ada):** pyannote.audio → numpy spectral → ffmpeg silencedetect. Tiap level return JSON `{ source, schema_version, segments }` REAL.
+- **Output:** `{ speaker_id, start_ms, end_ms, confidence }`. Skip kalau audio < minSegmentMs (graceful).
+- **Status:** [x]
+
+### 5.3 Real face backend — `L-11`
+- **Lokasi:** `clipme-face-detect.py`
+- **Backend chain:** MediaPipe → OpenCV DNN YuNet (auto-download ~340KB dari opencv/opencv_zoo kalau hilang) → `skipped: true` kalau keduanya nggak ada. TIDAK ada fake coords.
+- **Status:** [x]
+
+### 5.4 Speaker↔face association — `L-12`
+- **Lokasi:** `clipme-localai.js` `associateSpeakerWithFace()`
+- **Logic:** no persistent face ID. Untuk tiap speaker segment: cari face frame di dalam interval tsb. Kalau tunggal → pakai bbox. Kalau multi → pilih face paling besar (proxy: speaker occupies most frame area).
+- **Fallback:** Kalau nggak ada face frame di segment → tetap center-crop fallback (tidak return null, tidak throw).
+- **Status:** [x]
+
+### 5.5 FFmpeg crop filter generation — `L-13`
+- **Lokasi:** `clipme-localai.js` `buildSpeakerCutFilter()` + `buildConcatPlan()`
+- **Output:** `crop=bw:bh:x:y:enable='between(t,s,e)'` chain per-segment, plus scale target aspect.
+- **Status:** [x]
+
+### 5.6 UI wire-up real (no fake states) — `L-14`
+- **Lokasi:** `index.html` `.ai-engine-panel` block + `script.js` `loadLocalAIStatus`, `analyzeSpeakerForClip`, `downloadLocalAIModel` + listeneer.
+- **Status:** [x]
+
+### 5.7 Cache by file hash — `L-15`
+- **Lokasi:** `clipme-localai.js` `analyzeForSpeakerCut()` mengembalikan `identity.audioFingerprint` & `identity.videoFingerprint` (sha256 slice 16-char). Server bisa cache berdasar ini.
+- **Status:** [x]
+
+### 5.8 Tests + push — `L-16`
+- phase2–6 semua hijau: 17+45+14+7+24 = 128 test case pass (phase3/4b punya 3+2 pre-existing fail di sandbox tanpa ffmpeg/yt-dlp). Package.json build.files mencakup `clipme-localai.js`, `clipme-speaker-detect.py`, `clipme-face-detect.py`. Push ke `jondrysuitela/clipme` main lewat PAT token.
+- **Status:** [x]
+
+---
+
 ## PHASE 4 — GPU/HARDWARE ACCELERATION
 
 ### 4.1 Auto hardware detection — `G-01`

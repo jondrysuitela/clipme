@@ -249,6 +249,26 @@
             </div>
           </div>
           <div class="tab-panel" id="settingsTab">
+            <div class="ai-engine-panel">
+              <div class="field-label">AI Engine</div>
+              <label class="audio-opt" style="margin-bottom:6px">
+                <input type="checkbox" id="speakerCutToggle"> Speaker Cut (auto-zoom ke speaker aktif)
+              </label>
+              <label class="audio-opt" style="margin-bottom:6px">
+                <input type="checkbox" id="faceTrackToggle" checked> Face tracking (butuh OpenCV / MediaPipe)
+              </label>
+              <div class="ai-status-rows">
+                <div class="ai-status-row"><span>Speaker</span><span id="localaiSpeaker" class="ai-status-val">—</span></div>
+                <div class="ai-status-row"><span>Face</span><span id="localaiFace" class="ai-status-val">—</span></div>
+                <div class="ai-status-row"><span>Runtime</span><span id="localaiRuntime" class="ai-status-val">AUTO</span></div>
+                <div class="ai-status-row"><span>Backend</span><span id="localaiBackend" class="ai-status-val">CPU</span></div>
+              </div>
+              <div class="template-actions" style="margin-top:8px;">
+                <button class="ghost-button compact" id="analyzeSpeakerBtn" type="button">Analyze Speaker Cut</button>
+                <button class="ghost-button compact" id="downloadModelBtn" type="button">Download Models</button>
+              </div>
+              <div id="speakerTimelineMeta" class="caption-hint">Speaker timeline metadata akan muncul di sini.</div>
+            </div>
             <div class="field-label">Template preset</div>
             <select id="templateSelect" class="inspector-input">
               <option value="__default">Pilih template...</option>

@@ -678,14 +678,14 @@ function updateEngineStatus(jobs) {
 
 // F11: tampilkan konfigurasi engine NYATA dari server (device + model + tipe
 // komputasi), bukan label statis "CPU-ONLY". Update ulang tiap 15 detik.
+function setEngineVal(id, text, cls = "idle", title = "") {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = `engine-value ${cls}`;
+  if (title) el.title = title;
+}
 async function loadEngineCompute() {
-  const set = (id, text, cls = "idle", title = "") => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = text;
-    el.className = `engine-value ${cls}`;
-    if (title) el.title = title;
-  };
   try {
     const res = await fetch("/api/system");
     if (!res.ok) throw new Error("bad status");
@@ -728,6 +728,124 @@ async function loadEngineCompute() {
     set("engineCpu", "—", "idle");
     set("engineGpu", "—", "idle");
     set("engineAccel", "—", "idle");
+  }
+}
+
+// F12: status panel AI Engine. Polls /api/localai/status every 30s — speaker
+// detection backend (pyannote/energy), face (MediaPipe/OpenCV/skip), runtime
+// info. Show real backend availability, bukan "GPU Unknown" placeholder.
+const localAiState = { lastTimeline: null, lastAnalysisAtMs: 0 };
+
+async function loadLocalAIStatus() {
+  try {
+    const res = await fetch("/api/localai/status");
+    if (!res.ok) throw new Error("bad status");
+    const s = await res.json();
+    const setStatus = (id, text, cls = "idle", title = "") => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text;
+      el.className = `ai-status-val ${cls}`;
+      if (title) el.title = title;
+    };
+    const aiBackend = (s && s.aiBackend) || {};
+    const spk = aiBackend.speaker || {};
+    const fce = aiBackend.face || {};
+    const runtime = (s && s.runtime) || { mode: "AUTO", encoder: "libx264" };
+    const titleSpk = spk.available
+      ? `${spk.label}${spk.backend ? " · " + spk.backend : ""}`
+      : (spk.label || "tidak tersedia — install pyannote-audio atau pakai ffmpeg fallback");
+    setStatus("localaiSpeaker", spk.available ? "✓ Auto" : "— Skip", spk.available ? "ok" : "idle", titleSpk);
+    setStatus("localaiFace", fce.available ? "✓ Auto" : "— Skip", fce.available ? "ok" : "idle", fce.label || "tidak tersedia — install opencv-python / mediapipe");
+    setStatus("localaiRuntime", String(runtime.mode || "AUTO").toUpperCase(), runtime.mode === "GPU" ? "busy" : "ok", runtime.reason || "");
+    setStatus("localaiBackend", ["STT:" + (runtime.sttDevice || runtime.encoder || "CPU"), "ENC:" + (runtime.encoder || "libx264")].join(" · "), runtime.gpuUsed ? "busy" : "ok", runtime.reason || "");
+  } catch {
+    const off = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = "—";
+      el.className = "ai-status-val idle";
+    };
+    off("localaiSpeaker"); off("localaiFace"); off("localaiRuntime"); off("localaiBackend");
+  }
+}
+
+async function analyzeSpeakerForClip() {
+  if (!state.projectId || !state.activeClip) {
+    showToast("Pilih clip dan project dulu.");
+    return;
+  }
+  const btn = $("#analyzeSpeakerBtn");
+  const meta = $("#speakerTimelineMeta");
+  if (!btn) return;
+  btn.disabled = true;
+  const oldLabel = btn.textContent;
+  btn.textContent = "Analyzing…";
+  if (meta) meta.textContent = "Analyzing speaker + face (energy + spectral — heavy Python call)…";
+  try {
+    const res = await fetch("/api/localai/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: state.projectId,
+        clipId: state.activeClip.id,
+        start: state.activeClip.start,
+        end: state.activeClip.end,
+        sampleFps: 1,
+        minSegmentMs: 300,
+        noiseDb: -35,
+        speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+        faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+        sourceW: previewVideo.videoWidth || 1920,
+        sourceH: previewVideo.videoHeight || 1080,
+        targetAspect: currentRatio() || (9 / 16)
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Analyze gagal");
+    localAiState.lastTimeline = data.speakerTimeline;
+    localAiState.lastAnalysisAtMs = Date.now();
+    const segCount = (data.speakerTimeline && data.speakerTimeline.segments || []).length;
+    const totalDur = (data.speakerTimeline && data.speakerTimeline.total_duration_ms) || 0;
+    const faceCount = (data.faceTimeline && !data.faceTimeline.skipped) ? (data.faceTimeline.frames || []).length : 0;
+    const backendSrc = (data.summary && data.summary.backend && data.summary.backend.speaker) || "energy";
+    if (meta) {
+      meta.textContent = `${segCount} speaker segments (${(totalDur / 1000).toFixed(1)}s via ${backendSrc}). ` +
+        `${(data.associations || []).length} crops${faceCount ? `, ${faceCount} face frames.` : ""}`;
+    }
+    showToast(`Speaker analysis: ${segCount} segments${faceCount ? ", facetrack frames" : ""}.`);
+  } catch (e) {
+    if (meta) meta.textContent = `Error: ${e.message || "Analyze gagal"}`;
+    showToast(e.message || "Analyze gagal");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
+}
+
+async function downloadLocalAIModel() {
+  const btn = $("#downloadModelBtn");
+  if (!btn) return;
+  const oldLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Downloading…";
+  try {
+    const form = new URLSearchParams();
+    form.set("kind", "face"); // face detection bundled model; speaker uses Energy(no download)
+    const res = await fetch("/api/localai/download-model", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString()
+    });
+    const data = await res.json();
+    if (!res.ok || (data && data.error)) throw new Error((data && data.error) || "Download gagal");
+    showToast("Face model downloaded.");
+    await loadLocalAIStatus();
+  } catch (e) {
+    showToast(e.message || "Download gagal");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
   }
 }
 
@@ -3052,5 +3170,11 @@ refreshStorage();
 pollQueue();
 loadEngineCompute();
 syncUndoRedoButtons();
+const analyzeSpeakerBtn = document.getElementById("analyzeSpeakerBtn");
+if (analyzeSpeakerBtn) analyzeSpeakerBtn.addEventListener("click", analyzeSpeakerForClip);
+const downloadModelBtn = document.getElementById("downloadModelBtn");
+if (downloadModelBtn) downloadModelBtn.addEventListener("click", downloadLocalAIModel);
+loadLocalAIStatus();
 setInterval(pollQueue, 5000);
 setInterval(loadEngineCompute, 15000);
+setInterval(loadLocalAIStatus, 30000);
