@@ -1999,6 +1999,12 @@ function updateLiveCaption() {
     const span = document.createElement("span");
     span.className = "lc-word";
     span.textContent = seg.text;
+    
+    // Warnai teks jika ada speaker_id dan bukan style karaoke
+    if (seg.speaker_id && style !== "karaoke" && style !== "off") {
+        span.style.color = getSpeakerColor(seg.speaker_id);
+    }
+    
     cap.appendChild(span);
   }
   liveCaption.innerHTML = "";
