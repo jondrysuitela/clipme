@@ -2973,7 +2973,9 @@ function collectSettings() {
     exportRatios: state.exportRatios,
     captionStyle: style,
     captionSize: Number(captionSize.value) || 23,
-    captionPosition: state.captionPosition || 0.76
+    captionPosition: state.captionPosition || 0.76,
+    speakerCut: !!$("#speakerCutToggle")?.checked,
+    faceTrack: !!$("#faceTrackToggle")?.checked,
   };
 }
 
@@ -3007,8 +3009,16 @@ function loadSettings() {
   if (Array.isArray(data.exportRatios)) {
     const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
     if (valid.length) state.exportRatios = valid;
-  }
-  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+  }  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
 
   $("#enhanceRemoveSilence").checked = state.removeSilence;
   $("#enhanceDenoise").checked = state.denoise;
@@ -3025,7 +3035,12 @@ function loadSettings() {
   $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
-  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
+  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));  $("#speakerCutToggle").checked = state.speakerCut;
+  $("#faceTrackToggle").checked = state.faceTrack;  $("#speakerCutToggle").checked = state.speakerCut;
+  $("#faceTrackToggle").checked = state.faceTrack;  const sct = document.getElementById("speakerCutToggle");
+  if (sct) sct.checked = state.speakerCut;
+  const ftt = document.getElementById("faceTrackToggle");
+  if (ftt) ftt.checked = state.faceTrack;
   applyCaptionPosition();
 }
 
@@ -3052,7 +3067,9 @@ const settingsControls = [
   ["change", ".export-ratio-chk"],
   ["change", "#captionStyleSelect"],
   ["input", "#captionSize"],
-  ["input", "#captionPosition"]
+  ["input", "#captionPosition"],
+  ["change", "#speakerCutToggle"],
+  ["change", "#faceTrackToggle"]
 ];
 settingsControls.forEach(([eventName, sel]) => {
   $$(sel).forEach((el) => el.addEventListener(eventName, saveSettingsDebounced));
@@ -3093,8 +3110,16 @@ function applyTemplateData(data) {
   if (Array.isArray(data.exportRatios)) {
     const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
     if (valid.length) state.exportRatios = valid;
-  }
-  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+  }  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
+  state.speakerCut = !!data.speakerCut;
+  state.faceTrack = !!data.faceTrack;
+
 
   $("#enhanceRemoveSilence").checked = state.removeSilence;
   $("#enhanceDenoise").checked = state.denoise;

@@ -430,6 +430,33 @@ function hashFile(path) {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+// F12b: pickClipSpeakerCrop — from analyzeForSpeakerCut's associations list,
+// find the dominant speaker face box overlapping the clip range and return
+// a single crop box (real numbers, NEVER mock coords). Real implementation.
+function pickClipSpeakerCrop(associations, clipStartMs, clipEndMs) {
+  if (!Array.isArray(associations) || !associations.length) return null;
+  const inRange = associations.filter((a) => {
+    if (!a || typeof a.start_ms !== "number" || typeof a.end_ms !== "number") return false;
+    if (!a.crop || typeof a.crop.w !== "number" || typeof a.crop.h !== "number") return false;
+    return a.end_ms > clipStartMs && a.start_ms < clipEndMs;
+  });
+  if (!inRange.length) return null;
+  // Choose largest face area first, then longest speaker segment.
+  inRange.sort((a, b) => {
+    const aw = (a.crop.w || 0) * (a.crop.h || 0);
+    const bw = (b.crop.w || 0) * (b.crop.h || 0);
+    if (bw !== aw) return bw - aw;
+    return (b.end_ms - b.start_ms) - (a.end_ms - a.start_ms);
+  });
+  const top = inRange[0];
+  return {
+    x: Math.max(0, top.crop.x || 0),
+    y: Math.max(0, top.crop.y || 0),
+    w: top.crop.w || 0,
+    h: top.crop.h || 0
+  };
+}
+
 module.exports = {
   STATUS,
   MODEL_CATALOG,
@@ -447,8 +474,10 @@ module.exports = {
   associateSpeakerWithFace,
   buildSpeakerCutFilter,
   buildConcatPlan,
+  pickClipSpeakerCrop,
   // helpers
   hashFile,
+  pickClipSpeakerCrop,
   // combined entry point
   async analyzeForSpeakerCut(opts) {
     const {
@@ -474,5 +503,25 @@ module.exports = {
         backend: { speaker: speakerTimeline.backend, face: faceTimeline.source || "skipped" }
       }
     };
+  },
+
+  // listAnalyzeJobs: used by server to find cached analysis results
+  async listAnalyzeJobs(projectDir) {
+    const localaiDir = path.join(projectDir, "localai");
+    if (!fs.existsSync(localaiDir)) return [];
+    const names = await fs.promises.readdir(localaiDir);
+    const jobs = [];
+    for (const name of names) {
+      if (!name.startsWith("analyze-") || !name.endsWith(".json")) continue;
+      const filePath = path.join(localaiDir, name);
+      try {
+        const content = await fs.promises.readFile(filePath, "utf8");
+        const result = JSON.parse(content);
+        jobs.push({ jobId: name.replace(".json", ""), result, filePath });
+      } catch (e) {
+        console.warn(`Gagal membaca cached LocalAI job ${filePath}: ${e.message}`);
+      }
+    }
+    return jobs;
   }
 };

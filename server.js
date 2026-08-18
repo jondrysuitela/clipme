@@ -3400,6 +3400,8 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   payload.captionStyle = sanitizeString(payload.captionStyle || "bold", 20);
   payload.fontFamily = String(payload.fontFamily || "Arial").slice(0, 40);
   payload.captionColor = sanitizeColor(payload.captionColor);
+  payload.speakerCut = !!payload.speakerCut;
+  payload.faceTrack = !!payload.faceTrack;
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
   // Caption "off" atau segmen sudah dikirim client → tidak perlu STT sama sekali.
@@ -3438,6 +3440,71 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const end = isSectionSource ? originalEnd - originalStart : originalEnd;
   const cutDuration = end - start;
   payload.duration = cutDuration;
+
+  // Speaker Cut / Cut-to-Face analysis (if enabled).
+  let speakerCutFilter = null;
+  if (payload.speakerCut && localAIModule) {
+    const videoFilePath = sourcePath;
+    if (!videoFilePath) {
+      throw new Error("Speaker Cut: Source video tidak ditemukan.");
+    }
+    const probe = await probeVideo(videoFilePath);
+    const sourceVideoWidth = probe.width || 1920;
+    const sourceVideoHeight = probe.height || 1080;
+
+    const audioAnalysisPath = path.join(TMP_DIR, `audio-extract-${payload.projectId}-${payload.clipId}.mp3`);
+    let shouldExtractAudio = true;
+    if (fs.existsSync(audioAnalysisPath)) {
+      const currentAudioHash = await localAIModule.hashFile(audioAnalysisPath).catch(() => null);
+      const sourceVideoHash = await localAIModule.hashFile(videoFilePath).catch(() => null);
+      if (currentAudioHash === sourceVideoHash) shouldExtractAudio = false;
+    }
+
+    if (shouldExtractAudio) {
+      setProgress(22);
+      await run(FFMPEG, [
+        "-y", "-i", videoFilePath, "-ss", String(originalStart), "-t", String(cutDuration),
+        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", audioAnalysisPath
+      ], 300000, children, (p) => setProgress(22 + Math.round(p / 100 * 5)));
+    }
+    setProgress(28);
+
+    const analyzeJobPayload = {
+      projectId: payload.projectId, clipId: payload.clipId, start: payload.start, end: payload.end,
+      audioPath: audioAnalysisPath, videoPath: videoFilePath, pythonPath: VENV_PYTHON,
+      speakerScript: SPEAKER_DETECT_PY, faceScript: FACE_DETECT_PY, ffmpegPath: FFMPEG, modelsRoot: MODELS_ROOT,
+      sampleFps: 1, minSegmentMs: 300, noiseDb: -35,
+      enableFaceTracking: payload.faceTrack, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
+      targetAspect: resolveRatio(payload.ratio)
+    };
+
+    const analyzePayloadHash = crypto.createHash('sha1').update(JSON.stringify(analyzeJobPayload)).digest('hex');
+    const localaiCachePath = path.join(projectDir, "localai", `analyze-${analyzeJobPayload.clipId}-${analyzePayloadHash}.json`);
+
+    let analyzeResult;
+    if (fs.existsSync(localaiCachePath)) {
+      analyzeResult = JSON.parse(fs.readFileSync(localaiCachePath, "utf8"));
+    } else {
+      setProgress(30);
+      const analyzeJob = createJob("localai-analyze", async (p, c) => {
+        const t = await localAIModule.analyzeForSpeakerCut(analyzeJobPayload, p, c);
+        const localaiDir = path.join(projectDir, "localai");
+        fs.mkdirSync(localaiDir, { recursive: true });
+        fs.writeFileSync(localaiCachePath, JSON.stringify(t), "utf8");
+        return t;
+      });
+      analyzeResult = await waitForJob(analyzeJob.id);
+      if (analyzeResult.error) throw new Error(`LocalAI Analyze job failed: ${analyzeResult.error}`);
+    }
+    setProgress(55);
+
+    if (analyzeResult && analyzeResult.associations && analyzeResult.associations.length > 0) {
+      const crop = localAIModule.pickClipSpeakerCrop(analyzeResult.associations, originalStart * 1000, originalEnd * 1000);
+      if (crop) {
+        speakerCutFilter = `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`;
+      }
+    }
+  }
 
   // Detect & remove baked-in black bars from the source window before cropping.
   const contentCrop = await detectContentCrop(sourcePath, start, cutDuration, children);
@@ -3514,8 +3581,16 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     }
   }
 
-  const preFilter = filterParts.pre.join(",");
   let filter;
+  if (speakerCutFilter) {
+    if (filterParts.pre && filterParts.pre.length > 0) {
+      filterParts.pre = [...(contentCrop ? [`crop=${contentCrop.w}:${contentCrop.h}:${contentCrop.x}:${contentCrop.y}`] : []), speakerCutFilter, filterParts.scale, filterParts.crop];
+    } else {
+      filterParts.pre = [speakerCutFilter, filterParts.scale, filterParts.crop];
+    }
+  }
+  const preFilter = filterParts.pre.join(",");
+
   if (payload.captionStyle === "off") {
     filter = preFilter;
   } else if (timedFilters.length) {
