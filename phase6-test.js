@@ -74,7 +74,7 @@ function run(name, args) {
   return sandbox[name](...args);
 }
 
-const SERVER_FNS = ["normalizeClientSegments"];
+const SERVER_FNS = ["normalizeClientSegments", "normalizeSegmentWordTimestamps"];
 const srvSandbox = new Function(
   "cleanCaptionText",
   SERVER_FNS.map((n) => {
@@ -90,6 +90,7 @@ function srvRun(name, args) {
 const srvResolveExport = new Function(
   "cleanCaptionText",
   [
+    (() => { const f = extractFrom(serverSrc, "normalizeSegmentWordTimestamps"); return `function normalizeSegmentWordTimestamps(${f.params}) { ${f.body} }`; })(),
     (() => { const f = extractFrom(serverSrc, "normalizeClientSegments"); return `function normalizeClientSegments(${f.params}) { ${f.body} }`; })(),
     "let getClipTranscriptSegments = null;",
     (() => { const f = extractFrom(serverSrc, "resolveExportSegments"); return `function resolveExportSegments(${f.params}) { ${f.body} }`; })()

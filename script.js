@@ -39,7 +39,6 @@ const state = {
   removeSilence: false,
   denoise: false,
   enhance: false,
-  autoZoom: false,
   fps: 25,
   crf: 23,
   audioBitrate: 128,
@@ -59,6 +58,16 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+function clipmeLangTag(language) {
+  if (language === "English") return "en";
+  if (language === "Mixed") return "mix";
+  return "id";
+}
+
+// Bahasa target caption tetap Indonesia (dropdown Language dihapus). STT
+// auto-detect bahasa asli audio; terjemahan otomatis menyesuaikan.
+const CAPTION_LANG = "Indonesia";
 
 const clipList = $("#clipList");
 const previewTitle = $("#previewTitle");
@@ -93,6 +102,12 @@ function captionPreviewFontPx() {
   return Math.max(8, Math.round(frameW * CAPTION_FONT_RATIO * (Number(captionSize.value || CAPTION_FONT_BASE) / CAPTION_FONT_BASE)));
 }
 
+function applyCaptionPosition() {
+  const bottom = `${(1 - (state.captionPosition || 0.76)) * 100}%`;
+  captionBox.style.bottom = bottom;
+  liveCaption.style.bottom = bottom;
+}
+
 function applyCaptionVisuals() {
   const font = (captionFontSelect && captionFontSelect.value) || "Arial";
   const color = captionColorInput ? captionColorInput.value : "";
@@ -120,10 +135,21 @@ function renderStaticCaption() {
   const style = $("#captionStyleSelect").value;
   captionBox.style.fontSize = `${captionPreviewFontPx()}px`;
   captionBox.className = "caption-box" + (style !== "off" ? ` lc-${style}` : "");
-  captionBox.style.bottom = `${(state.captionPosition || 0.76) * 100}%`;
+  // Sama dengan export: posisi diukur dari ATAS frame (baseY = H * position).
+  applyCaptionPosition();
   applyCaptionVisuals();
   const hasText = captionBox.textContent && captionBox.textContent.replace(/"/g, "").trim();
   captionBox.style.display = style !== "off" && hasText ? "block" : "none";
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
 function formatTime(totalSeconds) {
@@ -218,7 +244,7 @@ function syncUndoRedoButtons() {
 }
 
 function refreshAfterEditableChange() {
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   syncTrimInputs();
   if (state.activeClip) {
     $("#clipRange").textContent = clipRange(state.activeClip);
@@ -250,7 +276,7 @@ function applyTrim(opts = {}) {
   syncTrimInputs();
   clipTime.textContent = clipRange(clip);
   $("#clipRange").textContent = clipRange(clip);
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   state.previewClipKey = "";
   if (state.sourceUrl && Number.isFinite(clip.start)) previewVideo.currentTime = clip.start;
   showToast(`Clip dipangkas: ${formatTime(start)} - ${formatTime(end)}`);
@@ -351,7 +377,7 @@ function renderClips(list = clips) {
       pushHistory();
       const [moved] = clips.splice(draggedIndex, 1);
       clips.splice(targetIndex, 0, moved);
-      renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+      renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
       showToast(`Urutan clip diubah: Clip ${String(moved.id).padStart(2, "0")}.`);
     });
 
@@ -375,16 +401,37 @@ function renderClips(list = clips) {
     const body = document.createElement("span");
     const heading = document.createElement("h3");
     heading.textContent = `Clip ${String(clip.id).padStart(2, "0")} - ${clip.title}`;
+
+    const tags = document.createElement("span");
+    tags.className = "clip-meta";
+    if (!clip.placeholder && clip.hookType) {
+      const hookTag = document.createElement("span");
+      hookTag.className = "clip-tag hook-type";
+      hookTag.textContent = clip.hookType;
+      tags.appendChild(hookTag);
+    }
+    if (!clip.placeholder && Number.isFinite(clip.confidence)) {
+      const confTag = document.createElement("span");
+      confTag.className = "clip-tag meta";
+      confTag.textContent = `${clip.confidence}%`;
+      tags.appendChild(confTag);
+    }
+    if (Number.isFinite(clip.start) && Number.isFinite(clip.end)) {
+      const durTag = document.createElement("span");
+      durTag.className = "clip-tag meta";
+      durTag.textContent = clipRange(clip);
+      tags.appendChild(durTag);
+    }
+
     const meta = document.createElement("p");
-    meta.appendChild(document.createTextNode(clipRange(clip)));
-    meta.appendChild(document.createElement("br"));
     meta.appendChild(document.createTextNode(clip.hook));
     body.appendChild(heading);
+    body.appendChild(tags);
     body.appendChild(meta);
 
     const score = document.createElement("span");
     score.className = "score";
-    score.textContent = `${clip.score}%`;
+    score.textContent = clip.score != null && !clip.placeholder ? `${clip.score}%` : "--";
 
     button.appendChild(check);
     button.appendChild(thumb);
@@ -401,7 +448,7 @@ function toggleClipSelected(clipId) {
   } else {
     state.selectedClipIds.add(clipId);
   }
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
 }
 
 function syncTrimHandles() {
@@ -457,7 +504,7 @@ function initTrimHandleDrag() {
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
-        renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+        renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
         if (historyPushed) showToast("Trim diubah via drag.");
       };
       document.addEventListener("mousemove", onMove);
@@ -476,6 +523,8 @@ function selectClip(clip) {
     renderEmptyClips();
     captionTimelinePanel.style.display = "none";
     state.captionLoadedFor = "";
+    $("#clipScore").textContent = "--";
+    $("#clipDuration").textContent = "--";
     return;
   }
   window.clearInterval(state.loopTimer);
@@ -486,6 +535,8 @@ function selectClip(clip) {
     state.captionSegments = [];
     captionTimelinePanel.style.display = "none";
   }
+  const translateFromSel = $("#translateFrom");
+  if (translateFromSel && translateFromSel.value !== "auto") translateFromSel.value = "auto";
   liveCaption.innerHTML = "";
   liveCaption.style.display = "none";
   previewTitle.textContent = `Clip ${String(clip.id).padStart(2, "0")} - ${clip.title}`;
@@ -494,13 +545,15 @@ function selectClip(clip) {
   hookInput.value = clip.hook;
   captionInput.value = clip.caption;
   clipTime.textContent = clipRange(clip);
+  $("#clipScore").textContent = clip.score != null && !clip.placeholder ? `${clip.score}%` : "--";
+  $("#clipDuration").textContent = clipRange(clip);
   syncTrimInputs();
 
   if (state.sourceUrl && Number.isFinite(clip.start)) {
     previewVideo.currentTime = clip.start;
   }
 
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   syncTrimHandles();
 }
 
@@ -554,6 +607,7 @@ async function pollQueue() {
     const response = await fetch("/api/queue");
     const data = await response.json();
     const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    updateEngineStatus(jobs);
     if (!jobs.length) {
       el.innerHTML = '<div class="empty-state">Tidak ada job aktif.</div>';
       return;
@@ -562,15 +616,21 @@ async function pollQueue() {
     for (const job of jobs) {
       const row = document.createElement("div");
       row.className = "table-row";
+      row.dataset.status = job.status;
 
       const main = document.createElement("div");
       const name = document.createElement("strong");
-      name.textContent = `${job.type} - ${job.status}`;
+      name.textContent = job.type;
       const meta = document.createElement("span");
       meta.textContent = `${job.progress || 0}%`;
       main.appendChild(name);
       main.appendChild(meta);
       row.appendChild(main);
+
+      const pill = document.createElement("span");
+      pill.className = `status-pill ${statusPillClass(job.status)}`;
+      pill.textContent = job.status;
+      row.appendChild(pill);
 
       if (job.status === "queued" || job.status === "running") {
         const cancel = document.createElement("button");
@@ -587,6 +647,54 @@ async function pollQueue() {
       el.appendChild(row);
     }
   } catch {}
+}
+
+function statusPillClass(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "running": return "status-pill-running";
+    case "done": return "status-pill-done";
+    case "failed": return "status-pill-failed";
+    case "cancelled": case "canceled": return "status-pill-cancelled";
+    default: return "status-pill-queued";
+  }
+}
+
+function updateEngineStatus(jobs) {
+  const el = $("#engineQueueStatus");
+  if (!el) return;
+  const active = (jobs || []).filter((j) => j.status === "running").length;
+  const queued = (jobs || []).filter((j) => j.status === "queued").length;
+  if (active === 0 && queued === 0) {
+    el.textContent = "QUEUE READY";
+    el.className = "engine-value idle";
+  } else if (active > 0) {
+    el.textContent = `${active} RUNNING${queued ? " +" + queued + " QUEUED" : ""}`;
+    el.className = "engine-value busy";
+  } else {
+    el.textContent = `${queued} QUEUED`;
+    el.className = "engine-value idle";
+  }
+}
+
+// F11: tampilkan konfigurasi engine NYATA dari server (device + model + tipe
+// komputasi), bukan label statis "CPU-ONLY". Update ulang tiap 15 detik.
+async function loadEngineCompute() {
+  const el = $("#engineCompute");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/system");
+    if (!res.ok) throw new Error("bad status");
+    const info = await res.json();
+    const model = String(info.model || "tiny").split(/[\\/]/).pop();
+    el.textContent = `${info.device} · ${model.toUpperCase()} · ${String(info.computeType || "int8").toUpperCase()}`;
+    el.className = `engine-value ${info.sttEnabled ? "ok" : "idle"}`;
+    el.title = info.sttEnabled
+      ? "STT engine tersedia"
+      : "STT tidak tersedia (python/venv/API key belum ada)";
+  } catch {
+    el.textContent = "OFFLINE";
+    el.className = "engine-value idle";
+  }
 }
 
 async function loadProjects() {
@@ -612,9 +720,10 @@ async function loadExports() {
     state.exports = (Array.isArray(data.exports) ? data.exports : []).map((e) => ({
       filename: e.filename,
       downloadUrl: e.downloadUrl || `/outputs/${encodeURIComponent(e.filename)}`,
-      clipTitle: "Export",
-      status: "Done",
-      createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : ""
+      clipTitle: e.hook || e.project || "Export",
+      status: e.hook || e.project ? "Selesai" : "Selesai",
+      createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
+      size: e.size
     }));
   } catch (err) {
     state.exports = [];
@@ -713,12 +822,12 @@ function renderExports() {
     const name = document.createElement("strong");
     name.textContent = item.filename;
     const meta = document.createElement("span");
-    meta.textContent = `${item.clipTitle} - ${item.createdAt}`;
+    meta.textContent = `${item.clipTitle} - ${item.createdAt}${item.size ? ` (${formatBytes(item.size)})` : ""}`;
     main.appendChild(name);
     main.appendChild(meta);
 
     const status = document.createElement("span");
-    status.textContent = item.status;
+    status.textContent = "Selesai";
 
     const download = document.createElement("a");
     download.className = "secondary-button compact";
@@ -905,7 +1014,7 @@ async function processYouTubeUrl() {
         body: JSON.stringify({
           url: urls[0],
           duration: $("#durationSelect").value,
-          language: $("#languageSelect").value,
+          language: CAPTION_LANG,
           assumedDuration: 3600
         })
       });
@@ -925,7 +1034,7 @@ async function processYouTubeUrl() {
       body: JSON.stringify({
         urls,
         duration: $("#durationSelect").value,
-        language: $("#languageSelect").value,
+        language: CAPTION_LANG,
         assumedDuration: 3600
       })
     });
@@ -1030,7 +1139,7 @@ async function loadPreviewClip() {
   $("#playClip").disabled = true;
   $("#playClip").textContent = "Loading...";
   state.activeClip.previewLoading = true;
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   uploadStatus.textContent = "Previewing";
   setProcessStep("preview", ["metadata", "clips"]);
   showToast("Mengambil potongan clip ringan untuk preview di aplikasi.");
@@ -1045,12 +1154,20 @@ async function loadPreviewClip() {
         start: state.activeClip.start,
         end: state.activeClip.end,
         caption: captionInput.value,
-        language: $("#languageSelect").value,
+        language: CAPTION_LANG,
         captionStyle: $("#captionStyleSelect").value,
         captionSize: captionSize.value,
         fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
         captionColor: captionColorInput ? captionColorInput.value : "",
-        ratio: currentRatio()
+        ratio: currentRatio(),
+        segments: state.captionSegments && state.captionSegments.length
+          ? state.captionSegments.map((s) => ({
+              start: Number(s.start) || 0,
+              end: Number(s.end) || 0,
+              text: String(s.text || "").trim(),
+              words: Array.isArray(s.words) && s.words.length ? s.words : []
+            }))
+          : []
       })
     });
 
@@ -1066,13 +1183,16 @@ async function loadPreviewClip() {
         hookInput.value = data.transcript.hook;
         state.activeClip.hook = data.transcript.hook;
       }
-      renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+      renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     }
 
     state.sourceUrl = data.previewUrl;
     state.previewClipKey = activeClipKey();
     state.activeClip.previewReady = true;
     state.activeClip.previewLoading = false;
+    if (data.transcriptError) {
+      console.warn("Preview transcript:", data.transcriptError);
+    }
     state.liveSegments = Array.isArray(data.segments) ? data.segments : [];
     state.liveActive = state.liveSegments.length > 0 && data.baked !== true && $("#captionStyleSelect").value !== "off";
     state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
@@ -1090,7 +1210,7 @@ async function loadPreviewClip() {
     setProcessStep("");
     showToast(error.message);
   } finally {
-    renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+    renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     $("#playClip").disabled = false;
     $("#playClip").textContent = "Play clip";
   }
@@ -1123,13 +1243,18 @@ async function exportSelectedClip() {
         }))
       : [];
     const ratios = selectedExportRatios();
+    // Honor the checked export ratio(s). When exactly one ratio is checked the
+    // single-export path must export at THAT ratio, not the preview's ratio —
+    // otherwise checking only "16:9 (wide)" while previewing portrait still
+    // produces a portrait file.
+    const exportRatio = ratios.length ? ratios[0] : currentRatio();
     const basePayload = {
       projectId: state.projectId,
       clipId: state.activeClip.id,
       start: state.activeClip.start,
       end: state.activeClip.end,
       caption: captionInput.value,
-      language: $("#languageSelect").value,
+      language: CAPTION_LANG,
       captionStyle: $("#captionStyleSelect").value,
       captionSize: captionSize.value,
       fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
@@ -1138,7 +1263,6 @@ async function exportSelectedClip() {
       removeSilence: state.removeSilence,
       denoise: state.denoise,
       enhance: state.enhance,
-      autoZoom: state.autoZoom,
       fps: Number(state.fps) || 0,
       crf: Number(state.crf) || 23,
       audioBitrate: Number(state.audioBitrate) || 128,
@@ -1148,7 +1272,7 @@ async function exportSelectedClip() {
       bgMusicPath: state.bgMusicPath,
       bgMusicVolume: state.bgMusicVolume,
       ducking: state.ducking,
-      ratio: currentRatio(),
+      ratio: exportRatio,
       segments: exportSegments
     };
     let response;
@@ -1187,7 +1311,7 @@ async function exportSelectedClip() {
         filename: item.filename,
         downloadUrl: item.downloadUrl,
         clipTitle: previewTitle.textContent,
-        status: "Done",
+        status: "Selesai",
         createdAt: new Date().toLocaleString()
       });
     }
@@ -1204,6 +1328,8 @@ async function exportSelectedClip() {
 }
 
 $("#videoInput").addEventListener("change", (event) => attachFile(event.target.files[0]));
+
+$("#newProjectBtn").addEventListener("click", () => $("#videoInput").click());
 
 $("#dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -1229,12 +1355,32 @@ $("#videoUrl").addEventListener("keydown", (event) => {
   }
 });
 
-$("#generateButton").addEventListener("click", () => {
+$("#generateButton").addEventListener("click", async () => {
   if (!state.projectId) {
     processYouTubeUrl();
     return;
   }
-  showToast("Clip sudah dibuat dari video YouTube.");
+  $("#generateButton").disabled = true;
+  uploadStatus.textContent = "Regenerating clips...";
+  renderClipSkeleton();
+  try {
+    const response = await fetch(`/api/projects/${state.projectId}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duration: $("#durationSelect").value })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal generate ulang clips.");
+    clips = data.clips;
+    setActiveClipOrEmpty();
+    uploadStatus.textContent = `${clips.length} clips ready`;
+    showToast(`${clips.length} clip dibuat dari transcript.`);
+  } catch (err) {
+    showToast(err.message);
+    renderClips(clips);
+  } finally {
+    $("#generateButton").disabled = false;
+  }
 });
 
 $("#playClip").addEventListener("click", playSelectedClip);
@@ -1496,6 +1642,119 @@ $("#importSrtInput").addEventListener("change", (event) => {
   reader.readAsText(file);
 });
 
+// Terjemahkan semua segmen caption ke bahasa target (inspector) via offline Argos.
+// Estimasi bahasa sumber dari isi caption (kata umum Indonesia vs Inggris).
+// Saat mode "auto" dan hasil deteksi = bahasa target, JANGAN blokir — caption
+// bisa jadi campuran (mis. Indonesia + Inggris), jadi pakai bahasa kebalikannya.
+const ID_HINT_WORDS = new Set(("yang di dan aku saya kita kamu tidak ini itu untuk dengan pada ke dari ada akan sudah bisa atau juga tapi jika kalau apa karena mari ayo).".replace(/[().]/g, "").split(" ")));
+const EN_HINT_WORDS = new Set(("the and of to you i we they it is are was were have has had not this that with for on in from be can will do you're we're they're don't can't won't".replace(/'/g, "").split(" ")));
+function guessCaptionLang(segs) {
+  let idScore = 0;
+  let enScore = 0;
+  for (const s of segs) {
+    for (const w of String(s.text || "").toLowerCase().split(/[^a-z]+/)) {
+      if (!w || w.length < 2) continue;
+      if (ID_HINT_WORDS.has(w)) idScore += 1;
+      if (EN_HINT_WORDS.has(w)) enScore += 1;
+    }
+  }
+  if (idScore === 0 && enScore === 0) return "";
+  return idScore >= enScore ? "id" : "en";
+}
+// Rasio kesamaan dua teks (0..1) berbasis token umum — dipakai untuk menolak
+// hasil terjemahan yang nyaris identik dengan aslinya (mis. caption sudah dalam
+// bahasa target, Argos mengembalikan teks hampir sama + kadang typo).
+function textSimilarity(a, b) {
+  const ta = String(a || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const tb = String(b || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (!ta.length || !tb.length) return 0;
+  const setB = new Set(tb);
+  let hits = 0;
+  for (const w of ta) if (setB.has(w)) hits += 1;
+  return hits / Math.max(ta.length, tb.length);
+}
+$("#translateBtn").addEventListener("click", async () => {
+  if (!state.activeClip) { showToast("Pilih clip dulu."); return; }
+  const segs = state.captionSegments || [];
+  if (!segs.length) { showToast("Tidak ada segmen untuk diterjemahkan."); return; }
+  const targetTag = clipmeLangTag(CAPTION_LANG);
+  if (!targetTag || targetTag === "mix") { showToast("Bahasa target harus Indonesia atau English."); return; }
+  const fromSel = $("#translateFrom") ? $("#translateFrom").value : "auto";
+  const autoGuess = guessCaptionLang(segs) || "";
+  let from;
+  if (fromSel && fromSel !== "auto") {
+    from = fromSel;
+    // Pilihan dropdown bisa tertinggal "Indonesia" dari clip sebelumnya. Kalau
+    // dropdown = bahasa target tapi isi caption terdeteksi bahasa lain (mis.
+    // masih asing/Inggris), ikuti auto-detect supaya terjemahan tetap jalan.
+    if (from === targetTag && autoGuess && autoGuess !== targetTag) from = autoGuess;
+  } else {
+    from = autoGuess;
+    // Caption campuran/ambigu: tetap coba terjemahkan dari bahasa kebalikannya.
+    if (!from || from === targetTag) from = targetTag === "id" ? "en" : "id";
+  }
+  if (from === targetTag) {
+    showToast(`Bahasa sumber sama dengan bahasa target (${targetTag === "id" ? "Indonesia" : "English"}). Kalau caption masih bahasa asing, pilih bahasa sumber di dropdown lalu coba lagi.`);
+    return;
+  }
+
+  const btn = $("#translateBtn");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Menerjemahkan...";
+  try {
+    const res = await fetch("/api/stt/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segments: segs.map((s) => ({ start: s.start, end: s.end, text: s.text })),
+        from,
+        to: targetTag
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Terjemahan gagal.");
+    pushHistory();
+    const translated = (data.segments || []).filter((s) => s && s.text);
+    if (!translated.length) throw new Error("Hasil terjemahan kosong.");
+    let changedCount = 0;
+    state.captionSegments = segs.map((s, i) => {
+      const t = translated[i] || {};
+      const newText = String(t.text || "");
+      // Tolak hasil yang nyaris sama dengan aslinya (caption sudah bahasa target
+      // atau Argos mengembalikan teks hampir identik) — biar tidak ada typo.
+      const keep = newText && textSimilarity(s.text, newText) < 0.7 ? newText : s.text;
+      if (keep !== s.text) changedCount += 1;
+      return { ...s, text: keep };
+    });
+    if (!changedCount) {
+      showToast("Tidak ada segmen yang berubah — caption tampaknya sudah dalam bahasa target.");
+      return;
+    }
+    state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({ ...s }));
+    state.liveSegments = state.captionSegments.map((s) => ({ ...s }));
+    state.liveActive = state.liveSegments.length > 0 && $("#captionStyleSelect").value !== "off";
+    state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
+    renderCaptionTimeline();
+    // Refresh preview: live caption saat play/pause dan caption box statis saat idle.
+    updateLiveCaption();
+    const combined = state.captionSegments.map((s) => s.text).join(" ").trim().slice(0, 155);
+    if (combined) {
+      captionInput.value = combined;
+      captionBox.textContent = `"${combined}"`;
+      renderStaticCaption();
+      if (state.activeClip) state.activeClip.caption = combined;
+    }
+    renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
+    showToast(`Terjemahan selesai (${changedCount}/${translated.length} segmen berubah). Klik "Simpan Perubahan" untuk menyimpan.`);
+  } catch (err) {
+    showToast(err.message || "Terjemahan gagal.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
+
 function parseSrtVtt(text) {
   const cleaned = String(text || "")
     .replace(/^\uFEFF/, "")
@@ -1578,6 +1837,7 @@ function updateLiveCaption() {
   const style = $("#captionStyleSelect").value;
   liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
   liveCaption.className = "live-caption" + (style !== "off" ? ` lc-${style}` : "");
+  applyCaptionPosition();
   applyCaptionVisuals();
   if (style === "karaoke" && seg.words && seg.words.length) {
     seg.words.forEach((w) => {
@@ -1948,7 +2208,7 @@ function saveCaptionTimeline() {
     clipId: state.activeClip.id,
     start: state.activeClip.start,
     end: state.activeClip.end,
-    language: $("#languageSelect").value,
+    language: CAPTION_LANG,
     segments: state.captionSegments
   };
 
@@ -2063,9 +2323,9 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
         clipId: state.activeClip.id,
         start: state.activeClip.start,
         end: state.activeClip.end,
-        language: $("#languageSelect").value,
+        language: CAPTION_LANG,
         style: $("#captionStyleSelect").value || "dynamic",
-        fillerMode: "aggressive",
+        fillerMode: ($("#fillerModeSelect") && $("#fillerModeSelect").value) || "aggressive",
         maxLines: 2,
         maxLineLength: 40,
         model: state.sttModel || ""
@@ -2090,6 +2350,12 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
       words: Array.isArray(s.words) ? s.words.slice() : []
     }));
     state.liveActive = state.liveSegments.length > 0 && $("#captionStyleSelect").value !== "off";
+    // Align the live caption window to this clip. Karaoke timestamps are
+    // clip-relative (0..duration), so liveOffset must match this clip's start
+    // — otherwise captions drift onto the wrong part of the video (mirrors
+    // loadPreviewClip) and go empty once playback leaves the segment window.
+    state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
+    try { previewVideo.currentTime = state.noDownload ? 0 : state.liveOffset; } catch {}
     loadCaptionTimeline(state.liveSegments);
     updateLiveCaption();
     if (data.hook || data.caption) {
@@ -2103,7 +2369,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
         renderStaticCaption();
         if (state.activeClip) state.activeClip.caption = data.caption;
       }
-      renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+      renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     }
   } catch (err) {
     showToast(err.message);
@@ -2116,7 +2382,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
 
 $("#sortClips").addEventListener("click", () => {
   state.sorted = !state.sorted;
-  const list = state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips;
+  const list = state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips;
   renderClips(list);
   showToast(state.sorted ? "Diurutkan berdasarkan viral score." : "Urutan kembali ke timeline.");
 });
@@ -2131,7 +2397,7 @@ captionInput.addEventListener("input", () => {
 hookInput.addEventListener("input", () => {
   if (!state.activeClip) return;
   state.activeClip.hook = hookInput.value;
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
 });
 
 captionSize.addEventListener("input", () => {
@@ -2145,10 +2411,7 @@ captionSize.addEventListener("input", () => {
 captionPosition.addEventListener("input", () => {
   state.captionPosition = Number(captionPosition.value) / 100;
   renderStaticCaption();
-  if (state.liveActive) {
-    liveCaption.style.bottom = `${state.captionPosition * 100}%`;
-    updateLiveCaption();
-  }
+  if (state.liveActive) updateLiveCaption();
 });
 
 $("#captionStyleSelect").addEventListener("change", () => {
@@ -2168,7 +2431,6 @@ $("#captionStyleSelect").addEventListener("change", () => {
 $("#enhanceRemoveSilence").addEventListener("change", (e) => { state.removeSilence = e.target.checked; });
 $("#enhanceDenoise").addEventListener("change", (e) => { state.denoise = e.target.checked; });
 $("#enhanceBoost").addEventListener("change", (e) => { state.enhance = e.target.checked; });
-$("#autoZoomToggle").addEventListener("change", (e) => { state.autoZoom = e.target.checked; });
 $("#fpsSelect").addEventListener("change", (e) => { state.fps = Number(e.target.value) || 25; });
 $("#qualitySelect").addEventListener("change", (e) => { state.crf = Number(e.target.value) || 23; });
 $("#audioBitrateSelect").addEventListener("change", (e) => { state.audioBitrate = Number(e.target.value) || 128; });
@@ -2279,7 +2541,7 @@ async function analyzeSelectedClip() {
         clipId: state.activeClip.id,
         start: state.activeClip.start,
         end: state.activeClip.end,
-        language: $("#languageSelect").value
+        language: CAPTION_LANG
       })
     });
     const data = await response.json();
@@ -2330,7 +2592,7 @@ $("#trimEnd").addEventListener("change", applyTrim);
 $("#selectAllClips").addEventListener("click", () => {
   const allSelected = clips.length > 0 && clips.every((clip) => state.selectedClipIds.has(clip.id));
   state.selectedClipIds = new Set(allSelected ? [] : clips.map((clip) => clip.id));
-  renderClips(state.sorted ? [...clips].sort((a, b) => b.score - a.score) : clips);
+  renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   showToast(allSelected ? "Semua clip di-unselect." : `Selected ${clips.length} clips`);
 });
 
@@ -2365,17 +2627,17 @@ $("#exportAllBtn").addEventListener("click", async () => {
           start: clip.start,
           end: clip.end,
           caption: clip.caption || "",
-          language: $("#languageSelect").value,
+          language: CAPTION_LANG,
           captionStyle: $("#captionStyleSelect").value,
           captionSize: captionSize.value,
           fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
           captionColor: captionColorInput ? captionColorInput.value : "",
+          captionPosition: state.captionPosition || 0.76,
           ratio: currentRatio(),
           ratios: selectedExportRatios(),
           removeSilence: state.removeSilence,
           denoise: state.denoise,
           enhance: state.enhance,
-          autoZoom: state.autoZoom,
           fps: Number(state.fps) || 0,
           crf: Number(state.crf) || 23,
           audioBitrate: Number(state.audioBitrate) || 128,
@@ -2403,7 +2665,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
         filename: item.filename,
         downloadUrl: item.downloadUrl,
         clipTitle: `Batch export`,
-        status: "Done",
+        status: "Selesai",
         createdAt: new Date().toLocaleString()
       });
     }
@@ -2439,16 +2701,16 @@ function exportClipPayloadFor(clip) {
     start: clip.start,
     end: clip.end,
     caption: clip.caption || "",
-    language: $("#languageSelect").value,
+    language: CAPTION_LANG,
     captionStyle: $("#captionStyleSelect").value,
     captionSize: captionSize.value,
     fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
     captionColor: captionColorInput ? captionColorInput.value : "",
+    captionPosition: state.captionPosition || 0.76,
     ratio: currentRatio(),
     removeSilence: state.removeSilence,
     denoise: state.denoise,
     enhance: state.enhance,
-    autoZoom: state.autoZoom,
     fps: Number(state.fps) || 0,
     crf: Number(state.crf) || 23,
     audioBitrate: Number(state.audioBitrate) || 128,
@@ -2468,7 +2730,7 @@ function addExportResult(item, title) {
     filename: item.filename,
     downloadUrl: item.downloadUrl,
     clipTitle: title,
-    status: "Done",
+    status: "Selesai",
     createdAt: new Date().toLocaleString()
   });
   renderExports();
@@ -2546,7 +2808,6 @@ function collectSettings() {
     removeSilence: state.removeSilence,
     denoise: state.denoise,
     enhance: state.enhance,
-    autoZoom: state.autoZoom,
     fps: state.fps,
     crf: state.crf,
     audioBitrate: state.audioBitrate,
@@ -2581,7 +2842,6 @@ function loadSettings() {
   state.removeSilence = !!data.removeSilence;
   state.denoise = !!data.denoise;
   state.enhance = !!data.enhance;
-  state.autoZoom = !!data.autoZoom;
   if (Number(data.fps)) state.fps = Number(data.fps);
   if (Number(data.crf)) state.crf = Number(data.crf);
   if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
@@ -2601,7 +2861,6 @@ function loadSettings() {
   $("#enhanceRemoveSilence").checked = state.removeSilence;
   $("#enhanceDenoise").checked = state.denoise;
   $("#enhanceBoost").checked = state.enhance;
-  $("#autoZoomToggle").checked = state.autoZoom;
   $("#fpsSelect").value = String(state.fps);
   $("#qualitySelect").value = String(state.crf);
   $("#audioBitrateSelect").value = String(state.audioBitrate);
@@ -2615,6 +2874,7 @@ function loadSettings() {
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
   captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
+  applyCaptionPosition();
 }
 
 const saveSettingsDebounced = (() => {
@@ -2629,7 +2889,6 @@ const settingsControls = [
   ["change", "#enhanceRemoveSilence"],
   ["change", "#enhanceDenoise"],
   ["change", "#enhanceBoost"],
-  ["change", "#autoZoomToggle"],
   ["change", "#fpsSelect"],
   ["change", "#qualitySelect"],
   ["change", "#audioBitrateSelect"],
@@ -2669,7 +2928,6 @@ function applyTemplateData(data) {
   state.removeSilence = !!data.removeSilence;
   state.denoise = !!data.denoise;
   state.enhance = !!data.enhance;
-  state.autoZoom = !!data.autoZoom;
   if (Number(data.fps)) state.fps = Number(data.fps);
   if (Number(data.crf)) state.crf = Number(data.crf);
   if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
@@ -2689,7 +2947,6 @@ function applyTemplateData(data) {
   $("#enhanceRemoveSilence").checked = state.removeSilence;
   $("#enhanceDenoise").checked = state.denoise;
   $("#enhanceBoost").checked = state.enhance;
-  $("#autoZoomToggle").checked = state.autoZoom;
   $("#fpsSelect").value = String(state.fps);
   $("#qualitySelect").value = String(state.crf);
   $("#audioBitrateSelect").value = String(state.audioBitrate);
@@ -2759,5 +3016,7 @@ loadExports();
 setRatio(currentRatio());
 refreshStorage();
 pollQueue();
+loadEngineCompute();
 syncUndoRedoButtons();
 setInterval(pollQueue, 5000);
+setInterval(loadEngineCompute, 15000);

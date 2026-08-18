@@ -17,6 +17,133 @@ function loadClipmeCaptionPrompt() {
   }
 }
 
+// Load the shared hook engine (single source of truth for hook intelligence).
+function loadClipmeHookEngine() {
+  try {
+    const engine = require('./clipme-hook-engine.js');
+    return engine;
+  } catch (e) {
+    console.error('Gagal memuat clipme-hook-engine.js:', e.message);
+    return null;
+  }
+}
+
+const hookEngine = loadClipmeHookEngine();
+
+const CLAUSE_CONJUNCTIONS = new Set([
+  'dan', 'atau', 'karena', 'tetapi', 'namun', 'kalau', 'jika', 'sehingga',
+  'yang', 'agar', 'supaya', 'tapi', 'sedangkan', 'sementara', 'maka',
+  'untuk', 'serta', 'bahwa', 'ketika', 'setelah', 'sebelum', 'supaya'
+]);
+
+const NUMBER_UNITS = new Set([
+  'juta', 'ribu', 'miliar', 'milyar', 'triliun', 'persen', '%', 'hari',
+  'jam', 'menit', 'detik', 'tahun', 'bulan', 'minggu', 'buah', 'orang',
+  'kali', 'rupiah', 'rb', 'sen', 'dolar', 'euro', 'kg', 'gram', 'liter'
+]);
+
+function isNumberToken(token) {
+  return /^\d+([.,]\d+)*%?$/.test(String(token || '').trim());
+}
+
+function isUnitToken(token) {
+  return NUMBER_UNITS.has(String(token || '').trim().toLowerCase());
+}
+
+function isCapitalizedToken(token) {
+  const t = String(token || '');
+  return t.length > 1 && /[\p{Lu}]/u.test(t[0]) && !/[\p{N}]/u.test(t[0]);
+}
+
+// Common Indonesian sentence-starters / function words that are capitalized at
+// sentence start but are NOT proper names. Prevents "Kalau", "Solusi",
+// "Ternyata", "Saya" etc. from being flagged as emphasis "names".
+const NAME_STOPLIST = new Set([
+  'kalau', 'jadi', 'solusi', 'ternyata', 'tapi', 'saya', 'apalagi', 'walaupun',
+  'maka', 'namun', 'sedangkan', 'sementara', 'padahal', 'untungnya', 'sayangnya',
+  'oke', 'nah', 'terus', 'lalu', 'gitu', 'ini', 'itu', 'dia', 'kita', 'mereka',
+  'kami', 'anda', 'kamu', 'gua', 'elu', 'bisa', 'mau', 'harus', 'sudah', 'belum',
+  'dengan', 'tanpa', 'dari', 'kepada', 'bukan', 'tidak', 'juga', 'hanya', 'saja',
+  'paling', 'sangat', 'benar', 'memang', 'emang', 'justru', 'sebenarnya',
+  'mungkin', 'seperti', 'begitu', 'bilang', 'kata', 'cuma', 'nih', 'tuh',
+  'maunya', 'sekali', 'banget', 'mau', 'nggak', 'tidak', 'pakai', 'pak',
+  'yang', 'agar', 'supaya', 'ketika', 'setelah', 'sebelum', 'biar', 'pertama',
+  'kedua', 'ketiga', 'selanjutnya', 'akhirnya', 'intinya', 'pokoknya', 'gue',
+  'gw', 'lo', 'lu', 'dong', 'kok', 'kan', 'deh', 'soalnya', 'tentang',
+  'sebagai', 'menurut', 'tapi'
+]);
+
+// CapCut-like two-line layout: balanced, clause-aware, orphan-preventing,
+// keeps number+unit and proper-name units together. Falls back to a greedy
+// fill when no balanced break fits within the length constraints.
+function layoutCaptionLines(words, maxLines, maxLineLength) {
+  const tokens = (words || [])
+    .map((w) => String(w && w.text != null ? w.text : w).trim())
+    .filter(Boolean);
+  if (!tokens.length) return [];
+  const joined = tokens.join(' ');
+  const maxLen = Math.max(1, Number(maxLineLength) || 40);
+  const maxL = Math.max(1, Number(maxLines) || 2);
+  if (joined.length <= maxLen) return [joined];
+  if (maxL === 1) return [joined];
+
+  const endsWithClause = (t) => /[,.;:…?!]$/.test(String(t || ''));
+  const startsConjunction = (t) => CLAUSE_CONJUNCTIONS.has(String(t || '').trim().toLowerCase());
+
+  const n = tokens.length;
+  let best = { score: -Infinity, k: -1 };
+  for (let k = 1; k < n; k++) {
+    const left = tokens.slice(0, k);
+    const right = tokens.slice(k);
+    const leftLen = left.join(' ').length;
+    const rightLen = right.join(' ').length;
+    if (leftLen > maxLen || rightLen > maxLen) continue;
+
+    let score = 100 - Math.abs(leftLen - rightLen) * 5;
+
+    // Prefer a break at a clause/punctuation/conjunction boundary.
+    if (endsWithClause(tokens[k - 1]) || startsConjunction(tokens[k])) score += 15;
+
+    // Avoid orphan single-word lines.
+    if (left.length === 1 || right.length === 1) score -= 40;
+
+    // Keep number+unit expressions together ("50 juta", "3 hari").
+    if ((isNumberToken(tokens[k - 1]) && isUnitToken(tokens[k])) ||
+        (isNumberToken(tokens[k]) && isUnitToken(tokens[k - 1]))) score -= 50;
+
+    // Avoid splitting a proper-name pair ("Jondry Suitela").
+    if (isCapitalizedToken(tokens[k - 1]) && isCapitalizedToken(tokens[k])) score -= 30;
+
+    if (score > best.score) best = { score, k };
+  }
+
+  if (best.k > 0) {
+    return [tokens.slice(0, best.k).join(' '), tokens.slice(best.k).join(' ')];
+  }
+
+  // Greedy fill fallback (matches previous behavior). Never emits more than
+  // maxL lines: overflow beyond the last line folds into it.
+  const lines = [];
+  let current = '';
+  let lineCount = 0;
+  for (const t of tokens) {
+    const test = current ? `${current} ${t}` : t;
+    if (lineCount >= maxL - 1) {
+      current = test;
+      continue;
+    }
+    if (test.length > maxLen && current) {
+      lines.push(current);
+      lineCount++;
+      current = t;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
 // Auto Caption Engine Core
 function AutoCaptionEngine(options = {}) {
   const config = {
@@ -25,7 +152,7 @@ function AutoCaptionEngine(options = {}) {
     maxLines: options.maxLines || 2,
     maxLineLength: options.maxLineLength || 40,
     emphasisThreshold: options.emphasisThreshold || 0.7,
-    minSegmentDuration: options.minSegmentDuration || 0.8,
+    minSegmentDuration: options.minSegmentDuration || 1.2,
     maxSegmentDuration: options.maxSegmentDuration || 3.0,
     minWords: options.minWords || 3,
     maxWords: options.maxWords || 7,
@@ -61,6 +188,24 @@ function AutoCaptionEngine(options = {}) {
           found.push(word);
         }
       }
+      // Numeric expressions are emphasis-worthy ("50", "2026", "10 persen").
+      const raw = String(text || '');
+      const numberMatches = raw.match(/\d+(?:[.,]\d+)*\s*(?:juta|ribu|miliar|persen|%)?/gi) || [];
+      for (const m of numberMatches) {
+        const clean = m.trim().toLowerCase();
+        if (clean && !found.includes(clean)) found.push(clean);
+      }
+      // Proper names (capitalized) are emphasis-worthy — but not sentence
+      // starters / function words ("Kalau", "Saya", "Ternyata").
+      const nameMatches = raw.match(/[\p{Lu}][\p{Ll}]{1,}(?:[\s-]+[\p{Lu}][\p{Ll}]{1,})*/gu) || [];
+      for (const m of nameMatches) {
+        let clean = m.trim();
+        const ntokens = clean.split(/[\s-]+/);
+        while (ntokens.length && NAME_STOPLIST.has(ntokens[0].toLowerCase())) ntokens.shift();
+        clean = ntokens.join(' ');
+        if (!clean || clean.length < 3) continue;
+        if (!found.includes(clean.toLowerCase())) found.push(clean);
+      }
       return found;
     },
 
@@ -93,11 +238,46 @@ function AutoCaptionEngine(options = {}) {
         'actually', 'literally', 'just', 'karena', 'lalu', 'terus', 'gitu',
         'aja', 'lah', 'kan', 'deh', 'nih', 'tuh', 'sih', 'ya', 'yuk'
       ];
-      const w = String(word || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      // Mode "none" = simpan SEMUA kata apa adanya (spec: keep every word).
+      // Hesitation hanya dibuang di mode light/aggressive; kata conversational
+      // hanya dibuang di aggressive.
+      if (config.fillerMode === 'none') return false;
+      const raw = String(word || '').toLowerCase().trim().replace(/\s+/g, ' ');
+      const w = raw.replace(/[^\p{L}\p{N} ]+/gu, '').trim();
       if (!w) return false;
       if (hesitation.includes(w)) return true;
       if (config.fillerMode === 'aggressive' && conversational.includes(w)) return true;
       return false;
+    },
+
+    // Classify an inter-word pause as a segmentation signal.
+    boundaryStrength: (gap) => {
+      const g = Number(gap) || 0;
+      if (g >= 0.7) return 'veryStrong';
+      if (g >= 0.35) return 'strong';
+      if (g >= 0.18) return 'medium';
+      if (g >= 0.08) return 'weak';
+      return 'none';
+    },
+
+    // Analyze speech rhythm: inter-word gaps, speech rate (words/sec,
+    // chars/sec). Used for CapCut-like pause-driven segmentation.
+    analyzeSpeechRhythm: (words) => {
+      const w = words || [];
+      const gaps = [];
+      for (let i = 0; i < w.length - 1; i++) {
+        const gap = (Number(w[i + 1]?.start) || 0) - (Number(w[i]?.end) || 0);
+        gaps.push({ from: i, to: i + 1, gap, strength: helpers.boundaryStrength(gap) });
+      }
+      let duration = 0;
+      if (w.length) duration = (Number(w[w.length - 1]?.end) || 0) - (Number(w[0]?.start) || 0);
+      const totalChars = w.reduce((s, x) => s + String(x?.text || '').length, 0);
+      return {
+        gaps,
+        duration,
+        wordsPerSec: duration > 0 ? w.length / duration : 0,
+        charsPerSec: duration > 0 ? totalChars / duration : 0
+      };
     },
 
     // Calculate segment score based on quality metrics
@@ -142,10 +322,11 @@ function AutoCaptionEngine(options = {}) {
       
       return {
         id: segmentId,
-        speaker_id: words[0].speaker_id,
+        speaker_id: words[0].speaker_id || "",
         start,
         end,
         text,
+        words: words.map(w => ({ text: String(w.text || "").trim(), start: Number(w.start) || 0, end: Number(w.end) || 0, speaker_id: w.speaker_id || words[0].speaker_id || "" })),
         emphasis_words: emphasisWords,
         emotion,
         wordCount: words.length,
@@ -153,32 +334,10 @@ function AutoCaptionEngine(options = {}) {
       };
     },
 
-    // Split text into lines respecting length constraints
+    // Split text into lines respecting length constraints.
+    // CapCut-like: balanced two-line layout, clause-aware, orphan-preventing.
     splitIntoLines: (text, maxLines, maxLineLength) => {
-      const words = text.split(' ');
-      const lines = [];
-      let currentLine = '';
-      let lineCount = 0;
-      
-      for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        
-        if (lineCount >= maxLines || testLine.length > maxLineLength) {
-          if (currentLine) {
-            lines.push(currentLine);
-            lineCount++;
-          }
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      }
-      
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-      
-      return lines;
+      return layoutCaptionLines(String(text || '').split(/\s+/), maxLines, maxLineLength);
     },
 
     // Determine if word should start a new segment
@@ -213,100 +372,72 @@ function AutoCaptionEngine(options = {}) {
     shouldEndSegment: (word, segmentWords, context) => {
       const wordText = String(word?.text ?? word ?? "");
       const segmentText = segmentWords.map((w) => String(w.text ?? w ?? "")).join(' ');
-      
-      // Hard cap: never exceed maxWords
-      if (segmentWords.length >= config.maxWords) {
-        return true;
-      }
-      
-      // Hard cap: never exceed maxSegmentDuration
       const firstStart = Number(segmentWords[0]?.start ?? 0);
-      const lastEnd = Number(segmentWords[segmentWords.length - 1]?.end ?? 0);
-      const segmentDuration = lastEnd - firstStart;
-      if (segmentDuration >= config.maxSegmentDuration) {
-        return true;
-      }
-      
-      // Only consider natural breaks once the segment is long enough
-      if (segmentWords.length < config.minWords) {
+      const lastEnd = Number(word?.end ?? segmentWords[segmentWords.length - 1]?.end ?? 0);
+      const segmentDuration = Math.max(0, lastEnd - firstStart);
+      const gapToNext = Number(context?.gapToNext ?? 0);
+      const strength = context?.boundaryStrength || helpers.boundaryStrength(gapToNext);
+      const nextWordText = String(context?.nextWordText ?? "").trim();
+
+      // 1. Hard caps: never exceed maxWords or maxSegmentDuration.
+      if (segmentWords.length >= config.maxWords) return true;
+      if (segmentDuration >= config.maxSegmentDuration) return true;
+
+      // 2. Long silence: caption must not hang across a big gap.
+      if (strength === 'veryStrong') return true;
+
+      // 3. Complete thought / sentence terminator — also enables micro captions
+      //    such as "Ya." / "Serius?" regardless of word count.
+      if (/[.!?…]$/.test(wordText)) return true;
+
+      // 4. Keep number+unit and proper-name units together unless the pause is
+      //    clearly a boundary (strong/very strong).
+      const unitPair =
+        (isNumberToken(wordText) && isUnitToken(nextWordText)) ||
+        (isNumberToken(nextWordText) && isUnitToken(wordText));
+      const namePair = isCapitalizedToken(wordText) && isCapitalizedToken(nextWordText);
+      if ((unitPair || namePair) && (strength === 'none' || strength === 'weak' || strength === 'medium')) {
         return false;
       }
-      
-      // End segment at a complete thought (sentence terminator)
-      if (/[.!?…]$/.test(wordText)) {
-        return true;
-      }
-      
-      // End segment after comma/colon for rhythm
-      if (/[,;:—]$/.test(wordText)) {
-        return true;
-      }
-      
-      // End segment when a strong emphasis word appears near the end
-      if (context.emphasisWords && context.emphasisWords.includes(wordText) &&
-          segmentWords.length >= config.minWords) {
-        return true;
-      }
-      
-      // End segment if it has grown long enough by duration
-      if (segmentDuration >= config.minSegmentDuration && segmentDuration <= config.maxSegmentDuration) {
-        return true;
-      }
-      
-      return false;
-    },
 
-    // Main processing pipeline
-    processTranscript: (transcript, style, fillerMode) => {
-      const processedSegments = [];
-      let segmentId = 1;
-      const activeFillerMode = fillerMode || config.fillerMode || 'none';
-      
-      for (let i = 0; i < transcript.length; i++) {
-        const word = transcript[i];
-        
-        // Skip filler words based on mode
-        if (helpers.isFillerWord(word.text)) {
-          continue;
-        }
-        
-        // Start or continue segment
-        let segmentWords = [];
-        let segmentStart = word.start;
-        
-        // Collect words for segment
-        for (let j = i; j < transcript.length; j++) {
-          const currentWord = transcript[j];
-          
-          // Skip filler words in middle of segment
-          if (helpers.isFillerWord(currentWord.text)) {
-            continue;
-          }
-          
-          segmentWords.push(currentWord);
-          
-          // Check if we should end segment after this word
-          const context = {
-            emphasisWords: helpers.extractEmphasisCandidates(segmentWords.map(w => w.text).join(' ')),
-            wordCount: segmentWords.length
-          };
-          
-          if (helpers.shouldEndSegment(currentWord, segmentWords, context) && segmentWords.length >= 1) {
-            break;
-          }
-        }
-        
-        // Build segment from collected words
-        const segment = helpers.buildSegmentFromWords(segmentWords, segmentId++, transcript);
-        
-        if (segment && segment.wordCount > 0) {
-          processedSegments.push(segment);
-        }
-        
-        i += segmentWords.length - 1;
+      // 5. Natural-break signals need a minimum number of words — unless a real
+      //    pause (medium+) marks a clear boundary. A 0.3s pause mid-phrase is a
+      //    boundary even if the preceding caption is short (§8, §37).
+      if (segmentWords.length < config.minWords && (strength === 'none' || strength === 'weak')) return false;
+
+      // 6. Clause break (comma/semicolon/colon) needs a little pause to feel
+      //    natural; otherwise only break when the segment is nearly full.
+      if (/[,;:—]$/.test(wordText)) {
+        if (gapToNext >= 0.12) return true;
+        if (segmentWords.length >= config.maxWords - 1) return true;
+        return false;
       }
-      
-      return processedSegments;
+
+      // 7. Pause-driven: a medium/strong pause is a segmentation signal.
+      if (strength === 'strong' || strength === 'medium') return true;
+
+      // 8. Reading speed: once a segment is mature, a caption that is too dense
+      //    to read comfortably is a bad caption — split earlier (§14, §25).
+      const density = Number(context?.density) || (segmentText.length / Math.max(0.1, segmentDuration));
+      if (density > 20 && segmentDuration >= config.minSegmentDuration && segmentWords.length >= config.minWords) return true;
+
+      // 9. Existing duration window. Prefer reaching a natural boundary: if the
+      //    very next word lands on a sentence end or a strong pause, extend
+      //    to it instead of cutting mid-phrase.
+      if (segmentDuration >= config.minSegmentDuration && segmentDuration <= config.maxSegmentDuration) {
+        const nextGap = Number(context?.nextGap ?? -1);
+        const nextStrength = nextGap >= 0 ? helpers.boundaryStrength(nextGap) : null;
+        const nextEndsUtterance = nextWordText ? /[.!?…]$/.test(nextWordText) : false;
+        if (nextWordText && (nextEndsUtterance || nextStrength === 'strong' || nextStrength === 'veryStrong')) {
+          return false;
+        }
+        return true;
+      }
+
+      // 10. Emphasis near the end of a mature segment.
+      if (context?.emphasisWords && context.emphasisWords.includes(wordText) && segmentWords.length >= config.minWords) return true;
+
+      return false;
     }
   };
 
@@ -369,47 +500,109 @@ function AutoCaptionEngine(options = {}) {
     const segments = [];
     let segmentId = 1;
     const activeFillerMode = fillerMode || config.fillerMode || 'none';
-    
+    const multiWordFillers = ['you know', 'i mean'];
+
+    // Skip a single filler word OR a multi-word filler phrase starting at idx.
+    // Returns the number of tokens consumed (0 when not a filler).
+    const fillerSpan = (idx) => {
+      if (idx >= transcript.length) return 0;
+      const one = helpers.isFillerWord(transcript[idx].text);
+      if (one) return 1;
+      if (config.fillerMode === 'aggressive' && idx + 1 < transcript.length) {
+        const joined = `${String(transcript[idx].text || '').toLowerCase()} ${String(transcript[idx + 1].text || '').toLowerCase()}`.replace(/\s+/g, ' ').trim();
+        if (multiWordFillers.includes(joined)) return 2;
+      }
+      return 0;
+    };
+
+    const nextNonFiller = (from) => {
+      let k = from;
+      while (k < transcript.length) {
+        const n = fillerSpan(k);
+        if (!n) break;
+        k += n;
+      }
+      return k;
+    };
+    const gapAfter = (idx) => {
+      const nf = nextNonFiller(idx + 1);
+      if (nf >= transcript.length) return 0;
+      return (Number(transcript[nf].start) || 0) - (Number(transcript[idx].end) || 0);
+    };
+
     for (let i = 0; i < transcript.length; i++) {
       const word = transcript[i];
-      
-      // Skip filler words based on mode
-      if (helpers.isFillerWord(word.text)) {
+
+      // Skip filler words (and multi-word filler phrases) based on mode
+      const skipN = fillerSpan(i);
+      if (skipN) {
+        i += skipN - 1;
         continue;
       }
-      
+
       const segmentWords = [word];
+      let lastIdx = i;
       let j = i + 1;
-      
-      while (j < transcript.length) {
-        const currentWord = transcript[j];
-        
-        if (helpers.isFillerWord(currentWord.text)) {
+
+      // Micro-caption check: a single complete utterance (e.g. "Ya.") may
+      // legitimately stand on its own when followed by a pause. Only a real
+      // sentence terminator — or a strong/very strong pause — may produce a
+      // single-word caption here, so a big gap is never bridged.
+      const g0 = gapAfter(lastIdx);
+      const s0 = helpers.boundaryStrength(g0);
+      const strongGap0 = s0 === 'strong' || s0 === 'veryStrong';
+      const ctx0 = {
+        emphasisWords: helpers.extractEmphasisCandidates(word.text),
+        wordCount: 1,
+        gapToNext: g0,
+        boundaryStrength: s0,
+        nextWordText: nextNonFiller(lastIdx + 1) < transcript.length ? transcript[nextNonFiller(lastIdx + 1)].text : '',
+        density: String(word.text || '').length / Math.max(0.1, (Number(word.end) || 0) - (Number(word.start) || 0))
+      };
+      const endsUtterance = /[.!?…]$/.test(String(word.text));
+      const singleEnded = (endsUtterance || strongGap0) && helpers.shouldEndSegment(word, segmentWords, ctx0);
+
+      if (!singleEnded) {
+        while (j < transcript.length) {
+          const currentWord = transcript[j];
+
+          if (helpers.isFillerWord(currentWord.text)) {
+            j++;
+            continue;
+          }
+
+          segmentWords.push(currentWord);
+          lastIdx = j;
           j++;
-          continue;
-        }
-        
-        segmentWords.push(currentWord);
-        j++;
-        
-        const context = {
-          emphasisWords: helpers.extractEmphasisCandidates(segmentWords.map((w) => w.text).join(' ')),
-          wordCount: segmentWords.length
-        };
-        
-        if (helpers.shouldEndSegment(currentWord, segmentWords, context)) {
-          break;
+
+          const g = gapAfter(lastIdx);
+          const nf = nextNonFiller(lastIdx + 1);
+          const text = segmentWords.map((w) => w.text).join(' ');
+          const firstStart = Number(segmentWords[0].start) || 0;
+          const context = {
+            emphasisWords: helpers.extractEmphasisCandidates(text),
+            wordCount: segmentWords.length,
+            gapToNext: g,
+            boundaryStrength: helpers.boundaryStrength(g),
+            nextWordText: nf < transcript.length ? transcript[nf].text : '',
+            nextGap: nf < transcript.length ? gapAfter(nf) : -1,
+            density: text.length / Math.max(0.1, (Number(currentWord.end) || 0) - firstStart)
+          };
+
+          if (helpers.shouldEndSegment(currentWord, segmentWords, context)) {
+            break;
+          }
         }
       }
-      
+
       const segment = helpers.buildSegmentFromWords(segmentWords, segmentId++, transcript);
       if (segment && segment.wordCount > 0) {
         segments.push(segment);
       }
-      
-      i = j - 1;
+
+      i = lastIdx;
     }
-    
+
     return {
       segments,
       provider: 'heuristic',
@@ -432,20 +625,22 @@ PARAMETER:
 - Bahasa target: ${language || 'Indonesia'}
 - Gaya caption: ${style}
 - Mode penghapusan filler: ${fillerMode}
-- Speaker ID: ${speaker}
+- Speaker ID: ${speaker || 'unknown (single speaker)'}
 
 TRANSKRIP KATA-LEVEL:
 ${timeWindowText}
 
 INSTRUKSI:
-1. Setiap caption segment harus berisi 2-7 kata maksimal, kira-kira 0.8-3.0 detik di layar, maksimal 2 baris.
+1. Setiap caption segment harus berisi 2-7 kata maksimal, kira-kira 1.2-3.0 detik di layar, maksimal 2 baris.
 2. Pertahankan urutan kata asli.
 3. Jangan menghapus kata yang mengubah makna kecuali filler words.
 4. Jika fillerMode adalah "aggressive", hapus kata seperti "um", "uh", "hmm", "eee", "eh", "anu", "jadi", "kayak", "basically", "you know", "I mean", "so", "well", "actually", "literally", "just", "karena", "lalu", "terus", "gitu", "aja"
 5. Pertahankan tanda baca dan kapitalisasi seperti asli, kecuali untuk memperbaiki kesalahan jelas STT.
 6. Identifikasi dan berikan penekanan pada 1-3 kata yang paling penting per segment.
 7. Pertahankan speaker ID asli untuk setiap kata.
-8. Output harus berupa JSON dengan format berikut:
+8. Gunakan jeda (gap antar kata) dan tanda baca sebagai sinyal batas segment; jangan potong di tengah frasa angka ("50 juta") atau nama orang ("Jondry Suitela") kecuali jeda sangat panjang.
+9. JANGAN menebak atau mengarang timestamp baru; mulai/akhir segment harus mengikuti timestamp kata asli yang diberikan.
+10. Output harus berupa JSON dengan format berikut:
 {
   "segments": [
     {
@@ -464,7 +659,9 @@ PENTING:
 - Setiap kata dalam output HARUS ada di transkrip sumber.
 - Pertahankan makna persis dari setiap frasa.
 - Jangan mengarang kata-kata baru, merangkum, atau menulis ulang.
+- Jangan mengarang timestamp: semua start/end harus berasal dari timestamp kata di transkrip sumber.
 - Setiap segmen harus realistis untuk ditampilkan di video vertikal.
+- Engine deterministik (bukan LLM) adalah otoritas akhir untuk timing dan urutan kata; kamu hanya memberi saran segmentasi.
 
 Berdasarkan transkrip di atas, buat segmen caption sesuai dengan instruksi.
     `;
@@ -498,13 +695,19 @@ Berdasarkan transkrip di atas, buat segmen caption sesuai dengan instruksi.
   }
 
   // Derive a hook from the strongest early segment opening.
-  function deriveHook(segments) {
+  function deriveHook(segments, language) {
     const segs = segments || [];
     if (!segs.length) return "";
-    // Hooks belong in the first seconds of the clip; score earlier segments higher.
-    const candidates = segs
+    const sentences = segs.map((s) => String(s.text || "").trim()).filter(Boolean);
+    // PHASE 10: delegasi ke hook engine bersama (single source of truth).
+    if (hookEngine && typeof hookEngine.selectHook === "function") {
+      const lang = (hookEngine.langTag && hookEngine.langTag(language)) || "id";
+      const result = hookEngine.selectHook(sentences, lang, {});
+      if (result && result.recommendedHook) return result.recommendedHook.slice(0, 90);
+    }
+    // Legacy fallback bila hook engine gagal dimuat.
+    const candidates = sentences
       .slice(0, 8)
-      .map((s) => String(s.text || "").trim())
       .filter((t) => {
         const wc = t.split(/\s+/).length;
         return wc >= 2 && wc <= 12;
@@ -512,12 +715,11 @@ Berdasarkan transkrip di atas, buat segmen caption sesuai dengan instruksi.
     if (!candidates.length) return "";
     let best = candidates[0];
     let bestScore = -1;
-    // Prefer segments with emphasis words, questions, or punchy endings.
     for (let i = 0; i < candidates.length; i++) {
       const c = candidates[i];
-      let score = (segs.length - i) * 1.5; // earlier = better
-      if (/[?]/.test(c)) score += 3;       // question = curiosity
-      if (/[.!…]$/.test(c)) score += 2;    // complete thought
+      let score = (segs.length - i) * 1.5;
+      if (/[?]/.test(c)) score += 3;
+      if (/[.!…]$/.test(c)) score += 2;
       if (segs[i] && Array.isArray(segs[i].emphasis_words) && segs[i].emphasis_words.length) score += 2;
       if (c.length > 25 && c.length <= 90) score += 1.5;
       if (score > bestScore) {
@@ -542,3 +744,9 @@ Berdasarkan transkrip di atas, buat segmen caption sesuai dengan instruksi.
 
 // Export the engine
 module.exports = AutoCaptionEngine;
+
+// Standalone layout helper shared with the server for preview/export parity.
+module.exports.layoutCaptionLines = layoutCaptionLines;
+module.exports.analyzeSpeechRhythm = (words) => {
+  try { return AutoCaptionEngine({}).helpers.analyzeSpeechRhythm(words); } catch (e) { return { gaps: [], duration: 0, wordsPerSec: 0, charsPerSec: 0 }; }
+};

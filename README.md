@@ -51,6 +51,7 @@ http://localhost:4173
 - **Reorder clip**: kartu clip bisa diseret (drag & drop) untuk mengubah urutan clip.
 - **Hapus project per-baris**: tombol `Hapus` di setiap baris Library menghapus project beserta file-nya.
 - **Cari kata di caption**: kotak pencarian di panel Caption Timeline menyorot segmen yang cocok.
+- **Terjemahkan caption (offline)**: tombol `Terjemahkan` di panel Caption Timeline menerjemahkan semua segmen ke bahasa pilihan (Indonesia/English) via Argos Translate lokal — tanpa API key. Auto-caption juga diterjemahkan otomatis ke bahasa pilihan bila bahasa asli video berbeda.
 - **Pilih model STT**: dropdown `Model STT (offline)` di tab Settings menampilkan model Faster-Whisper yang tersedia di server.
 
 ## Catatan
@@ -97,6 +98,19 @@ $env:CLIPFORGE_VENV_PYTHON="C:\path\ke\.venv\Scripts\python.exe"
 node server.js
 ```
 
+Terjemahan caption offline (Argos Translate — model `id`↔`en` diunduh sekali, ~100 MB):
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install argostranslate
+node server.js
+```
+
+Model terjemahan lain bisa di-pre-download sebelum dipakai:
+
+```powershell
+.\.venv\Scripts\python.exe stt-engine.py translate --text "Halo" --from id --to en
+```
+
 Model default local STT adalah `tiny` di CPU dengan `int8` (tercepat). Model `small` juga ter-bundle. Bisa diganti:
 
 ```powershell
@@ -127,3 +141,23 @@ Jumlah job berat paralel default adalah 2. Bisa diubah:
 $env:CLIPFORGE_MAX_JOBS="1"
 node server.js
 ```
+
+## Mengatasi blokir YouTube (HTTP 429 / "Sign in to confirm you're not a bot")
+
+Download YouTube kadang diblokir karena rate limit atau bot check. yt-dlp sudah
+mencoba beberapa client (`android_vr`, `ios`, `default`, lalu `tv` — prioritas
+resolusi lalu ketahanan anti-bot). Jika masih
+terblokir, berikan autentikasi lewat cookies:
+
+- **Dari file cookies.txt** (format Netscape, bisa diekspor lewat ekstensi browser):
+  ```powershell
+  $env:YTDLP_COOKIES="C:\path\ke\cookies.txt"
+  node server.js
+  ```
+- **Langsung dari browser** (browser harus sudah login ke YouTube):
+  ```powershell
+  $env:YTDLP_COOKIES_FROM_BROWSER="chrome"   # atau edge, firefox
+  node server.js
+  ```
+
+Cara mengekspor cookies.txt: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp

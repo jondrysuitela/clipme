@@ -94,17 +94,17 @@ A caption segment is NOT a sentence. It is a reading chunk.
 
 # 5. FILLER WORD HANDLING
 
-fillerMode: "none" | "moderate" | "aggressive"
+fillerMode: "none" | "light" | "aggressive"
 
 ### none
 Keep every word, including fillers.
 
-### moderate
-Keep fillers only when they feel natural and conversational.
+### light
+Remove obvious hesitation fillers only: "um", "uh", "hmm", "eh", "eee", "ehm", "anu".
 
 ### aggressive
-Remove filler words such as:
-"um", "uh", "hmm", "eh", "eee", "anu", "jadi", "kayak", "basically", "you know", "I mean", "so", "well", "actually", "literally", "just", "karena", "lalu", "terus", "gitu", "aja"
+Also remove conversational filler words such as:
+"jadi", "kayak", "basically", "you know", "I mean", "so", "well", "actually", "literally", "just", "karena", "lalu", "terus", "gitu", "aja"
 
 Removing a filler must never change the meaning of the sentence.
 

@@ -59,6 +59,7 @@ class TranscriptionConfig:
     vad_filter: bool = True
     chunk_length: int = 30
     hotwords: List[str] = field(default_factory=list)
+    diarization: bool = True
 
 
 class ProgressCallback(Protocol):

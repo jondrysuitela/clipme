@@ -29,11 +29,13 @@
       "script.js",
       "server.js",
       "clipme-prompt.js",
+      "clipme-hook-engine.js",
       "clipme-caption-engine.js",
       "clipme-caption-prompt.js",
       "build/icon.png",
       "transcribe_faster_whisper.py",
       "stt-engine.py",
+      "stt-config.json",
       "stt/**/*.py",
       "electron/**/*",
       "package.json"
@@ -41,6 +43,7 @@
     "asarUnpack": [
       "stt/**/*.py",
       "stt-engine.py",
+      "stt-config.json",
       "transcribe_faster_whisper.py"
     ],
     "extraResources": [

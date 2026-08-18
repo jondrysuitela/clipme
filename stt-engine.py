@@ -53,6 +53,7 @@ def main():
     tp.add_argument("--remove-silence", action="store_true")
     tp.add_argument("--enhance", action="store_true")
     tp.add_argument("--no-vad", action="store_true", help="Disable VAD")
+    tp.add_argument("--no-diarization", action="store_true", help="Disable lightweight speaker diarization")
 
     # search
     sp = sub.add_parser("search", help="Search transcript")
@@ -79,6 +80,14 @@ def main():
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--config", default="")
 
+    # translate
+    trp = sub.add_parser("translate", help="Translate text or transcript JSON (offline, Argos)")
+    trp.add_argument("--text", default="", help="Plain text to translate")
+    trp.add_argument("--json", default="", help="Transcript JSON file to translate")
+    trp.add_argument("--from", dest="from_code", required=True)
+    trp.add_argument("--to", dest="to_code", required=True)
+    trp.add_argument("--output", default="", help="Output path for --json mode")
+
     # config
     cp = sub.add_parser("config")
     cp.add_argument("--output", default="stt-config.json")
@@ -98,6 +107,32 @@ def main():
         cfg.save(args.output)
         print(f"Config saved to {args.output}")
         return
+
+    # ── Translate (offline) ──
+    if args.command == "translate":
+        from stt.translate import translate_segments, translate_text
+
+        if args.text:
+            print(translate_text(args.text, args.from_code, args.to_code))
+            return
+        if args.json:
+            if not os.path.exists(args.json):
+                print(f"Error: File not found: {args.json}", file=sys.stderr)
+                sys.exit(1)
+            with open(args.json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            segments = data if isinstance(data, list) else data.get("segments", [])
+            translated = translate_segments(segments, args.from_code, args.to_code)
+            payload = translated if isinstance(data, list) else {**data, "segments": translated}
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                print(f"Output: {args.output}", file=sys.stderr)
+            else:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        print("Error: --text atau --json diperlukan.", file=sys.stderr)
+        sys.exit(1)
 
     # ── List models ──
     if args.command == "list-models":
@@ -141,7 +176,7 @@ def main():
 
         def progress(pct, msg):
             bar = "#" * (pct // 5) + "." * (20 - pct // 5)
-            print(f"\r[{bar}] {pct}% {msg}", end="", file=sys.stderr)
+            print(f"\r[{bar}] {pct}% {msg}", end="", file=sys.stderr, flush=True)
             if pct >= 100:
                 print(file=sys.stderr)
 
@@ -158,6 +193,8 @@ def main():
             kwargs["enhance"] = True
         if args.no_vad:
             kwargs["vad_filter"] = False
+        if args.no_diarization:
+            kwargs["diarization"] = False
 
         try:
             result = asyncio.run(engine.transcribe(args.audio, **kwargs))

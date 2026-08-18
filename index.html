@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
 <title>Clipper Studio</title>
 <link rel="icon" type="image/png" href="build/icon.png">
 <link rel="stylesheet" href="styles.css">
@@ -17,17 +18,36 @@
         <span>Clip studio</span>
       </div>
     </div>
-    <nav class="nav-list">
-      <button class="nav-item active" data-view="studio" type="button">
-        <span class="nav-icon">S</span> Studio
-      </button>
-      <button class="nav-item" data-view="library" type="button">
-        <span class="nav-icon">L</span> Library
-      </button>
-      <button class="nav-item" data-view="exports" type="button">
-        <span class="nav-icon">E</span> Exports
-      </button>
-    </nav>
+
+    <div class="sidebar-group sidebar-group-nav">
+      <p class="sidebar-section-label">Workspace</p>
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="studio" type="button">
+          <span class="nav-icon">S</span> Studio
+        </button>
+        <button class="nav-item" data-view="library" type="button">
+          <span class="nav-icon">L</span> Library
+        </button>
+        <button class="nav-item" data-view="exports" type="button">
+          <span class="nav-icon">E</span> Exports
+        </button>
+      </nav>
+    </div>
+
+    <div class="sidebar-group sidebar-group-engine">
+      <p class="sidebar-section-label">Local Engine</p>
+      <div class="local-engine">
+        <div class="engine-status-row">
+          <span class="engine-label">Compute</span>
+          <span class="engine-value idle" id="engineCompute">CPU-ONLY</span>
+        </div>
+        <div class="engine-status-row">
+          <span class="engine-label">Queue</span>
+          <span class="engine-value idle" id="engineQueueStatus">QUEUE READY</span>
+        </div>
+      </div>
+    </div>
+
     <div class="usage">
       <div class="usage-row"><span>Storage</span><strong id="storageUsed">0 MB</strong></div>
       <div class="meter"><span id="storageMeter" style="width:0%"></span></div>
@@ -41,6 +61,7 @@
         <h1 id="fileTitle">Clipper Studio</h1>
       </div>
       <div class="topbar-actions">
+        <button class="primary-button" id="newProjectBtn" type="button">+ New Project</button>
       </div>
     </div>
 
@@ -78,13 +99,6 @@
                 <option value="45">45s</option>
                 <option value="60">60s</option>
                 <option value="90" selected>90s</option>
-              </select>
-            </label>
-            <label>Language
-              <select id="languageSelect">
-                <option value="Indonesia" selected>Indonesia</option>
-                <option value="English">English</option>
-                <option value="Mixed">Mixed</option>
               </select>
             </label>
           </div>
@@ -144,6 +158,11 @@
               <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
               <button class="ghost-button compact" id="muteToggle" type="button" title="Mute/unmute">Mute</button>
               <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
+              <select id="fillerModeSelect" class="inspector-input" style="max-width:130px" title="Mode filter kata pengisi (filler)">
+                <option value="aggressive" selected>Filler: Aggressive</option>
+                <option value="light">Filler: Light</option>
+                <option value="none">Filler: None (simpan semua)</option>
+              </select>
               <span id="captionStatus" class="caption-status"></span>
               <button class="primary-button compact" id="exportButton" type="button">Export selected clip</button>
             </div>
@@ -276,9 +295,6 @@
             <label class="audio-opt"><input type="checkbox" id="enhanceDenoise"> Kurangi noise</label>
             <label class="audio-opt"><input type="checkbox" id="enhanceBoost"> Perkuat suara (normalisasi)</label>
             <div class="caption-hint">Opsional: jeda diam dipotong, noise di-filter, volume dinormalisasi saat export.</div>
-            <div class="field-label">Motion</div>
-            <label class="audio-opt"><input type="checkbox" id="autoZoomToggle"> Auto-zoom (slow zoom-in)</label>
-            <div class="caption-hint">Efek Ken Burns ringan — kamera zoom pelan ke tengah selama clip.</div>
             <div class="field-label">Frame rate</div>
             <select id="fpsSelect" class="inspector-input">
               <option value="24">24 fps</option>
@@ -334,6 +350,13 @@
             <button class="ghost-button compact" id="importSrtBtn" type="button">Import SRT/VTT</button>
             <input type="file" id="importSrtInput" accept=".srt,.vtt,text/plain" style="display:none">
             <button class="ghost-button compact" id="exportSrt" type="button">Export SRT</button>
+            <select class="inspector-input" id="translateFrom" style="max-width:110px" title="Bahasa asli caption">
+              <option value="auto">Auto deteksi</option>
+              <option value="en">English</option>
+              <option value="id">Indonesia</option>
+              <option value="ms">Melayu</option>
+            </select>
+            <button class="ghost-button compact" id="translateBtn" type="button" title="Terjemahkan semua segmen caption ke bahasa pilihan di inspector (offline)">Terjemahkan</button>
             <button class="primary-button compact" id="saveTimeline" type="button">Simpan Perubahan</button>
           </div>
         </div>

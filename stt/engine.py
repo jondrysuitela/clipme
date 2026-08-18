@@ -102,7 +102,13 @@ class STTEngine(ISTTEngine):
 
         # 2. Build transcription config
         tc = self._build_config(**kwargs)
-        language = kwargs.get("language", "") or self._cfg.get("language.default", "")
+        # Auto-detect language by default; only force a language when the
+        # caller explicitly passed one (or the config has auto_detect off).
+        language = kwargs.get("language", "")
+        if not language:
+            auto_detect = self._cfg.get("language.auto_detect", True)
+            if not auto_detect:
+                language = self._cfg.get("language.default", "")
 
         # 3. Audio preprocessing (optional)
         audio_path = self._maybe_preprocess(audio_path, kwargs)
@@ -197,6 +203,15 @@ class STTEngine(ISTTEngine):
 
             result.segments.append(seg)
 
+        # F8: diarisasi ringan berbasis akustik (RMS + zero-crossing rate) —
+        # label pembicara yang NYATA dari perubahan energi audio, bukan
+        # "speaker_1" yang dihardcode. Mati saat segment sudah tidak ada audio.
+        if tc.diarization:
+            try:
+                self._diarize(result.segments, audio_path)
+            except Exception as e:
+                log.warn(f"Diarization skipped: {e}")
+
         self._report(95, "Finalizing...")
         result.text = " ".join(s.text for s in result.segments if s.text).strip()
         result.processed_duration = time.time() - t_start
@@ -218,6 +233,78 @@ class STTEngine(ISTTEngine):
     def _report(self, pct: int, msg: str = "") -> None:
         if self._progress_cb:
             self._progress_cb(pct, msg)
+
+    def _diarize(self, segments: List[Segment], audio_path: str, max_speakers: int = 4) -> None:
+        """Label pembicara per segmen dari akustik audio (RMS + ZCR).
+
+        Bukan model diarisasi penuh (pyannote), tapi nilai yang DIDETEKSI dari
+        audio: perbedaan energi/pitch antar-segmen diklaster berurutan. Jujur,
+        deterministik, offline, tanpa dependensi baru. Label memakai bentuk
+        "speaker_1", "speaker_2", dst. — konsisten dengan format lama.
+        """
+        if not segments:
+            return
+        try:
+            audio, sr = self._audio_proc.load(audio_path)
+        except Exception:
+            return
+        if audio is None or len(audio) == 0:
+            return
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+
+        eps = 1e-9
+        feats = []
+        for s in segments:
+            i0 = max(0, int(s.start * sr))
+            i1 = min(len(audio), max(i0, int(s.end * sr)))
+            x = audio[i0:i1]
+            if len(x) < max(1, sr // 50):
+                feats.append(None)
+                continue
+            rms = float(np.sqrt(np.mean(x ** 2) + eps))
+            if len(x) > 1:
+                zcr = float(np.mean(np.abs(np.diff(np.sign(x))) > 0))
+            else:
+                zcr = 0.0
+            feats.append((rms, zcr))
+
+        valid = [f for f in feats if f is not None]
+        if not valid:
+            return
+        max_rms = max(f[0] for f in valid) or 1.0
+
+        labels = []
+        means: List[Tuple[float, float]] = []
+        for f in feats:
+            if f is None:
+                labels.append(labels[-1] if labels else 0)
+                continue
+            fv = (f[0] / max_rms, f[1])
+            if not means:
+                means.append(fv)
+                labels.append(0)
+                continue
+            best = 0
+            best_d = float("inf")
+            for li, m in enumerate(means):
+                d = abs(fv[0] - m[0]) + 0.5 * abs(fv[1] - m[1])
+                if d < best_d:
+                    best_d = d
+                    best = li
+            # Perubahan akustik jelas dan segmen cukup panjang → pembicara baru.
+            if best_d > 0.32 and len(means) < max_speakers:
+                best = len(means)
+                means.append(fv)
+            labels.append(best)
+            # Running mean agar adaptif terhadap pergeseran nada pembicara.
+            m = means[best]
+            means[best] = (m[0] * 0.75 + fv[0] * 0.25, m[1] * 0.75 + fv[1] * 0.25)
+
+        for seg, label in zip(segments, labels):
+            seg.speaker = f"speaker_{label + 1}"
+            for w in seg.words:
+                w.speaker = seg.speaker
 
     def _build_config(self, **kwargs) -> TranscriptionConfig:
         tc = TranscriptionConfig()
