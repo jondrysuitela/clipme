@@ -37,8 +37,9 @@ const { execFile } = require("child_process");
 // installs pyannote-audio, the high-quality diarizer runs through the same
 // Python interface (clipme-speaker-detect.py dispatches).
 //
-// Face detection: OpenCV res10 SSD shipped as ~10MB frozen graph is the
-// default. We're NOT bundling proprietary gated models.
+// Face detection (Cut-to-Face Mode Lite): OpenCV FaceDetectorYN (YuNet from
+// OpenCV Zoo, MIT) + Haar profile cascade (Apache-2.0). No proprietary/gated
+// models, no cloud APIs. Download only via explicit "Download Models" button.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MODEL_CATALOG = {
@@ -60,13 +61,22 @@ const MODEL_CATALOG = {
     backend: "pyannote",
     license: "MIT"
   },
-  "face-res10": {
-    name: "opencv face detector (Res10 SSD)",
-    description: "CPU-friendly real face detection. Bundled as frozen graph.",
+  "face-yunet": {
+    name: "opencv face detector (YuNet)",
+    description: "OpenCV FaceDetectorYN from OpenCV Zoo. CPU-friendly, ~340KB ONNX, offline.",
     repo: "opencv/opencv_zoo",
-    files: ["deploy.prototxt", "res10_300x300_ssd_iter_140000_fp16.caffemodel"],
-    sizeMB: 6,
-    backend: "opencv-dnn",
+    files: ["face_detection_yunet_2023mar.onnx"],
+    sizeMB: 1,
+    backend: "opencv-yunet",
+    license: "MIT"
+  },
+  "face-haar": {
+    name: "opencv Haar profile cascade",
+    description: "Detects side-facing (left/right profile) faces. Ships inside OpenCV.",
+    repo: "opencv/opencv",
+    files: ["haarcascade_profileface.xml"],
+    sizeMB: 1,
+    backend: "opencv-haar",
     license: "Apache-2.0"
   },
   "face-mediapipe": {
@@ -278,27 +288,28 @@ async function speakerFallback(opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FACE DETECTION PROVIDER
+// FACE DETECTION PROVIDER (Cut-to-Face Mode Lite)
 //
 // Backend priority:
-//   1. MediaPipe (if installed) — accurate + GPU
-//   2. OpenCV DNN with bundled Res10 SSD — works out-of-box if opencv-python
+//   1. OpenCV FaceDetectorYN (YuNet, MIT) — front-facing, high confidence
+//   2. OpenCV Haar profile cascade (Apache-2.0) — left/right profile faces
 //   3. Fallback — return SKIPPED status, NOT mock coordinates
 //
 // Output timeline shape:
 //   { schema_version, source, fps,
-//     frames: [{ t_ms, faces: [{ x, y, w, h, confidence }] }] }
+//     frames: [{ t_ms, faces: [{ x, y, w, h, confidence,
+//                                track_id, track_confidence, mouth_motion }] }] }
 // ─────────────────────────────────────────────────────────────────────────────
 
 function describeFace(opts) {
   const { pythonPath, faceScript } = opts;
-  let avail = false, label = "OpenCV DNN fallback (when opencv-python installed)";
+  let avail = false, label = "OpenCV YuNet + Haar (when opencv-python installed)";
   if (pythonPath && faceScript && fs.existsSync(pythonPath) && fs.existsSync(faceScript)) avail = true;
   return { available: avail, label };
 }
 
 async function analyzeFace(opts) {
-  const { videoPath, pythonPath, faceScript, sampleFps = 1 } = opts;
+  const { videoPath, pythonPath, faceScript, sampleFps = 3 } = opts;
   if (!fs.existsSync(videoPath)) throw new Error(`videoPath not found: ${videoPath}`);
   if (!pythonPath || !faceScript || !fs.existsSync(pythonPath) || !fs.existsSync(faceScript)) {
     return { schema_version: 1, source: "skipped-no-backend", fps: sampleFps, frames: [], skipped: true };
@@ -324,13 +335,26 @@ async function analyzeFace(opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SPEAKER-FACE ASSOCIATION
+// SPEAKER-FACE ASSOCIATION (Cut-to-Face Mode Lite)
 //
-// Heuristic: for each speaker segment, pick the face-detection frame whose
-// timestamp falls inside the segment and whose face is "most likely speaking".
-// Without tracking: use spatial clustering — assume speaker is the face
-// closest to mid-screen of the active frame.
+// Primary: active-speaker engine (clipme-active-speaker.js) which combines
+// mouth motion, detector confidence, track confidence, speaker timeline and
+// track continuity (req 6), with hysteresis (req 7), ~1.1s hold (req 8),
+// look-room (req 9) and compaction to max 48 (req 10). Old caches without
+// track_id (v1: x,y,w,h,confidence) are still supported (req 11).
 // ─────────────────────────────────────────────────────────────────────────────
+
+let activeSpeakerModule = null;
+function loadActiveSpeaker() {
+  if (activeSpeakerModule) return activeSpeakerModule;
+  try {
+    const p = path.join(path.dirname(__filename), "clipme-active-speaker.js");
+    if (fs.existsSync(p)) activeSpeakerModule = require(p);
+  } catch (e) {
+    console.error("Gagal memuat clipme-active-speaker.js:", e.message);
+  }
+  return activeSpeakerModule;
+}
 
 // Debounce rapid speaker changes (Hysteresis)
 function smoothSpeakerTimeline(segments, minDurationMs = 800) {
@@ -361,6 +385,23 @@ function associateSpeakerWithFace(speakerTimeline, faceTimeline, options = {}) {
   const sourceHeight = options.sourceHeight || 1080;
   if (!faceTimeline || faceTimeline.skipped || !Array.isArray(faceTimeline.frames) || faceTimeline.frames.length === 0) {
     return []; // fallback if no face
+  }
+
+  // Primary: active-speaker engine (track_id + mouth motion aware)
+  const activeSpeaker = loadActiveSpeaker();
+  if (activeSpeaker && typeof activeSpeaker.buildAssociations === "function") {
+    try {
+      const lite = activeSpeaker.buildAssociations(faceTimeline, speakerTimeline, {
+        sourceWidth,
+        sourceHeight,
+        targetAspect: options.targetAspect || (9 / 16),
+        lookRoom: options.lookRoom !== false,
+        lookFactor: options.lookFactor
+      });
+      if (Array.isArray(lite) && lite.length > 0) return lite;
+    } catch (e) {
+      console.error("Active-speaker association gagal, fallback legacy:", e.message);
+    }
   }
 
   const rawSegments = speakerTimeline.segments || [];
@@ -537,7 +578,7 @@ module.exports = {
       audioPath, videoPath = audioPath,
       pythonPath, speakerScript, faceScript,
       ffmpegPath, modelsRoot = MODEL_DIR,
-      sampleFps = 1, minSegmentMs = 250, noiseDb = -35,
+      sampleFps = 3, minSegmentMs = 250, noiseDb = -35,
       faceStartSeconds = 0, faceDurationSeconds = 0
     } = opts;
 

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "updated_utc": "2026-08-19T00:34:21.535763Z",
+  "models": [
+    {
+      "id": "face-yunet",
+      "name": "OpenCV Zoo YuNet Face Detector (2023mar)",
+      "file": "face/face_detection_yunet_2023mar.onnx",
+      "license": "MIT",
+      "source": "https://github.com/opencv/opencv_zoo/tree/master/models/face_detector/yunet",
+      "download": "explicit-only (tombol 'Download Models')"
+    },
+    {
+      "id": "face-haar",
+      "name": "OpenCV Haar Cascade Profile Face",
+      "file": "face_extra/haarcascade_profileface.xml",
+      "license": "Apache-2.0",
+      "source": "https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_profileface.xml",
+      "download": "explicit-only (tombol 'Download Models')"
+    }
+  ],
+  "policy": [
+    "No SCRFD, InsightFace, TalkNet, atau model berlisensi komersial.",
+    "Analisis video tidak melakukan request jaringan apa pun.",
+    "Unduhan hanya melalui tombol 'Download Models' (explicit)."
+  ]
+}

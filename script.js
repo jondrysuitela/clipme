@@ -920,7 +920,7 @@ async function analyzeSpeakerForClip() {
         clipId: requestedClip.id,
         start: requestedClip.start,
         end: requestedClip.end,
-        sampleFps: 1,
+        sampleFps: 3,
         minSegmentMs: 300,
         noiseDb: -35,
         speakerCut: true,
@@ -956,14 +956,24 @@ async function analyzeSpeakerForClip() {
     dbgHtml += `<b>Face frames:</b> ${faceCount}<br>`;
 
     if (associationCount > 0) {
-      dbgHtml += `<br><b>CSS Cut-to-Face preview aktif (${associationCount} cuts):</b><br>`;
+      dbgHtml += `<br><b>CSS Cut-to-Face preview aktif (${associationCount} cuts, max 48):</b><br>`;
       data.associations.forEach((a) => {
         const s = (a.start_ms / 1000).toFixed(1);
         const e = (a.end_ms / 1000).toFixed(1);
         const confidence = Number(a.face && a.face.confidence);
         const confidenceText = Number.isFinite(confidence) ? confidence.toFixed(2) : "-";
-        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id || "speaker"} → Face {x:${a.face?.x ?? "-"}, y:${a.face?.y ?? "-"}, conf:${confidenceText}}</div>`;
+        const trackId = a.track_id != null ? a.track_id : (a.face && a.face.track_id != null ? a.face.track_id : null);
+        const trackText = trackId != null && trackId >= 0 ? `track #${trackId}` : "no-track";
+        const mouth = Number(a.mouth_motion != null ? a.mouth_motion : (a.face && a.face.mouth_motion));
+        const mouthText = Number.isFinite(mouth) && mouth > 0 ? mouth.toFixed(2) : "-";
+        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id || "speaker"} → Face {x:${a.face?.x ?? "-"}, y:${a.face?.y ?? "-"}, conf:${confidenceText}, ${trackText}, mouth:${mouthText}}</div>`;
       });
+      // Active-track + mouth-motion summary (requirement 13)
+      const tracked = data.associations.filter((a) => a.track_id != null && a.track_id >= 0);
+      const avgMouth = tracked.length
+        ? (tracked.reduce((sum, a) => sum + (Number(a.mouth_motion) || 0), 0) / tracked.length)
+        : 0;
+      dbgHtml += `<br><b>Active track:</b> ${tracked.length ? `${tracked.length} association(s) dengan track_id` : "n/a"} · <b>Avg mouth-motion:</b> ${avgMouth > 0 ? avgMouth.toFixed(2) : "n/a"}`;
     } else {
       dbgHtml += "<br><b>Cut-to-Face:</b> wajah aktif belum ditemukan; preview tetap center-crop.";
     }
