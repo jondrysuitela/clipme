@@ -426,6 +426,22 @@ function normalizeLlmAnalysis(raw, fallbackAnalysis) {
     openingStructure: Array.isArray(fallbackAnalysis.openingStructure) ? fallbackAnalysis.openingStructure : [],
     openingAlternatives: Array.isArray(fallbackAnalysis.openingAlternatives) ? fallbackAnalysis.openingAlternatives.slice(0, 4) : [],
     openingKeepOriginal: fallbackAnalysis.openingKeepOriginal === true,
+    openingClipPotential: fallbackAnalysis.openingClipPotential != null ? fallbackAnalysis.openingClipPotential : 0,
+    openingDuration: fallbackAnalysis.openingDuration || null,
+    openingMinViable: fallbackAnalysis.openingMinViable != null ? fallbackAnalysis.openingMinViable : null,
+    openingOptimal: fallbackAnalysis.openingOptimal != null ? fallbackAnalysis.openingOptimal : null,
+    openingMaxUseful: fallbackAnalysis.openingMaxUseful != null ? fallbackAnalysis.openingMaxUseful : null,
+    openingRecommended: fallbackAnalysis.openingRecommended != null ? fallbackAnalysis.openingRecommended : null,
+    openingMaxAllowed: fallbackAnalysis.openingMaxAllowed != null ? fallbackAnalysis.openingMaxAllowed : null,
+    openingDurationMode: String(fallbackAnalysis.openingDurationMode || "AUTO"),
+    openingPayoffTimestamp: fallbackAnalysis.openingPayoffTimestamp != null ? fallbackAnalysis.openingPayoffTimestamp : null,
+    openingPayoffDistance: fallbackAnalysis.openingPayoffDistance != null ? fallbackAnalysis.openingPayoffDistance : null,
+    openingPayoffQuality: fallbackAnalysis.openingPayoffQuality != null ? fallbackAnalysis.openingPayoffQuality : null,
+    openingStoryCompleteness: fallbackAnalysis.openingStoryCompleteness != null ? fallbackAnalysis.openingStoryCompleteness : null,
+    openingRetentionPotential: fallbackAnalysis.openingRetentionPotential != null ? fallbackAnalysis.openingRetentionPotential : null,
+    openingDurationEfficiency: fallbackAnalysis.openingDurationEfficiency != null ? fallbackAnalysis.openingDurationEfficiency : null,
+    openingEndingQuality: fallbackAnalysis.openingEndingQuality != null ? fallbackAnalysis.openingEndingQuality : null,
+    openingNaturalCutReason: String(fallbackAnalysis.openingNaturalCutReason || ""),
     keyMessage: String(g("keyMessage", fallbackAnalysis.keyMessage) || ""),
     payoff: p || fallbackAnalysis.payoff,
     storyStructure: String(g("storyStructure", fallbackAnalysis.storyStructure) || ""),
@@ -1640,7 +1656,10 @@ function clipmeAssemble(sentences, segments, lang, targetLength, options) {
     try {
       opening = openingEngineModule.buildOpeningDecision(segments, lang, {
         keepOriginal: !!opts.keepOriginal,
-        disableRewrite: !!opts.disableRewrite
+        disableRewrite: !!opts.disableRewrite,
+        maxAllowed: opts.maxAllowed,
+        mode: opts.mode || "AUTO",
+        fixedDuration: opts.fixedDuration
       });
     } catch (e) {
       opening = null;
@@ -1663,7 +1682,23 @@ function clipmeAssemble(sentences, segments, lang, targetLength, options) {
         openingPayoff: opening.payoff ? { index: opening.payoff.index, start: opening.payoff.start, end: opening.payoff.end, text: opening.payoff.text } : null,
         openingStructure: opening.clipStructure || [],
         openingAlternatives: opening.alternatives || [],
-        openingKeepOriginal: !!opening.keepOriginal
+        openingKeepOriginal: !!opening.keepOriginal,
+        openingClipPotential: Math.round(opening.clipPotentialScore || 0),
+        openingDuration: opening.duration ? { ...opening.duration } : null,
+        openingMinViable: opening.duration ? opening.duration.minimumViableDuration : null,
+        openingOptimal: opening.duration ? opening.duration.optimalDuration : null,
+        openingMaxUseful: opening.duration ? opening.duration.maximumUsefulDuration : null,
+        openingRecommended: opening.duration ? opening.duration.recommendedDuration : null,
+        openingMaxAllowed: opening.duration ? opening.duration.maximumAllowedDuration : null,
+        openingDurationMode: opening.duration ? opening.duration.mode : null,
+        openingPayoffTimestamp: opening.duration ? opening.duration.payoffTimestamp : null,
+        openingPayoffDistance: opening.duration ? opening.duration.payoffDistance : null,
+        openingPayoffQuality: opening.duration ? opening.duration.payoffQuality : null,
+        openingStoryCompleteness: opening.duration ? opening.duration.storyCompleteness : null,
+        openingRetentionPotential: opening.duration ? opening.duration.retentionPotential : null,
+        openingDurationEfficiency: opening.duration ? opening.duration.durationEfficiency : null,
+        openingEndingQuality: opening.duration ? opening.duration.endingQuality : null,
+        openingNaturalCutReason: opening.duration ? opening.duration.naturalCutReason : ""
       }
     : {
         openingStrategy: "KEEP",
@@ -1681,7 +1716,23 @@ function clipmeAssemble(sentences, segments, lang, targetLength, options) {
         openingPayoff: null,
         openingStructure: [],
         openingAlternatives: [],
-        openingKeepOriginal: false
+        openingKeepOriginal: false,
+        openingClipPotential: 0,
+        openingDuration: null,
+        openingMinViable: null,
+        openingOptimal: null,
+        openingMaxUseful: null,
+        openingRecommended: null,
+        openingMaxAllowed: null,
+        openingDurationMode: null,
+        openingPayoffTimestamp: null,
+        openingPayoffDistance: null,
+        openingPayoffQuality: null,
+        openingStoryCompleteness: null,
+        openingRetentionPotential: null,
+        openingDurationEfficiency: null,
+        openingEndingQuality: null,
+        openingNaturalCutReason: ""
       };
 
   const criteria = clipmeCriterionScores({ sentences, fullText, hits, starter, starterScore, lang });
@@ -1804,7 +1855,8 @@ function clippedForField(value, max) {
   return String(value || "").length > max ? `${String(value).slice(0, max - 1)}—|` : String(value || "");
 }
 
-function analyzeTranscriptToClips(transcript, duration, targetLength = 90, language = "Indonesia") {
+function analyzeTranscriptToClips(transcript, duration, targetLength = 90, language = "Indonesia", options) {
+  const opts = options || {};
   const length = targetClipLength(targetLength);
   const lang = clipmeLangTag(language);
   const sentencesIndexed = transcript
@@ -1839,7 +1891,11 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
         start: Math.max(0, Number(s.start || 0) - w.start),
         end: Math.max(0, Number(s.end || 0) - w.start)
       }));
-      const analysis = clipmeAssemble(sentences, relativeSegments, lang, length);
+      const analysis = clipmeAssemble(sentences, relativeSegments, lang, length, {
+        maxAllowed: length,
+        mode: opts.mode || "AUTO",
+        fixedDuration: opts.fixedDuration
+      });
       return { ...w, analysis };
     })
     .sort((a, b) => b.analysis.score - a.analysis.score);
@@ -1889,6 +1945,29 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
         }
       }
 
+      // DYNAMIC CLIP END — durasi mengikuti rekomendasi engine (max = ceiling).
+      // Snap ke batas kalimat terdekat di bawah target agar potongan selalu
+      // berakhir alami (speaker-safe, tidak memotong kalimat di tengah).
+      let dynamicEnd = false;
+      const recDur = Number(analysis.openingRecommended);
+      if (Number.isFinite(recDur) && recDur > 0 && clipStart > 0) {
+        const maxEnd = Math.min(duration, candidate.end);
+        const minClip = Math.min(3, Math.max(2, Math.round((maxEnd - clipStart) * 0.15)));
+        const minEnd = clipStart + minClip;
+        const targetEnd = Math.min(clipStart + recDur, maxEnd);
+        if (targetEnd - minEnd >= 1) {
+          const boundaries = candidate.segments
+            .map((s) => Number(s.end) || 0)
+            .filter((b) => b >= minEnd && b <= targetEnd + 0.5)
+            .sort((a, b) => b - a);
+          const snapped = boundaries.length ? Math.min(boundaries[0], targetEnd) : targetEnd;
+          if (snapped > clipStart + 1.5 && snapped <= maxEnd + 0.5) {
+            clipEnd = Math.round(snapped);
+            dynamicEnd = true;
+          }
+        }
+      }
+
       return {
         id: index + 1,
         title: CLIPME_TITLES[index] || CLIPME_TITLES[CLIPME_TITLES.length - 1],
@@ -1908,6 +1987,12 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
         payoffConfidence: analysis.payoffConfidence,
         openingStrategy,
         openingApplied,
+        dynamicEnd,
+        recommendedDuration: Number.isFinite(Number(analysis.openingRecommended)) ? Number(analysis.openingRecommended) : null,
+        optimalDuration: Number.isFinite(Number(analysis.openingOptimal)) ? Number(analysis.openingOptimal) : null,
+        optimalRange: analysis.openingMinViable != null && analysis.openingMaxUseful != null ? `${analysis.openingMinViable}-${analysis.openingMaxUseful}` : null,
+        maximumAllowed: Number.isFinite(Number(analysis.openingMaxAllowed)) ? Number(analysis.openingMaxAllowed) : null,
+        naturalCutReason: analysis.openingNaturalCutReason || "",
         bestOpening: analysis.openingBest || hookText,
         editorialScore: analysis.openingEditorialScore || 0,
         openingSourceIndex: analysis.openingSourceIndex != null ? analysis.openingSourceIndex : -1,
@@ -2103,9 +2188,9 @@ function clipHook(caption, index) {
   return first ? `${first.slice(0, 58)}${first.length > 58 ? "..." : ""}` : `Highlight ${index + 1}`;
 }
 
-function buildTranscriptClips(transcript, duration, targetLength = 90, language = "Indonesia") {
+function buildTranscriptClips(transcript, duration, targetLength = 90, language = "Indonesia", options) {
   if (!transcript.length) return buildClips(duration, targetLength);
-  return analyzeTranscriptToClips(transcript, duration, targetLength, language);
+  return analyzeTranscriptToClips(transcript, duration, targetLength, language, options);
 }
 
 async function transcribeAudioWithOpenAI(audioPath, language) {
@@ -3354,7 +3439,10 @@ async function analyzeYouTubeUrl(videoUrl, payload) {
     transcriptProvider = speechResult.provider;
   }
 
-  const clips = buildTranscriptClips(transcript, probe.duration, payload.duration, payload.language);
+  const clips = buildTranscriptClips(transcript, probe.duration, payload.duration, payload.language, {
+    mode: payload.durationMode || "AUTO",
+    fixedDuration: Number(payload.fixedDuration) > 0 ? Number(payload.fixedDuration) : 0
+  });
 
   writeProjectManifest(projectDir, {
     id,
@@ -4530,7 +4618,10 @@ async function handleAnalyzeClip(req, res) {
   const sentences = splitSentences(segments.map((s) => s.text).join(" "));
   const heuristicAnalysis = clipmeAssemble(sentences, segments, lang, clip.end - clip.start, {
     keepOriginal: payload.keepOriginal,
-    disableRewrite: payload.disableRewrite
+    disableRewrite: payload.disableRewrite,
+    maxAllowed: clip.end - clip.start,
+    mode: payload.durationMode || "AUTO",
+    fixedDuration: Number(payload.fixedDuration) > 0 ? Number(payload.fixedDuration) : 0
   });
 
   // LLM mode first (source-truthful, per the ClipMe system prompt). Fallback to heuristic.
@@ -4982,7 +5073,10 @@ function handleGenerateClips(req, res, params) {
       sendJson(res, 400, { error: "Transcript kosong." });
       return;
     }
-    const clips = buildTranscriptClips(transcript, manifest.probe?.duration || 0, target, manifest.transcriptLanguage || "Indonesia");
+    const clips = buildTranscriptClips(transcript, manifest.probe?.duration || 0, target, manifest.transcriptLanguage || "Indonesia", {
+      mode: data.durationMode || "AUTO",
+      fixedDuration: Number(data.fixedDuration) > 0 ? Number(data.fixedDuration) : 0
+    });
     manifest.clips = clips.map((clip) => ({ ...clip, previewReady: false }));
     fs.writeFileSync(path.join(projectDir, "project.json"), JSON.stringify(manifest, null, 2));
     sendJson(res, 200, { clips: manifest.clips, transcriptStatus: `${manifest.transcriptProvider}: ${transcript.length} lines` });

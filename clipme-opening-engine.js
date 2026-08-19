@@ -19,6 +19,7 @@
 //   buildOpeningDecision(segments, lang, opts)
 // ============================================================================
 const HE = require("./clipme-hook-engine.js");
+const DurationEngine = require("./clipme-duration-engine.js");
 
 const cleanText = HE.cleanText;
 const wordsOf = HE.helpers.wordsOf;
@@ -410,6 +411,27 @@ function buildOpeningDecision(segments, lang, options) {
   const score = editorialScore(decisionObj, langKey);
   const clipStructure = buildClipStructure(moments, decisionObj);
 
+  // ---- VIRAL DURATION ENGINE: durasi mengikuti konten (max = ceiling) ----
+  let duration = null;
+  let clipPotentialScore = 0;
+  if (DurationEngine && typeof DurationEngine.analyzeDuration === "function") {
+    duration = DurationEngine.analyzeDuration(moments, chosen, {
+      maxAllowed: Number(opts.maxAllowed) > 0 ? Number(opts.maxAllowed) : 90,
+      mode: opts.mode || "AUTO",
+      fixedDuration: Number(opts.fixedDuration) > 0 ? Number(opts.fixedDuration) : 0
+    });
+    clipPotentialScore = DurationEngine.clipPotentialScore({
+      hookQuality: chosen.momentScore != null ? chosen.momentScore : chosen.deep || 0,
+      openingQuality: chosen.momentScore != null ? chosen.momentScore : chosen.deep || 0,
+      storyCompleteness: duration.storyCompleteness,
+      retentionPotential: duration.retentionPotential,
+      payoffQuality: duration.payoffQuality,
+      durationEfficiency: duration.durationEfficiency,
+      endingQuality: duration.endingQuality,
+      payoffPresent: !!payoff
+    });
+  }
+
   // Confidence: gap terhadap momen kedua + kualitas absolut.
   const sorted = moments.filter((m) => !m.filler).sort((a, b) => b.momentScore - a.momentScore);
   const second = sorted[1] || null;
@@ -441,6 +463,7 @@ function buildOpeningDecision(segments, lang, options) {
     hookText: crafted.text,
     editorialScore: score,
     confidence,
+    clipPotentialScore,
     reason: decision.reason,
     sourceSegment: { index: chosen.index, start: chosen.start, end: chosen.end, text: chosen.text },
     momentRoles: chosen.roles,
@@ -450,6 +473,7 @@ function buildOpeningDecision(segments, lang, options) {
     clipStructure,
     alternatives,
     keepOriginal,
+    duration,
     moments
   };
 }

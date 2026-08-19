@@ -104,7 +104,7 @@
             <span data-step="export">Export</span>
           </div>
           <div class="settings-grid">
-            <label>Clip length
+            <label>Max clip length
               <select id="durationSelect">
                 <option value="15">15s</option>
                 <option value="30">30s</option>
@@ -113,6 +113,16 @@
                 <option value="90" selected>90s</option>
               </select>
             </label>
+            <label>Clip length mode
+              <select id="durationModeSelect" title="Durasi clip ditentukan editor AI (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
+                <option value="AUTO" selected>AUTO — editor memutuskan</option>
+                <option value="SHORT">SHORT — padat</option>
+                <option value="STORY">STORY — cerita utuh</option>
+                <option value="MAXIMUM">MAXIMUM — selama masih bernilai</option>
+                <option value="FIXED">FIXED — sesuai Max clip length</option>
+              </select>
+            </label>
+            <input class="inspector-input" id="fixedDurationInput" type="number" min="5" max="90" step="5" value="30" placeholder="Fixed duration (detik)" style="display:none">
           </div>
           <button class="wide-button" id="generateButton" type="button" disabled>Generate clips</button>
         </div>
@@ -234,6 +244,18 @@
               <label class="field-label">Best opening</label>
               <div class="intel-block intel-block--opening" id="intelBestOpening">--</div>
               <div class="intel-opening-meta" id="intelOpeningMeta"></div>
+              <label class="field-label">Viral clip length</label>
+              <div class="intel-block intel-block--duration" id="intelDuration">
+                <span class="intel-dur-main">--</span>
+                <span class="intel-dur-sub" id="intelDurationSub"></span>
+              </div>
+              <div class="intel-duration-meta">
+                <span class="intel-dur-tag" id="intelDurRecommended">--</span>
+                <span class="intel-dur-tag" id="intelDurRange">--</span>
+                <span class="intel-dur-tag" id="intelDurMax">--</span>
+                <span class="intel-dur-tag" id="intelDurMode">--</span>
+              </div>
+              <div class="intel-opening-reason" id="intelCutReason"></div>
               <label class="field-label">Original hook</label>
               <div class="intel-block" id="intelOriginalHook">--</div>
               <label class="field-label">Recommended hook</label>

@@ -146,6 +146,18 @@ function effectiveCaptionStyle() {
     : "off";
 }
 
+function durationSettingsPayload() {
+  const modeEl = $("#durationModeSelect");
+  const mode = (modeEl && modeEl.value) || "AUTO";
+  let fixed = 0;
+  if (mode === "FIXED") {
+    const fEl = $("#fixedDurationInput");
+    const n = fEl ? Number(fEl.value) : 0;
+    fixed = Number.isFinite(n) && n > 0 ? n : 30;
+  }
+  return { durationMode: mode, fixedDuration: fixed };
+}
+
 function formatBytes(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n <= 0) return "";
@@ -1359,7 +1371,8 @@ async function processYouTubeUrl() {
           url: urls[0],
           duration: $("#durationSelect").value,
           language: CAPTION_LANG,
-          assumedDuration: 3600
+          assumedDuration: 3600,
+          ...durationSettingsPayload()
         })
       });
       const data = await response.json();
@@ -1379,7 +1392,8 @@ async function processYouTubeUrl() {
         urls,
         duration: $("#durationSelect").value,
         language: CAPTION_LANG,
-        assumedDuration: 3600
+        assumedDuration: 3600,
+        ...durationSettingsPayload()
       })
     });
     const data = await response.json();
@@ -1711,7 +1725,7 @@ $("#generateButton").addEventListener("click", async () => {
     const response = await fetch(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ duration: $("#durationSelect").value })
+      body: JSON.stringify({ duration: $("#durationSelect").value, ...durationSettingsPayload() })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Gagal generate ulang clips.");
@@ -2907,7 +2921,8 @@ async function analyzeSelectedClip() {
         end: state.activeClip.end,
         language: CAPTION_LANG,
         keepOriginal: !!$("#keepOriginalToggle").checked,
-        disableRewrite: !!$("#disableRewriteToggle").checked
+        disableRewrite: !!$("#disableRewriteToggle").checked,
+        ...durationSettingsPayload()
       })
     });
     const data = await response.json();
@@ -2968,6 +2983,7 @@ function renderIntel(a) {
     meta.textContent = a.openingReason;
     openingMeta.appendChild(meta);
   }
+  renderIntelDuration(a);
   $("#intelOriginalHook").textContent = a.originalHook || "--";
   $("#intelRecommendedHook").textContent = a.recommendedHook || "--";
   $("#intelKeyMessage").textContent = a.keyMessage || "--";
@@ -3060,6 +3076,49 @@ function renderIntel(a) {
   $("#intelQuality").textContent = a.qualityGate && a.qualityGate.pass != null
     ? (a.qualityGate.pass ? "LULUS (pas untuk publish)" : "GAGAL (perbaiki atau reject)")
     : "--";
+}
+
+function renderIntelDuration(a) {
+  const mainEl = $("#intelDuration");
+  const rec = Number(a.openingRecommended);
+  const hasDur = Number.isFinite(rec) && rec > 0;
+  if (!hasDur) {
+    mainEl.textContent = "--";
+    $("#intelDurationSub").textContent = "";
+    $("#intelDurRecommended").textContent = "--";
+    $("#intelDurRange").textContent = "--";
+    $("#intelDurMax").textContent = "--";
+    $("#intelDurMode").textContent = "--";
+    $("#intelCutReason").textContent = "";
+    return;
+  }
+  const main = document.createElement("span");
+  main.className = "intel-dur-main";
+  main.textContent = `~${Math.round(rec)} detik`;
+  mainEl.innerHTML = "";
+  mainEl.appendChild(main);
+  const clipLen = state.activeClip ? Math.round(state.activeClip.end - state.activeClip.start) : null;
+  const sub = document.createElement("span");
+  sub.className = "intel-dur-sub";
+  sub.textContent = clipLen != null ? `vs clip saat ini ${clipLen}s` : "";
+  mainEl.appendChild(sub);
+
+  $("#intelDurRecommended").textContent = `Recommended ${Math.round(rec)}s`;
+  const min = Number(a.openingMinViable);
+  const maxUse = Number(a.openingMaxUseful);
+  $("#intelDurRange").textContent =
+    Number.isFinite(min) && Number.isFinite(maxUse) ? `Optimal ${Math.round(min)}–${Math.round(maxUse)}s` : "--";
+  const maxAllowed = Number(a.openingMaxAllowed);
+  $("#intelDurMax").textContent = Number.isFinite(maxAllowed) ? `Max ${Math.round(maxAllowed)}s` : "--";
+  $("#intelDurMode").textContent = a.openingDurationMode ? `Mode ${a.openingDurationMode}` : "--";
+  $("#intelCutReason").textContent = a.openingNaturalCutReason || "";
+
+  if (Number.isFinite(Number(a.openingClipPotential))) {
+    const chip = document.createElement("span");
+    chip.className = "intel-badge intel-badge--active";
+    chip.textContent = `Viral potential ${Math.round(a.openingClipPotential)}/100`;
+    $("#intelOpeningMeta").appendChild(chip);
+  }
 }
 
 $("#exportButton").addEventListener("click", exportSelectedClip);
@@ -3274,7 +3333,9 @@ function collectSettings() {
     captionPosition: state.captionPosition || 0.76,
     speakerCut: !!$("#speakerCutToggle")?.checked,
     faceTrack: !!$("#faceTrackToggle")?.checked,
-    autoCaption: autoCaptionEnabled()
+    autoCaption: autoCaptionEnabled(),
+    durationMode: ($("#durationModeSelect") && $("#durationModeSelect").value) || "AUTO",
+    fixedDuration: Number(($("#fixedDurationInput") && $("#fixedDurationInput").value) || 30)
   };
 }
 
@@ -3306,6 +3367,11 @@ function loadSettings() {
   const act = $("#autoCaptionToggle");
   if (act && data.autoCaption != null) act.checked = !!data.autoCaption;
   syncAutoCaptionToggle();
+  const dm = $("#durationModeSelect");
+  if (dm && data.durationMode) dm.value = data.durationMode;
+  const fd = $("#fixedDurationInput");
+  if (fd) fd.value = String(Number(data.fixedDuration) || 30);
+  syncDurationModeUi();
   applyCaptionPosition();
 }
 
@@ -3315,6 +3381,22 @@ function syncAutoCaptionToggle() {
     btn.disabled = !autoCaptionEnabled();
     btn.title = autoCaptionEnabled() ? "" : "Auto caption dimatikan — nyalakan toggle untuk generate caption";
   }
+}
+
+function syncDurationModeUi() {
+  const modeEl = $("#durationModeSelect");
+  const fixedEl = $("#fixedDurationInput");
+  if (fixedEl) {
+    const isFixed = modeEl && modeEl.value === "FIXED";
+    fixedEl.style.display = isFixed ? "" : "none";
+    if (!isFixed) fixedEl.value = "30";
+  }
+}
+if ($("#durationModeSelect")) {
+  $("#durationModeSelect").addEventListener("change", () => {
+    syncDurationModeUi();
+    saveSettingsDebounced();
+  });
 }
 
 const saveSettingsDebounced = (() => {
@@ -3331,7 +3413,9 @@ const settingsControls = [
   ["input", "#captionPosition"],
   ["change", "#speakerCutToggle"],
   ["change", "#faceTrackToggle"],
-  ["change", "#autoCaptionToggle"]
+  ["change", "#autoCaptionToggle"],
+  ["change", "#durationModeSelect"],
+  ["input", "#fixedDurationInput"]
 ];
 settingsControls.forEach(([eventName, sel]) => {
   $$(sel).forEach((el) => el.addEventListener(eventName, saveSettingsDebounced));
