@@ -2438,6 +2438,30 @@ function buildVideoFilter(payload, contentCrop = null) {
   return { scale: pre[0], crop: pre[pre.length - 1], pre, size, ratio: requested };
 }
 
+// Compare the source resolution against the export target size. The pipeline
+// always scales/crops to the target (e.g. 1080x1920 portrait), so a much smaller
+// source gets upscaled hard and the export looks blurry. Warn only when the
+// upscale factor is > 2x — 1080p->1080x1920 portrait (~1.8x) is the normal case.
+async function buildResolutionWarnings(sourcePath, targetSize) {
+  try {
+    const probe = await probeVideo(sourcePath);
+    if (!probe || !probe.width || !probe.height) return [];
+    const { width: sw, height: sh } = probe;
+    const upscale = Math.max(targetSize.width / sw, targetSize.height / sh);
+    if (upscale > 2) {
+      return [(
+        `Sumber video hanya ${sw}x${sh} — di-upscale ${upscale.toFixed(1)}x ke ` +
+        `${targetSize.width}x${targetSize.height}. Hasil export akan terlihat buram. ` +
+        `Gunakan sumber minimal ${Math.ceil(targetSize.width * 2)}x${Math.ceil(targetSize.height * 2)} ` +
+        `(untuk YouTube, download otomatis naik ke 4K) agar hasil tajam.`
+      )];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 // Overlay a text watermark in a corner of the output frame.
 // - text: watermark string; empty disables the overlay
 // - position: "tl" | "tr" | "bl" | "br" (default br)
@@ -3773,6 +3797,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   // Detect & remove baked-in black bars from the source window before cropping.
   const contentCrop = await detectContentCrop(sourcePath, start, cutDuration, children);
   const filterParts = buildVideoFilter(payload, contentCrop);
+  const warnings = await buildResolutionWarnings(sourcePath, filterParts.size);
   const segments = payload.captionStyle !== "off"
     ? resolveExportSegments(payload, projectDir, manifest)
     : [];
@@ -3851,6 +3876,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     filename: outputName,
     downloadUrl: `/outputs/${path.relative(OUTPUT_DIR, outputDir).split(path.sep).map(encodeURIComponent).join("/")}/${encodeURIComponent(outputName)}`
   };
+  if (warnings.length) result.warnings = warnings;
   if (isIntermediate) {
     // Intermediate file in temp (concat): not directly downloadable.
     delete result.downloadUrl;
@@ -3858,11 +3884,19 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   return result;
 }
 
-function sectionFileName(payload, suffix = "export") {
+function sectionFileName(payload, suffix = "export", heightCap = 0) {
   const clipId = String(payload.clipId || 1).padStart(2, "0");
   const start = Math.max(0, Math.floor(Number(payload.start || 0)));
   const end = Math.max(start + 1, Math.ceil(Number(payload.end || start + 30)));
-  return `${suffix}-${clipId}-${start}-${end}.mp4`;
+  return `${suffix}-${clipId}-${start}-${end}${heightCap ? `-h${heightCap}` : ""}.mp4`;
+}
+
+// Portrait (9:16) crops a narrow strip out of a wide source and upscales it to
+// 1080x1920. A 1080p source only provides ~607x1080 px for that strip, so the
+// result is soft. Downloading up to 2160p for portrait gives the crop enough
+// pixels to stay sharp at 1080x1920. Wide/4:5 barely upscale, so 1080p is enough.
+function exportSectionHeightCap(payload) {
+  return resolveRatio(payload.ratio) === "portrait" ? 2160 : 1080;
 }
 
 function clipTranscriptBaseName(payload) {
@@ -3893,7 +3927,8 @@ function clipTranscriptEditedPath(projectDir, payload) {
 
 function findCachedSection(projectDir, payload, suffix) {
   const sectionDir = path.join(projectDir, "sections");
-  const stablePath = path.join(sectionDir, sectionFileName(payload, suffix));
+  const heightCap = suffix === "export" ? exportSectionHeightCap(payload) : 0;
+  const stablePath = path.join(sectionDir, sectionFileName(payload, suffix, heightCap));
   return fs.existsSync(stablePath) ? stablePath : "";
 }
 
@@ -3903,7 +3938,8 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
 
   const clipId = String(payload.clipId || 1).padStart(2, "0");
   const suffix = options.preview ? "preview" : "export";
-  const stablePath = path.join(sectionDir, sectionFileName(payload, suffix));
+  const heightCap = options.preview ? 0 : exportSectionHeightCap(payload);
+  const stablePath = path.join(sectionDir, sectionFileName(payload, suffix, heightCap));
   if (fs.existsSync(stablePath)) return stablePath;
 
   return singleFlight(`section:${stablePath}`, async () => {
@@ -3915,7 +3951,7 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
     const section = `*${start}-${end}`;
     const format = options.preview
       ? "bv*[height<=360][vcodec^=avc1]+ba/b[height<=360]/best[height<=360]/best"
-      : "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080]/best[height<=1080]/best";
+      : `bv*[height<=${heightCap}][vcodec^=avc1]+ba/b[height<=${heightCap}]/best[height<=${heightCap}]/best`;
 
     const ytdlpBase = [
       "--no-playlist",

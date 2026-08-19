@@ -1658,8 +1658,10 @@ async function exportSelectedClip() {
 
     const result = await waitForJob(data.jobId);
     const results = Array.isArray(result.results) && result.results.length ? result.results : [result];
+    const warnings = [];
     for (const item of results) {
       if (!item.downloadUrl) continue;
+      if (Array.isArray(item.warnings)) warnings.push(...item.warnings);
       const anchor = document.createElement("a");
       anchor.href = item.downloadUrl;
       anchor.download = item.filename;
@@ -1676,7 +1678,9 @@ async function exportSelectedClip() {
     }
     renderExports();
     uploadStatus.textContent = `${clips.length} clips ready`;
-    showToast(`Export selesai: ${results.length} file`);
+    showToast(warnings.length
+      ? `Export selesai. ${warnings.join(" ")}`
+      : `Export selesai: ${results.length} file`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -3190,6 +3194,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
     const result = await waitForJob(data.jobId);
     const okResults = (result.results || []).filter((item) => item && item.filename);
     const errors = (result.results || []).filter((item) => item && item.error);
+    const warnings = (result.results || []).flatMap((item) => item.warnings || []);
 
     for (const item of okResults) {
       state.exports.unshift({
@@ -3205,6 +3210,8 @@ $("#exportAllBtn").addEventListener("click", async () => {
     const summary = `${okResults.length}/${result.total || targetClips.length} berhasil`;
     if (errors.length) {
       showToast(`${summary}, ${errors.length} gagal (${errors[0].error || "error"}).`);
+    } else if (warnings.length) {
+      showToast(`${summary}. ${warnings.join(" ")}`);
     } else {
       showToast(`${summary}.`);
     }
@@ -3288,7 +3295,10 @@ $("#exportCombinedBtn").addEventListener("click", async () => {
     if (!data.jobId) throw new Error("Server tidak mengembalikan job gabung.");
     const result = await waitForJob(data.jobId);
     addExportResult(result, `Gabungan ${targetClips.length} clip`);
-    showToast(`Video gabungan selesai: ${result.filename}`);
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    showToast(warnings.length
+      ? `Video gabungan selesai. ${warnings.join(" ")}`
+      : `Video gabungan selesai: ${result.filename}`);
   } catch (err) {
     showToast(err.message);
   } finally {
