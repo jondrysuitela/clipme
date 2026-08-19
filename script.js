@@ -644,8 +644,29 @@ function selectClip(clip) {
   state.activeClip = clip;
   state.liveActive = false;
   state.captionSelected = -1;
-  if (state.captionLoadedFor !== captionTimelineKey()) {
+  // Sinkronkan preview dengan timeline: kalau clip ini sudah punya segmen
+  // caption di cache (captionByClip), pulihkan liveSegments + overlay langsung
+  // supaya preview tidak tertinggal bahasa lama (mis. Inggris) saat timeline
+  // sudah berubah (Indonesia). Kalau belum ada cache, kosongkan segmen live
+  // agar caption clip sebelumnya tidak bocor ke clip baru.
+  const cachedSegments = state.captionByClip[captionTimelineKey()];
+  if (Array.isArray(cachedSegments) && cachedSegments.length) {
+    state.captionSegments = cachedSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+    state.liveSegments = state.captionSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+    state.captionLoadedFor = captionTimelineKey();
+    state.liveOffset = state.youtubeUrl ? 0 : (Number(clip.start) || 0);
+    captionTimelinePanel.style.display = "block";
+    loadCaptionTimeline(state.liveSegments);
+    // Static box juga ikut bahasa segmen (bukan clip.caption lama yang asing).
+    const combined = state.captionSegments.map((s) => s.text).join(" ").trim().slice(0, 155);
+    if (combined) {
+      captionBox.textContent = `"${combined}"`;
+      captionInput.value = combined;
+    }
+  } else {
     state.captionSegments = [];
+    state.liveSegments = [];
+    state.captionLoadedFor = captionTimelineKey();
     captionTimelinePanel.style.display = "none";
   }
   const translateFromSel = $("#translateFrom");
@@ -653,10 +674,15 @@ function selectClip(clip) {
   liveCaption.innerHTML = "";
   liveCaption.style.display = "none";
   previewTitle.textContent = `Clip ${String(clip.id).padStart(2, "0")} - ${clip.title}`;
-  captionBox.textContent = `"${clip.caption}"`;
+  // Kalau segmen cache sudah tersedia (bahasa target), JANGAN timpa static
+  // box dengan clip.caption lama (bahasa asing). clip.caption hanya dipakai
+  // saat clip belum punya segmen caption.
+  if (!(Array.isArray(cachedSegments) && cachedSegments.length)) {
+    captionBox.textContent = `"${clip.caption}"`;
+    captionInput.value = clip.caption;
+  }
   renderStaticCaption();
   hookInput.value = clip.hook;
-  captionInput.value = clip.caption;
   clipTime.textContent = clipRange(clip);
   $("#clipScore").textContent = clip.score != null && !clip.placeholder ? `${clip.score}%` : "--";
   $("#clipDuration").textContent = clipRange(clip);
@@ -1441,6 +1467,14 @@ function playSelectedClip() {
   previewVideo.currentTime = state.noDownload ? 0 : state.activeClip.start;
   previewVideo.play();
 
+  // Pastikan overlay live caption aktif saat play — selectClip mematikan
+  // liveActive, jadi tanpa ini preview tidak pernah menampilkan segmen
+  // (mis. hasil terjemahan) walau timeline sudah berubah bahasa.
+  if (!state.liveActive && state.liveSegments && state.liveSegments.length && $("#captionStyleSelect").value !== "off") {
+    state.liveActive = true;
+  }
+  updateLiveCaption();
+
   state.loopTimer = window.setInterval(() => {
     const stopAt = state.noDownload ? state.activeClip.end - state.activeClip.start : state.activeClip.end;
     if (previewVideo.currentTime >= stopAt) {
@@ -2171,6 +2205,17 @@ function exportCaptionSrt() {
   showToast(`SRT diexport: ${name}`);
 }
 
+function getSpeakerColor(speakerId) {
+  // Palet stabil per speaker — updateLiveCaption memanggil fungsi ini untuk
+  // mewarnai teks per speaker_id; sebelumnya undefined dan membuat overlay
+  // caption crash (ReferenceError) sehingga preview tidak pernah update.
+  const palette = ["#FFD700", "#00E5FF", "#FF6B6B", "#7CFF6B", "#C77DFF", "#FF9E5E", "#5E9EFF", "#FF5EF0"];
+  const id = String(speakerId || "");
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return palette[hash % palette.length];
+}
+
 function updateLiveCaption() {
   if (!state.liveActive || !state.liveSegments.length) return;
   const t = previewVideo.currentTime - state.liveOffset;
@@ -2264,6 +2309,14 @@ function loadCaptionTimeline(segments) {
   state.captionSegments = normalizeCaptionSegments(segments, 0, dur);
   state.captionSelected = -1;
   state.captionLoadedFor = captionTimelineKey();
+  // Sinkronkan liveSegments dengan timeline — sebelumnya jalur restore
+  // (captionByClip -> loadCaptionTimeline) tidak menyentuh liveSegments,
+  // sehingga overlay preview memakai data basi (bahasa lama) padahal
+  // timeline sudah berubah (mis. hasil terjemahan).
+  state.liveSegments = state.captionSegments.map((s) => ({
+    ...s,
+    words: Array.isArray(s.words) ? s.words.slice() : []
+  }));
   state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
     ...s,
     words: Array.isArray(s.words) ? s.words.slice() : []
