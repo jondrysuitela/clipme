@@ -1232,7 +1232,10 @@ function setLocalPreview(file) {
 async function uploadToBackend(file) {
   const form = new FormData();
   form.append("video", file);
-  form.append("duration", $("#durationSelect").value);
+  form.append("durationMode", durationSettingsPayload().durationMode);
+  if (durationSettingsPayload().durationMode === "FIXED") {
+    form.append("fixedDuration", durationSettingsPayload().fixedDuration);
+  }
 
   uploadStatus.textContent = "Uploading";
   $("#generateButton").disabled = true;
@@ -1369,7 +1372,6 @@ async function processYouTubeUrl() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: urls[0],
-          duration: $("#durationSelect").value,
           language: CAPTION_LANG,
           assumedDuration: 3600,
           ...durationSettingsPayload()
@@ -1390,7 +1392,6 @@ async function processYouTubeUrl() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         urls,
-        duration: $("#durationSelect").value,
         language: CAPTION_LANG,
         assumedDuration: 3600,
         ...durationSettingsPayload()
@@ -1725,7 +1726,7 @@ $("#generateButton").addEventListener("click", async () => {
     const response = await fetch(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ duration: $("#durationSelect").value, ...durationSettingsPayload() })
+      body: JSON.stringify(durationSettingsPayload())
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Gagal generate ulang clips.");

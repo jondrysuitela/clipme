@@ -1945,23 +1945,29 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
         }
       }
 
-      // DYNAMIC CLIP END — durasi mengikuti rekomendasi engine (max = ceiling).
-      // Snap ke batas kalimat terdekat di bawah target agar potongan selalu
-      // berakhir alami (speaker-safe, tidak memotong kalimat di tengah).
+      // DYNAMIC CLIP END — durasi mengikuti rekomendasi engine (tanpa batas
+      // default; ceiling = durasi video). Snap ke batas kalimat terdekat di
+      // bawah target agar potongan selalu berakhir alami (speaker-safe).
       let dynamicEnd = false;
       const recDur = Number(analysis.openingRecommended);
-      if (Number.isFinite(recDur) && recDur > 0 && clipStart > 0) {
-        const maxEnd = Math.min(duration, candidate.end);
-        const minClip = Math.min(3, Math.max(2, Math.round((maxEnd - clipStart) * 0.15)));
+      if (Number.isFinite(recDur) && recDur > 0) {
+        const targetEnd = Math.min(duration, clipStart + recDur);
+        const avail = Math.max(1, targetEnd - clipStart);
+        const minClip = Math.min(3, Math.max(2, Math.round(avail * 0.15)));
         const minEnd = clipStart + minClip;
-        const targetEnd = Math.min(clipStart + recDur, maxEnd);
         if (targetEnd - minEnd >= 1) {
-          const boundaries = candidate.segments
+          // Perluas kumpulan segmen melewati window bila rekomendasi melampaui
+          // ujung window (mis. cold open menggeser start ke belakang).
+          let pool = candidate.segments;
+          if (targetEnd > candidate.end + 0.5) {
+            pool = sentencesIndexed.filter((s) => s.end > clipStart - 0.5 && s.start < targetEnd + 0.5);
+          }
+          const boundaries = pool
             .map((s) => Number(s.end) || 0)
             .filter((b) => b >= minEnd && b <= targetEnd + 0.5)
             .sort((a, b) => b - a);
           const snapped = boundaries.length ? Math.min(boundaries[0], targetEnd) : targetEnd;
-          if (snapped > clipStart + 1.5 && snapped <= maxEnd + 0.5) {
+          if (snapped > clipStart + 1.5 && snapped <= duration + 0.5) {
             clipEnd = Math.round(snapped);
             dynamicEnd = true;
           }

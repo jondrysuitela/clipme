@@ -104,25 +104,16 @@
             <span data-step="export">Export</span>
           </div>
           <div class="settings-grid">
-            <label>Max clip length
-              <select id="durationSelect">
-                <option value="15">15s</option>
-                <option value="30">30s</option>
-                <option value="45">45s</option>
-                <option value="60">60s</option>
-                <option value="90" selected>90s</option>
-              </select>
-            </label>
             <label>Clip length mode
-              <select id="durationModeSelect" title="Durasi clip ditentukan editor AI (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
-                <option value="AUTO" selected>AUTO — editor memutuskan</option>
+              <select id="durationModeSelect" title="Durasi clip ditentukan editor AI dari hook viral (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
+                <option value="AUTO" selected>AUTO — sesuai hook viral</option>
                 <option value="SHORT">SHORT — padat</option>
                 <option value="STORY">STORY — cerita utuh</option>
                 <option value="MAXIMUM">MAXIMUM — selama masih bernilai</option>
-                <option value="FIXED">FIXED — sesuai Max clip length</option>
+                <option value="FIXED">FIXED — durasi kunci (isi angka)</option>
               </select>
             </label>
-            <input class="inspector-input" id="fixedDurationInput" type="number" min="5" max="90" step="5" value="30" placeholder="Fixed duration (detik)" style="display:none">
+            <input class="inspector-input" id="fixedDurationInput" type="number" min="5" max="600" step="5" value="30" placeholder="Fixed duration (detik)" style="display:none">
           </div>
           <button class="wide-button" id="generateButton" type="button" disabled>Generate clips</button>
         </div>
