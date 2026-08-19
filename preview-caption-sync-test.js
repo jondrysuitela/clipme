@@ -168,6 +168,7 @@ test("selectClip restores translated liveSegments + static box from cache", () =
   state.youtubeUrl = "";
   state.liveOffset = 10;
   document.getElementById("captionStyleSelect").value = "bold";
+  document.getElementById("autoCaptionToggle").checked = true;
 
   const idSegs = [
     { start: 0, end: 1.5, text: "Halo dunia ini bahasa Indonesia", speaker_id: "", words: [] }
@@ -205,6 +206,7 @@ test("playSelectedClip re-enables live overlay with translated segments", () => 
   state.noDownload = false;
   state.liveOffset = 0;
   document.getElementById("captionStyleSelect").value = "bold";
+  document.getElementById("autoCaptionToggle").checked = true;
 
   const idSegs = [
     { start: 0, end: 1.5, text: "Halo dunia ini bahasa Indonesia", speaker_id: "", words: [] }
@@ -243,6 +245,7 @@ test("getSpeakerColor defined — no crash when segments have speaker_id", () =>
   state.youtubeUrl = "";
   state.liveOffset = 0;
   document.getElementById("captionStyleSelect").value = "bold";
+  document.getElementById("autoCaptionToggle").checked = true;
 
   const segs = [
     { start: 0, end: 1.5, text: "Halo dunia bahasa Indonesia", speaker_id: "SPEAKER_00", words: [] }

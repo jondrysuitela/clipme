@@ -138,6 +138,21 @@ function loadClipmeHookEngine() {
 
 const hookEngineModule = loadClipmeHookEngine();
 
+const CLIPME_OPENING_ENGINE_MODULE = path.join(ROOT, "clipme-opening-engine.js");
+
+function loadClipmeOpeningEngine() {
+  try {
+    if (fs.existsSync(CLIPME_OPENING_ENGINE_MODULE)) {
+      return require(CLIPME_OPENING_ENGINE_MODULE);
+    }
+  } catch (e) {
+    console.error("Gagal memuat clipme-opening-engine.js:", e.message);
+  }
+  return null;
+}
+
+const openingEngineModule = loadClipmeOpeningEngine();
+
 const CLIPME_HARDWARE_MODULE = path.join(ROOT, "clipme-hardware.js");
 
 function loadClipmeHardware() {
@@ -211,9 +226,9 @@ function resolveVideoEncoder() {
   }
   return {
     encoder: "libx264",
-    preset: "veryfast",
+    preset: "medium",
     qualityFlag: "-crf",
-    qualityValue: "23"
+    qualityValue: "18"
   };
 }
 
@@ -384,7 +399,33 @@ function normalizeLlmAnalysis(raw, fallbackAnalysis) {
     originalHook: String(g("originalHook", fallbackAnalysis.originalHook) || ""),
     recommendedHook: String(g("recommendedHook", fallbackAnalysis.recommendedHook) || fallbackAnalysis.recommendedHook),
     hookReordered: g("hookReordered", false) === true,
+    hookDeepScore: n("hookDeepScore", fallbackAnalysis.hookDeepScore != null ? fallbackAnalysis.hookDeepScore : fallbackAnalysis.hookScore),
+    hookDimensions: raw && raw.hookDimensions && typeof raw.hookDimensions === "object" ? raw.hookDimensions : fallbackAnalysis.hookDimensions || {},
+    hookMode: String(g("hookMode", fallbackAnalysis.hookMode || "direct") || "direct"),
+    hookColdOpen: g("hookColdOpen", false) === true,
+    hookColdOpenStartIndex: Number(g("hookColdOpenStartIndex", fallbackAnalysis.hookColdOpenStartIndex != null ? fallbackAnalysis.hookColdOpenStartIndex : -1)),
+    hookLengthTarget: n("hookLengthTarget", fallbackAnalysis.hookLengthTarget != null ? fallbackAnalysis.hookLengthTarget : 9),
+    hookExplanation: String(g("hookExplanation", fallbackAnalysis.hookExplanation || "") || ""),
+    hookAlternatives: raw && Array.isArray(raw.hookAlternatives) ? raw.hookAlternatives.slice(0, 6) : fallbackAnalysis.hookAlternatives || [],
     hookStrategy: String(g("hookStrategy", fallbackAnalysis.hookStrategy || "") || ""),
+    // Keputusan opening SELALU dari moment engine (deterministik, source-faithful).
+    // LLM tidak diajak bicara soal opening dan schema-nya tidak memuat field ini;
+    // field rekaan model tidak boleh menimpa engine (hard gate source fidelity).
+    openingStrategy: String(fallbackAnalysis.openingStrategy || "KEEP"),
+    openingBest: String(fallbackAnalysis.openingBest || ""),
+    openingEditorialScore: fallbackAnalysis.openingEditorialScore != null ? fallbackAnalysis.openingEditorialScore : 0,
+    openingConfidence: fallbackAnalysis.openingConfidence != null ? fallbackAnalysis.openingConfidence : 0,
+    openingReason: String(fallbackAnalysis.openingReason || ""),
+    openingSourceIndex: fallbackAnalysis.openingSourceIndex != null ? fallbackAnalysis.openingSourceIndex : -1,
+    openingSourceStart: fallbackAnalysis.openingSourceStart != null ? fallbackAnalysis.openingSourceStart : null,
+    openingSourceText: String(fallbackAnalysis.openingSourceText || ""),
+    openingRoles: Array.isArray(fallbackAnalysis.openingRoles) ? fallbackAnalysis.openingRoles : [],
+    openingOpenLoop: fallbackAnalysis.openingOpenLoop === true,
+    openingOpenLoopQuestion: String(fallbackAnalysis.openingOpenLoopQuestion || ""),
+    openingPayoff: fallbackAnalysis.openingPayoff || null,
+    openingStructure: Array.isArray(fallbackAnalysis.openingStructure) ? fallbackAnalysis.openingStructure : [],
+    openingAlternatives: Array.isArray(fallbackAnalysis.openingAlternatives) ? fallbackAnalysis.openingAlternatives.slice(0, 4) : [],
+    openingKeepOriginal: fallbackAnalysis.openingKeepOriginal === true,
     keyMessage: String(g("keyMessage", fallbackAnalysis.keyMessage) || ""),
     payoff: p || fallbackAnalysis.payoff,
     storyStructure: String(g("storyStructure", fallbackAnalysis.storyStructure) || ""),
@@ -576,14 +617,17 @@ function sanitizeColor(value) {
 }
 
 const X264_PRESETS = new Set(["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]);
+// Kualitas export rekomendasi: preset medium + CRF 18 (tajam, efisien).
+const EXPORT_PRESET = "medium";
+const EXPORT_CRF = 18;
 
 function sanitizePreset(value) {
-  return X264_PRESETS.has(String(value || "")) ? String(value) : "veryfast";
+  return X264_PRESETS.has(String(value || "")) ? String(value) : EXPORT_PRESET;
 }
 
 function sanitizeCrf(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return 23;
+  if (!Number.isFinite(n)) return EXPORT_CRF;
   return Math.min(51, Math.max(0, Math.round(n)));
 }
 
@@ -1563,7 +1607,8 @@ function clipmeQualityGates({ sentences, fullText, starterScore, hookType, lang,
   };
 }
 
-function clipmeAssemble(sentences, segments, lang, targetLength) {
+function clipmeAssemble(sentences, segments, lang, targetLength, options) {
+  const opts = options || {};
   const fullText = sentences.join(" ") || cleanCaptionText(segments.map((s) => s.text).join(" "));
   const starter = sentences[0] || "";
   const hits = matchClipmeSignals(fullText, lang);
@@ -1585,6 +1630,59 @@ function clipmeAssemble(sentences, segments, lang, targetLength) {
   const originalHook = hookResult ? hookResult.originalHook : (splitSentences(starter)[0] || starter);
   const recommendedHook = hookResult && hookResult.recommendedHook ? hookResult.recommendedHook : starter;
   const payoffInfo = hookResult ? hookResult.payoff : { confidence: 0, fulfilled: clipmeHookFulfilled(fullText, starterScore), payoffSentence: "" };
+
+  // ---- EDITORIAL OPENING ENGINE ----
+  // Menemukan momen terkuat, memilih strategi (KEEP/REFRAME/REWRITE/COLD_OPEN/
+  // HYBRID), mengecek open loop & payoff, dan menyusun struktur clip. Murni
+  // CPU-first dan deterministik; tidak mengubah hookResult di atas.
+  let opening = null;
+  if (openingEngineModule && typeof openingEngineModule.buildOpeningDecision === "function") {
+    try {
+      opening = openingEngineModule.buildOpeningDecision(segments, lang, {
+        keepOriginal: !!opts.keepOriginal,
+        disableRewrite: !!opts.disableRewrite
+      });
+    } catch (e) {
+      opening = null;
+    }
+  }
+  const openingFields = opening
+    ? {
+        openingStrategy: opening.strategy,
+        openingBest: opening.bestOpening,
+        openingEditorialScore: opening.editorialScore,
+        openingConfidence: opening.confidence,
+        openingReason: opening.reason,
+        openingSourceIndex: opening.sourceSegment ? opening.sourceSegment.index : -1,
+        openingSourceStart: opening.sourceSegment ? opening.sourceSegment.start : null,
+        openingSourceEnd: opening.sourceSegment ? opening.sourceSegment.end : null,
+        openingSourceText: opening.sourceSegment ? opening.sourceSegment.text : "",
+        openingRoles: opening.momentRoles || [],
+        openingOpenLoop: !!opening.openLoop,
+        openingOpenLoopQuestion: opening.openLoopQuestion || "",
+        openingPayoff: opening.payoff ? { index: opening.payoff.index, start: opening.payoff.start, end: opening.payoff.end, text: opening.payoff.text } : null,
+        openingStructure: opening.clipStructure || [],
+        openingAlternatives: opening.alternatives || [],
+        openingKeepOriginal: !!opening.keepOriginal
+      }
+    : {
+        openingStrategy: "KEEP",
+        openingBest: recommendedHook,
+        openingEditorialScore: 0,
+        openingConfidence: 0,
+        openingReason: "",
+        openingSourceIndex: -1,
+        openingSourceStart: null,
+        openingSourceEnd: null,
+        openingSourceText: "",
+        openingRoles: [],
+        openingOpenLoop: false,
+        openingOpenLoopQuestion: "",
+        openingPayoff: null,
+        openingStructure: [],
+        openingAlternatives: [],
+        openingKeepOriginal: false
+      };
 
   const criteria = clipmeCriterionScores({ sentences, fullText, hits, starter, starterScore, lang });
   const contextWarning = clipmeContextWarning(sentences, lang);
@@ -1628,6 +1726,7 @@ function clipmeAssemble(sentences, segments, lang, targetLength) {
   qualityGate.pass = Object.values(qualityGate).every(Boolean);
 
   return {
+    ...openingFields,
     score: overall,
     confidence,
     hookType,
@@ -1635,8 +1734,18 @@ function clipmeAssemble(sentences, segments, lang, targetLength) {
     hookConfidence,
     payoffConfidence: payoffInfo.confidence,
     originalHook,
-    recommendedHook: clippedForField(recommendedHook, 90),
+    recommendedHook: clippedForField(recommendedHook, 140),
     hookReordered,
+    hookDeepScore: hookResult ? hookResult.deepScore || hookResult.score : starterScore,
+    hookDimensions: hookResult && hookResult.dimensions ? hookResult.dimensions : {},
+    hookMode: hookResult ? hookResult.mode || "direct" : "direct",
+    hookColdOpen: !!(hookResult && hookResult.coldOpen),
+    hookColdOpenStartIndex: hookResult && hookResult.coldOpenStartIndex != null ? hookResult.coldOpenStartIndex : -1,
+    hookLengthTarget: hookResult && hookResult.lengthTarget ? hookResult.lengthTarget : 9,
+    hookExplanation: hookResult && hookResult.explanation ? hookResult.explanation : "",
+    hookAlternatives: hookResult && Array.isArray(hookResult.alternatives)
+      ? hookResult.alternatives.slice(0, 6).map((a) => ({ strategy: a.strategy, text: String(a.text).slice(0, 140) }))
+      : [],
     hookScore: criteria.hook,
     retentionScore: criteria.retention,
     shareabilityScore: criteria.share,
@@ -1758,11 +1867,33 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
       const analysis = candidate.analysis;
       const caption = clipCaption(candidate.segments);
       const hookText = candidate.hook || clippedForField(analysis.recommendedHook, 90);
+
+      // COLD OPEN / REFRAME — geser start clip ke momen pembuka yang terpilih
+      // (masih dalam window, menyisakan cukup konteks & tetap >= durasi min).
+      let clipStart = Math.round(candidate.start);
+      let clipEnd = Math.round(candidate.end);
+      let openingApplied = false;
+      const openingStrategy = analysis.openingStrategy || "KEEP";
+      const relStart = Number(analysis.openingSourceStart);
+      if (
+        (openingStrategy === "COLD_OPEN" || openingStrategy === "REFRAME") &&
+        Number.isFinite(relStart) &&
+        Number(analysis.openingSourceIndex) > 0 &&
+        relStart >= 2.5
+      ) {
+        const newStart = Math.round(candidate.start + relStart);
+        const minDur = Math.min(6, Math.max(3, Math.round((clipEnd - clipStart) * 0.4)));
+        if (newStart >= clipStart + 2 && newStart + minDur <= clipEnd + 1) {
+          clipStart = newStart;
+          openingApplied = true;
+        }
+      }
+
       return {
         id: index + 1,
         title: CLIPME_TITLES[index] || CLIPME_TITLES[CLIPME_TITLES.length - 1],
-        start: Math.round(candidate.start),
-        end: Math.round(candidate.end),
+        start: clipStart,
+        end: clipEnd,
         score: analysis.score,
         confidence: analysis.confidence,
         hook: hookText,
@@ -1775,6 +1906,13 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
         hookIntent: analysis.hookIntent,
         hookConfidence: analysis.hookConfidence,
         payoffConfidence: analysis.payoffConfidence,
+        openingStrategy,
+        openingApplied,
+        bestOpening: analysis.openingBest || hookText,
+        editorialScore: analysis.openingEditorialScore || 0,
+        openingSourceIndex: analysis.openingSourceIndex != null ? analysis.openingSourceIndex : -1,
+        openingOpenLoop: !!analysis.openingOpenLoop,
+        openingStructure: analysis.openingStructure || [],
         analysis
       };
     });
@@ -2133,10 +2271,22 @@ async function localizeCaption({ caption, segments }, spokenLang, targetLang, ch
   );
   if (!Array.isArray(translated)) return { caption, segments, translated: false };
 
-  const newSegments = segments.map((s, i) => ({
-    ...s,
-    text: translated[i] && translated[i].text ? translated[i].text : s.text
-  }));
+  // Terjemahan mengganti teks segmen, tapi kata-kata per-waktu (words/eventWords/
+  // karaoke) masih bahasa asli. Kalau dibiarkan, engine caption/karaoke menyusun
+  // ulang teks dari kata basi itu — hasil akhirnya kembali bahasa asing walau
+  // teks sudah diterjemahkan. Buang kata-kata lama agar diturunkan ulang dari
+  // teks terjemahan (flattenTranscriptWords fallback).
+  const newSegments = segments.map((s, i) => {
+    const translatedText = translated[i] && translated[i].text ? translated[i].text : s.text;
+    const changed = translatedText !== s.text;
+    const out = { ...s, text: translatedText };
+    if (changed) {
+      delete out.words;
+      delete out.eventWords;
+      delete out.karaoke;
+    }
+    return out;
+  });
   const newCaption = cleanCaptionText(translated.map((t) => t.text || "").join(" ")).slice(0, 155);
   const changed = newSegments.some((s, i) => s.text !== (segments[i] || {}).text);
   return { caption: newCaption || caption, segments: newSegments, translated: changed };
@@ -2169,7 +2319,7 @@ function ffmpegText(value) {
 
 const RATIO_PRESETS = {
   portrait: { width: 1080, height: 1920 },
-  wide: { width: 1280, height: 720 },
+  wide: { width: 1920, height: 1080 },
   four5: { width: 864, height: 1080 }
 };
 
@@ -2189,7 +2339,7 @@ function buildVideoFilter(payload, contentCrop = null) {
   // Remove baked-in black bars (letterbox/pillarbox) BEFORE the ratio crop, so
   // exported frames are full-bleed instead of carrying black bands.
   const debar = contentCrop ? [`crop=${contentCrop.w}:${contentCrop.h}:${contentCrop.x}:${contentCrop.y}`] : [];
-  const scale = `scale=${size.width}:${size.height}:force_original_aspect_ratio=increase`;
+  const scale = `scale=${size.width}:${size.height}:flags=lanczos:force_original_aspect_ratio=increase`;
   const crop = `crop=${size.width}:${size.height}`;
 
   const pre = [...debar, scale, crop];
@@ -2413,7 +2563,7 @@ function generateKaraokeFilters(segments, opts) {
 
   function buildWordList(seg, segStart, segEnd) {
     const wordList = [];
-    if (Array.isArray(seg.words) && seg.words.length) {
+    if (Array.isArray(seg.words) && seg.words.length && wordsAlignWithSegmentText(seg)) {
       for (const w of seg.words) {
         const text = cleanCaptionText(w.text);
         if (!text) continue;
@@ -2613,15 +2763,16 @@ function buildFilterCommandArgs({ input, start, duration, filterGraph, audioFilt
     args.push(
       "-c:v", "h264_nvenc",
       "-preset", enc.preset || "p4",
-      "-cq", enc.qualityValue || "23",
+      "-cq", enc.qualityValue || String(EXPORT_CRF),
       "-rc", "vbr",
       "-b:v", "0",
       "-c:a", "aac", "-b:a", audioBitrate,
+      "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       outputPath
     );
   } else {
-    args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-movflags", "+faststart", outputPath);
+    args.push("-c:v", "libx264", "-preset", preset, "-crf", String(crf), "-c:a", "aac", "-b:a", audioBitrate, "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputPath);
   }
   return args;
 }
@@ -2676,7 +2827,7 @@ function getPreviewTimedSegments(projectDir, manifest, payload) {
   return resolveExportSegments(payload, projectDir, manifest)
     .map((seg) => {
       let words = [];
-      if (Array.isArray(seg.words) && seg.words.length) {
+      if (Array.isArray(seg.words) && seg.words.length && wordsAlignWithSegmentText(seg)) {
         words = seg.words
           .map((w) => ({
             text: cleanCaptionText(w.text || ""),
@@ -4377,7 +4528,10 @@ async function handleAnalyzeClip(req, res) {
   }
 
   const sentences = splitSentences(segments.map((s) => s.text).join(" "));
-  const heuristicAnalysis = clipmeAssemble(sentences, segments, lang, clip.end - clip.start);
+  const heuristicAnalysis = clipmeAssemble(sentences, segments, lang, clip.end - clip.start, {
+    keepOriginal: payload.keepOriginal,
+    disableRewrite: payload.disableRewrite
+  });
 
   // LLM mode first (source-truthful, per the ClipMe system prompt). Fallback to heuristic.
   let analysis = heuristicAnalysis;
@@ -4412,11 +4566,24 @@ async function handleAnalyzeClip(req, res) {
   });
 }
 
+// Cek apakah kata-kata segmen (words) selaras dengan teks segmen saat ini.
+// Setelah terjemahan, seg.text berubah bahasa tapi seg.words masih kata-kata
+// asli — menyusun ulang teks dari kata basi itu mengembalikan bahasa asing.
+// Jika tidak selaras, turunkan ulang kata dari teks terjemahan.
+function wordsAlignWithSegmentText(seg) {
+  if (!Array.isArray(seg.words) || !seg.words.length) return false;
+  const clean = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\s]/gi, "");
+  const fromWords = clean(seg.words.map((w) => w.text).join(" "));
+  const fromText = clean(seg.text);
+  if (!fromText || !fromWords) return false;
+  return fromWords === fromText || fromText.includes(fromWords) || fromWords.includes(fromText);
+}
+
 // Flatten timed segments into a word-level transcript for the caption engine.
 function flattenTranscriptWords(segments) {
   const words = [];
   for (const seg of segments || []) {
-    if (Array.isArray(seg.words) && seg.words.length) {
+    if (Array.isArray(seg.words) && seg.words.length && wordsAlignWithSegmentText(seg)) {
       for (const w of seg.words) {
         words.push({
           text: String(w.text || "").trim(),
@@ -4704,17 +4871,24 @@ async function handleAutoCaptions(req, res) {
   // Persist hasil ke -edited.json (pola yang sudah dipakai "Simpan Perubahan")
   // agar segmen auto-caption tidak hilang saat halaman di-refresh / dibuka ulang.
   // Segmen disimpan dengan timestamp ABSOLUT (mengikuti kontrak file edited).
+  // JANGAN menimpa file yang sudah diedit manual (provider "manual-edit") —
+  // hasil auto-caption tidak boleh membuang koreksi typo user.
   try {
     fs.mkdirSync(path.join(projectDir, "clip-transcripts"), { recursive: true });
-    fs.writeFileSync(clipTranscriptEditedPath(projectDir, payload), JSON.stringify({
-      provider: llmUsed ? "caption-llm" : "caption-heuristic",
-      segments: timed.map((s) => ({
-        start: (s.start || 0) + offset,
-        end: (s.end || 0) + offset,
-        text: s.text,
-        words: Array.isArray(s.karaoke) ? s.karaoke.map((w) => ({ ...w, start: (w.start || 0) + offset, end: (w.end || 0) + offset })) : []
-      }))
-    }, null, 2), "utf8");
+    const editedPath = clipTranscriptEditedPath(projectDir, payload);
+    let existingEdited = null;
+    try { existingEdited = JSON.parse(fs.readFileSync(editedPath, "utf8")); } catch {}
+    if (!existingEdited || existingEdited.provider !== "manual-edit") {
+      fs.writeFileSync(editedPath, JSON.stringify({
+        provider: llmUsed ? "caption-llm" : "caption-heuristic",
+        segments: timed.map((s) => ({
+          start: (s.start || 0) + offset,
+          end: (s.end || 0) + offset,
+          text: s.text,
+          words: Array.isArray(s.karaoke) ? s.karaoke.map((w) => ({ ...w, start: (w.start || 0) + offset, end: (w.end || 0) + offset })) : []
+        }))
+      }, null, 2), "utf8");
+    }
   } catch (err) {
     console.error("Gagal persist caption:", err.message);
   }
@@ -5198,7 +5372,7 @@ async function handleExportCombined(req, res) {
             FFMPEG,
             copyMode
               ? [...concatArgs, "-c", "copy", combinedPath]
-              : [...concatArgs, "-c:v", "libx264", "-preset", "veryfast", "-crf", String(sanitizeCrf(clipDefs[0].crf)), "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", combinedPath],
+              : [...concatArgs, "-c:v", "libx264", "-preset", EXPORT_PRESET, "-crf", String(sanitizeCrf(clipDefs[0].crf)), "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", combinedPath],
             300000,
             children
           );
@@ -5736,6 +5910,10 @@ module.exports = {
   _test: {
     isNvencRuntimeFailure,
     runWithNvencCpuFallback,
-    buildFilterCommandArgs
+    buildFilterCommandArgs,
+    wordsAlignWithSegmentText,
+    flattenTranscriptWords,
+    clipmeAssemble,
+    analyzeTranscriptToClips
   }
 };

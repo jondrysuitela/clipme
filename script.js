@@ -36,14 +36,10 @@ const state = {
   suppressScrollMark: false,
   selectedClipIds: new Set(),
   captionPosition: 0.76,
-  fps: 25,
-  crf: 23,
+  fps: 30,
+  crf: 18,
   audioBitrate: 128,
-  watermark: "",
-  watermarkPosition: "br",
-  watermarkOpacity: 0.6,
   sourceDuration: 0,
-  exportRatios: ["portrait"],
   history: [],
   historyIndex: -1,
   sttModel: "",
@@ -127,7 +123,7 @@ function applyCaptionVisuals() {
 }
 
 function renderStaticCaption() {
-  const style = $("#captionStyleSelect").value;
+  const style = effectiveCaptionStyle();
   captionBox.style.fontSize = `${captionPreviewFontPx()}px`;
   captionBox.className = "caption-box" + (style !== "off" ? ` lc-${style}` : "");
   // Sama dengan export: posisi diukur dari ATAS frame (baseY = H * position).
@@ -135,6 +131,19 @@ function renderStaticCaption() {
   applyCaptionVisuals();
   const hasText = captionBox.textContent && captionBox.textContent.replace(/"/g, "").trim();
   captionBox.style.display = style !== "off" && hasText ? "block" : "none";
+}
+
+// Master switch "Auto caption": mati => gaya efektif "off" di semua jalur
+// (preview, live overlay, export burn) dan generate caption nonaktif.
+function autoCaptionEnabled() {
+  const el = $("#autoCaptionToggle");
+  return !el || el.checked;
+}
+
+function effectiveCaptionStyle() {
+  return autoCaptionEnabled()
+    ? (($("#captionStyleSelect") && $("#captionStyleSelect").value) || "bold")
+    : "off";
 }
 
 function formatBytes(bytes) {
@@ -287,8 +296,6 @@ function setRatio(token) {
   previewFrame.classList.remove("portrait", "wide", "four5");
   previewFrame.classList.add(ratio);
   previewFrame.dataset.layout = ratio;
-  const layoutSelect = $("#layoutSelect");
-  if (layoutSelect) layoutSelect.value = ratio;
   $$(".segmented button").forEach((item) => {
     item.classList.toggle("active", item.dataset.ratio === ratio);
   });
@@ -413,19 +420,6 @@ function updatePreviewFaceTransform() {
     cutToFacePreviewBadge.classList.add("visible");
   }
 }
-
-function selectedExportRatios() {
-  const checked = $$(".export-ratio-chk:checked").map((el) => el.dataset.ratio);
-  if (checked.length) return checked;
-  return [currentRatio()];
-}
-
-$$(".export-ratio-chk").forEach((el) => {
-  el.addEventListener("change", () => {
-    const checked = $$(".export-ratio-chk:checked").map((item) => item.dataset.ratio);
-    state.exportRatios = checked.length ? checked : [currentRatio()];
-  });
-});
 
 function renderEmptyClips(message) {
   state.activeClip = null;
@@ -1470,7 +1464,7 @@ function playSelectedClip() {
   // Pastikan overlay live caption aktif saat play — selectClip mematikan
   // liveActive, jadi tanpa ini preview tidak pernah menampilkan segmen
   // (mis. hasil terjemahan) walau timeline sudah berubah bahasa.
-  if (!state.liveActive && state.liveSegments && state.liveSegments.length && $("#captionStyleSelect").value !== "off") {
+  if (!state.liveActive && state.liveSegments && state.liveSegments.length && effectiveCaptionStyle() !== "off") {
     state.liveActive = true;
   }
   updateLiveCaption();
@@ -1513,7 +1507,7 @@ async function loadPreviewClip() {
         end: state.activeClip.end,
         caption: captionInput.value,
         language: CAPTION_LANG,
-        captionStyle: $("#captionStyleSelect").value,
+        captionStyle: effectiveCaptionStyle(),
         captionSize: captionSize.value,
         fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
         captionColor: captionColorInput ? captionColorInput.value : "",
@@ -1567,7 +1561,7 @@ async function loadPreviewClip() {
     state.captionSegments = state.liveSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
     state.captionByClip[captionTimelineKey()] = state.captionSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
     
-    state.liveActive = state.liveSegments.length > 0 && data.baked !== true && $("#captionStyleSelect").value !== "off";
+    state.liveActive = state.liveSegments.length > 0 && data.baked !== true && effectiveCaptionStyle() !== "off";
     state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     previewVideo.src = data.previewUrl;
     previewVideo.controls = true;
@@ -1615,12 +1609,7 @@ async function exportSelectedClip() {
           words: Array.isArray(s.words) && s.words.length ? s.words : []
         }))
       : [];
-    const ratios = selectedExportRatios();
-    // Honor the checked export ratio(s). When exactly one ratio is checked the
-    // single-export path must export at THAT ratio, not the preview's ratio —
-    // otherwise checking only "16:9 (wide)" while previewing portrait still
-    // produces a portrait file.
-    const exportRatio = ratios.length ? ratios[0] : currentRatio();
+    const exportRatio = currentRatio();
     const basePayload = {
       projectId: state.projectId,
       clipId: state.activeClip.id,
@@ -1628,7 +1617,7 @@ async function exportSelectedClip() {
       end: state.activeClip.end,
       caption: captionInput.value,
       language: CAPTION_LANG,
-      captionStyle: $("#captionStyleSelect").value,
+      captionStyle: effectiveCaptionStyle(),
       captionSize: captionSize.value,
       fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
       captionColor: captionColorInput ? captionColorInput.value : "",
@@ -1636,31 +1625,17 @@ async function exportSelectedClip() {
       fps: Number(state.fps) || 0,
       crf: Number(state.crf) || 23,
       audioBitrate: Number(state.audioBitrate) || 128,
-      watermark: state.watermark,
-      watermarkPosition: state.watermarkPosition,
-      watermarkOpacity: state.watermarkOpacity,
       speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
       faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
       ratio: exportRatio,
       segments: exportSegments
     };
     let response;
-    if (ratios.length > 1) {
-      response = await fetch("/api/export-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: state.projectId,
-          clips: [{ ...basePayload, ratios }]
-        })
-      });
-    } else {
-      response = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(basePayload)
-      });
-    }
+    response = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(basePayload)
+    });
 
     const data = await response.json();
     if (!response.ok && response.status !== 202) throw new Error(data.error || "Export gagal.");
@@ -2111,7 +2086,7 @@ $("#translateBtn").addEventListener("click", async () => {
     }
     state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({ ...s }));
     state.liveSegments = state.captionSegments.map((s) => ({ ...s }));
-    state.liveActive = state.liveSegments.length > 0 && $("#captionStyleSelect").value !== "off";
+    state.liveActive = state.liveSegments.length > 0 && effectiveCaptionStyle() !== "off";
     state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     renderCaptionTimeline();
     // Refresh preview: live caption saat play/pause dan caption box statis saat idle.
@@ -2230,7 +2205,7 @@ function updateLiveCaption() {
     return;
   }
   const cap = document.createElement("div");
-  const style = $("#captionStyleSelect").value;
+  const style = effectiveCaptionStyle();
   liveCaption.style.fontSize = `${captionPreviewFontPx()}px`;
   liveCaption.className = "live-caption" + (style !== "off" ? ` lc-${style}` : "");
   applyCaptionPosition();
@@ -2719,6 +2694,7 @@ document.addEventListener("click", (event) => {
 });
 
 $("#autoCaptionBtn").addEventListener("click", async () => {
+  if (!autoCaptionEnabled()) { showToast("Auto caption dimatikan — nyalakan toggle-nya dulu."); return; }
   if (!state.projectId) { showToast("Analyze URL dulu sebelum auto caption."); return; }
   if (!state.activeClip) { showToast("Tidak ada clip untuk auto caption."); return; }
   const btn = $("#autoCaptionBtn");
@@ -2734,7 +2710,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
         start: state.activeClip.start,
         end: state.activeClip.end,
         language: CAPTION_LANG,
-        style: $("#captionStyleSelect").value || "dynamic",
+        style: effectiveCaptionStyle() || "dynamic",
         fillerMode: ($("#fillerModeSelect") && $("#fillerModeSelect").value) || "aggressive",
         maxLines: 2,
         maxLineLength: 40,
@@ -2757,7 +2733,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
       ...s,
       words: Array.isArray(s.words) ? s.words.slice() : []
     }));
-    state.liveActive = state.liveSegments.length > 0 && $("#captionStyleSelect").value !== "off";
+    state.liveActive = state.liveSegments.length > 0 && effectiveCaptionStyle() !== "off";
     // Align the live caption window to this clip. Karaoke timestamps are
     // clip-relative (0..duration), so liveOffset must match this clip's start
     // — otherwise captions drift onto the wrong part of the video (mirrors
@@ -2786,6 +2762,25 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
     btn.disabled = false;
     btn.textContent = "Auto Caption";
   }
+});
+
+$("#autoCaptionToggle").addEventListener("change", () => {
+  const enabled = autoCaptionEnabled();
+  const btn = $("#autoCaptionBtn");
+  btn.disabled = !enabled;
+  btn.title = enabled ? "" : "Auto caption dimatikan — nyalakan toggle untuk generate caption";
+  if (!enabled) {
+    state.liveActive = false;
+    liveCaption.style.display = "none";
+    liveCaption.innerHTML = "";
+    renderStaticCaption();
+    if (typeof renderCaptionTimeline === "function") renderCaptionTimeline();
+    showToast("Auto caption dimatikan: export tanpa caption terbakar.");
+  } else {
+    renderStaticCaption();
+    showToast("Auto caption aktif.");
+  }
+  saveSettingsDebounced();
 });
 
 $("#sortClips").addEventListener("click", () => {
@@ -2823,7 +2818,7 @@ captionPosition.addEventListener("input", () => {
 });
 
 $("#captionStyleSelect").addEventListener("change", () => {
-  const style = $("#captionStyleSelect").value;
+  const style = effectiveCaptionStyle();
   renderStaticCaption();
   if (!state.projectId || !state.activeClip || !state.liveSegments.length) return;
   state.liveActive = style !== "off";
@@ -2834,18 +2829,6 @@ $("#captionStyleSelect").addEventListener("change", () => {
     liveCaption.innerHTML = "";
     liveCaption.style.display = "none";
   }
-});
-
-$("#fpsSelect").addEventListener("change", (e) => { state.fps = Number(e.target.value) || 25; });
-$("#qualitySelect").addEventListener("change", (e) => { state.crf = Number(e.target.value) || 23; });
-$("#audioBitrateSelect").addEventListener("change", (e) => { state.audioBitrate = Number(e.target.value) || 128; });
-$("#watermarkText").addEventListener("input", (e) => { state.watermark = e.target.value; });
-$("#watermarkPosition").addEventListener("change", (e) => { state.watermarkPosition = e.target.value; });
-$("#watermarkOpacity").addEventListener("input", (e) => { state.watermarkOpacity = Number(e.target.value) / 100; });
-
-$("#layoutSelect").addEventListener("change", (event) => {
-  setRatio(event.target.value);
-  showToast(`Layout diganti ke ${event.target.selectedOptions[0].text}.`);
 });
 
 if (captionFontSelect) {
@@ -2878,6 +2861,8 @@ $$(".tabs button").forEach((button) => {
 });
 
 $("#analyzeIntelBtn").addEventListener("click", analyzeSelectedClip);
+
+$("#intelRegenerate").addEventListener("click", analyzeSelectedClip);
 
 $("#intelApplyHook").addEventListener("click", () => {
   const value = $("#intelRecommendedHook").textContent;
@@ -2920,7 +2905,9 @@ async function analyzeSelectedClip() {
         clipId: state.activeClip.id,
         start: state.activeClip.start,
         end: state.activeClip.end,
-        language: CAPTION_LANG
+        language: CAPTION_LANG,
+        keepOriginal: !!$("#keepOriginalToggle").checked,
+        disableRewrite: !!$("#disableRewriteToggle").checked
       })
     });
     const data = await response.json();
@@ -2942,9 +2929,122 @@ function renderIntel(a) {
   $("#intelScore").textContent = a.score != null ? `${a.score}/100` : "--";
   $("#intelConfidence").textContent = a.confidence != null ? `${a.confidence}%` : "--";
   $("#intelHookType").textContent = a.hookType || "--";
+  $("#intelBestOpening").textContent = a.openingBest || a.recommendedHook || "--";
+  const openingMeta = $("#intelOpeningMeta");
+  openingMeta.innerHTML = "";
+  if (a.openingStrategy) {
+    const meta = document.createElement("span");
+    meta.className = "intel-badge intel-badge--mode";
+    meta.textContent = `Strategy: ${a.openingStrategy}`;
+    openingMeta.appendChild(meta);
+  }
+  if (a.openingEditorialScore != null) {
+    const meta = document.createElement("span");
+    meta.className = "intel-badge intel-badge--active";
+    meta.textContent = `Editorial score ${a.openingEditorialScore}/100`;
+    openingMeta.appendChild(meta);
+  }
+  if (a.openingConfidence != null) {
+    const meta = document.createElement("span");
+    meta.className = "intel-badge";
+    meta.textContent = `Confidence ${a.openingConfidence}%`;
+    openingMeta.appendChild(meta);
+  }
+  if (a.openingOpenLoop) {
+    const meta = document.createElement("span");
+    meta.className = "intel-badge";
+    meta.textContent = `Open loop${a.openingOpenLoopQuestion ? ": " + a.openingOpenLoopQuestion.slice(0, 48) : ""}`;
+    openingMeta.appendChild(meta);
+  }
+  if (a.openingSourceStart != null && a.openingSourceStart !== "") {
+    const meta = document.createElement("span");
+    meta.className = "intel-badge";
+    meta.textContent = `Moment @${Number(a.openingSourceStart).toFixed(1)}s`;
+    openingMeta.appendChild(meta);
+  }
+  if (a.openingReason) {
+    const meta = document.createElement("div");
+    meta.className = "intel-opening-reason";
+    meta.textContent = a.openingReason;
+    openingMeta.appendChild(meta);
+  }
   $("#intelOriginalHook").textContent = a.originalHook || "--";
   $("#intelRecommendedHook").textContent = a.recommendedHook || "--";
   $("#intelKeyMessage").textContent = a.keyMessage || "--";
+
+  const badges = $("#intelHookBadges");
+  badges.innerHTML = "";
+  if (a.hookMode) {
+    const b = document.createElement("span");
+    b.className = "intel-badge intel-badge--mode";
+    b.textContent = a.hookMode === "editorial" ? "Editorial rewrite" : "Direct (asli)";
+    badges.appendChild(b);
+  }
+  if (a.hookColdOpen) {
+    const b = document.createElement("span");
+    b.className = "intel-badge intel-badge--active";
+    b.textContent = `Cold open (mulai dari kalimat #${(a.hookColdOpenStartIndex || 0) + 1})`;
+    badges.appendChild(b);
+  }
+  if (a.hookDeepScore != null) {
+    const b = document.createElement("span");
+    b.className = "intel-badge";
+    b.textContent = `Hook score ${a.hookDeepScore}/100`;
+    badges.appendChild(b);
+  }
+
+  $("#intelExplanation").textContent = a.hookExplanation || "--";
+
+  const altsEl = $("#intelAlternatives");
+  altsEl.innerHTML = "";
+  if (a.hookAlternatives && a.hookAlternatives.length) {
+    a.hookAlternatives.forEach((alt) => {
+      const row = document.createElement("div");
+      row.className = "intel-alt";
+      const strategy = document.createElement("span");
+      strategy.className = "intel-alt-strategy";
+      strategy.textContent = alt.strategy || "Varian";
+      const text = document.createElement("span");
+      text.className = "intel-alt-text";
+      text.textContent = alt.text;
+      const useBtn = document.createElement("button");
+      useBtn.type = "button";
+      useBtn.className = "ghost-button compact";
+      useBtn.textContent = "Gunakan";
+      useBtn.addEventListener("click", () => {
+        hookInput.value = alt.text;
+        if (state.activeClip) state.activeClip.hook = alt.text;
+        $("#intelRecommendedHook").textContent = alt.text;
+        showToast("Hook alternatif diterapkan.");
+      });
+      row.appendChild(strategy);
+      row.appendChild(text);
+      row.appendChild(useBtn);
+      altsEl.appendChild(row);
+    });
+  } else {
+    altsEl.textContent = "--";
+  }
+
+  const dimsEl = $("#intelDimensions");
+  dimsEl.innerHTML = "";
+  if (a.hookDimensions && Object.keys(a.hookDimensions).length) {
+    const labels = {
+      contentStrength: "Kekuatan isi", curiosity: "Curiosity gap", emotional: "Emosi",
+      novelty: "Kebaruan", conflict: "Konflik", specificity: "Spesifisitas",
+      consequence: "Konsekuensi", clarity: "Kejelasan", standalone: "Mandiri",
+      retention: "Retensi", sourceFidelity: "Fidelity sumber", delivery: "Penyampaian"
+    };
+    const entries = Object.entries(a.hookDimensions).sort((x, y) => y[1] - x[1]);
+    for (const [key, val] of entries) {
+      const chip = document.createElement("span");
+      chip.className = "intel-dim";
+      chip.innerHTML = `${labels[key] || key} <b>${Math.round(val * 100)}%</b>`;
+      dimsEl.appendChild(chip);
+    }
+  } else {
+    dimsEl.textContent = "--";
+  }
   $("#intelPayoff").textContent = a.payoff || "--";
   $("#intelStory").textContent = a.storyStructure || "--";
   $("#intelContext").textContent = a.contextWarning || "--";
@@ -3007,19 +3107,15 @@ $("#exportAllBtn").addEventListener("click", async () => {
           end: clip.end,
           caption: clip.caption || "",
           language: CAPTION_LANG,
-          captionStyle: $("#captionStyleSelect").value,
+          captionStyle: effectiveCaptionStyle(),
           captionSize: captionSize.value,
           fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
           captionColor: captionColorInput ? captionColorInput.value : "",
           captionPosition: state.captionPosition || 0.76,
           ratio: currentRatio(),
-          ratios: selectedExportRatios(),
           fps: Number(state.fps) || 0,
           crf: Number(state.crf) || 23,
           audioBitrate: Number(state.audioBitrate) || 128,
-          watermark: state.watermark,
-          watermarkPosition: state.watermarkPosition,
-          watermarkOpacity: state.watermarkOpacity,
           speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
           faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
           segments: captionSegmentsForClip(clip)
@@ -3077,7 +3173,7 @@ function exportClipPayloadFor(clip) {
     end: clip.end,
     caption: clip.caption || "",
     language: CAPTION_LANG,
-    captionStyle: $("#captionStyleSelect").value,
+    captionStyle: effectiveCaptionStyle(),
     captionSize: captionSize.value,
     fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
     captionColor: captionColorInput ? captionColorInput.value : "",
@@ -3086,9 +3182,6 @@ function exportClipPayloadFor(clip) {
     fps: Number(state.fps) || 0,
     crf: Number(state.crf) || 23,
     audioBitrate: Number(state.audioBitrate) || 128,
-    watermark: state.watermark,
-    watermarkPosition: state.watermarkPosition,
-    watermarkOpacity: state.watermarkOpacity,
     speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
     faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     segments: captionSegmentsForClip(clip)
@@ -3176,18 +3269,12 @@ const SETTINGS_KEY = "clipperStudio.settings";
 function collectSettings() {
   const style = $("#captionStyleSelect") ? $("#captionStyleSelect").value : "bold";
   return {
-    fps: state.fps,
-    crf: state.crf,
-    audioBitrate: state.audioBitrate,
-    watermark: state.watermark,
-    watermarkPosition: state.watermarkPosition,
-    watermarkOpacity: state.watermarkOpacity,
-    exportRatios: state.exportRatios,
     captionStyle: style,
     captionSize: Number(captionSize.value) || 23,
     captionPosition: state.captionPosition || 0.76,
     speakerCut: !!$("#speakerCutToggle")?.checked,
     faceTrack: !!$("#faceTrackToggle")?.checked,
+    autoCaption: autoCaptionEnabled()
   };
 }
 
@@ -3205,42 +3292,29 @@ function loadSettings() {
     data = null;
   }
   if (!data || typeof data !== "object") return;
-  if (Number(data.fps)) state.fps = Number(data.fps);
-  if (Number(data.crf)) state.crf = Number(data.crf);
-  if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
-  if (typeof data.watermark === "string") state.watermark = data.watermark;
-  if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
-  if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
-  if (Array.isArray(data.exportRatios)) {
-    const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
-    if (valid.length) state.exportRatios = valid;
-  }  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
+  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
   state.speakerCut = !!data.speakerCut;
   state.faceTrack = !!data.faceTrack;
 
-  state.speakerCut = !!data.speakerCut;
-  state.faceTrack = !!data.faceTrack;
-
-  state.speakerCut = !!data.speakerCut;
-  state.faceTrack = !!data.faceTrack;
-
-
-  $("#fpsSelect").value = String(state.fps);
-  $("#qualitySelect").value = String(state.crf);
-  $("#audioBitrateSelect").value = String(state.audioBitrate);
-  $("#watermarkText").value = state.watermark;
-  $("#watermarkPosition").value = state.watermarkPosition;
-  $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
-  $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
-  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));  $("#speakerCutToggle").checked = state.speakerCut;
-  $("#faceTrackToggle").checked = state.faceTrack;  $("#speakerCutToggle").checked = state.speakerCut;
-  $("#faceTrackToggle").checked = state.faceTrack;  const sct = document.getElementById("speakerCutToggle");
+  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
+  const sct = document.getElementById("speakerCutToggle");
   if (sct) sct.checked = state.speakerCut;
   const ftt = document.getElementById("faceTrackToggle");
   if (ftt) ftt.checked = state.faceTrack;
+  const act = $("#autoCaptionToggle");
+  if (act && data.autoCaption != null) act.checked = !!data.autoCaption;
+  syncAutoCaptionToggle();
   applyCaptionPosition();
+}
+
+function syncAutoCaptionToggle() {
+  const btn = $("#autoCaptionBtn");
+  if (btn) {
+    btn.disabled = !autoCaptionEnabled();
+    btn.title = autoCaptionEnabled() ? "" : "Auto caption dimatikan — nyalakan toggle untuk generate caption";
+  }
 }
 
 const saveSettingsDebounced = (() => {
@@ -3252,18 +3326,12 @@ const saveSettingsDebounced = (() => {
 })();
 
 const settingsControls = [
-  ["change", "#fpsSelect"],
-  ["change", "#qualitySelect"],
-  ["change", "#audioBitrateSelect"],
-  ["input", "#watermarkText"],
-  ["change", "#watermarkPosition"],
-  ["input", "#watermarkOpacity"],
-  ["change", ".export-ratio-chk"],
   ["change", "#captionStyleSelect"],
   ["input", "#captionSize"],
   ["input", "#captionPosition"],
   ["change", "#speakerCutToggle"],
-  ["change", "#faceTrackToggle"]
+  ["change", "#faceTrackToggle"],
+  ["change", "#autoCaptionToggle"]
 ];
 settingsControls.forEach(([eventName, sel]) => {
   $$(sel).forEach((el) => el.addEventListener(eventName, saveSettingsDebounced));
@@ -3271,102 +3339,6 @@ settingsControls.forEach(([eventName, sel]) => {
 
 loadSettings();
 
-const TEMPLATES_KEY = "clipperStudio.templates";
-
-function loadTemplates() {
-  try {
-    return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveTemplates(templates) {
-  try {
-    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
-  } catch {}
-}
-
-function applyTemplateData(data) {
-  if (Number(data.fps)) state.fps = Number(data.fps);
-  if (Number(data.crf)) state.crf = Number(data.crf);
-  if (Number(data.audioBitrate)) state.audioBitrate = Number(data.audioBitrate);
-  if (typeof data.watermark === "string") state.watermark = data.watermark;
-  if (["tl", "tr", "bl", "br"].includes(data.watermarkPosition)) state.watermarkPosition = data.watermarkPosition;
-  if (data.watermarkOpacity != null) state.watermarkOpacity = Number(data.watermarkOpacity);
-  if (Array.isArray(data.exportRatios)) {
-    const valid = data.exportRatios.filter((r) => ["portrait", "wide", "four5"].includes(r));
-    if (valid.length) state.exportRatios = valid;
-  }  if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
-  state.speakerCut = !!data.speakerCut;
-  state.faceTrack = !!data.faceTrack;
-
-  state.speakerCut = !!data.speakerCut;
-  state.faceTrack = !!data.faceTrack;
-
-  state.speakerCut = !!data.speakerCut;
-  state.faceTrack = !!data.faceTrack;
-
-
-  $("#fpsSelect").value = String(state.fps);
-  $("#qualitySelect").value = String(state.crf);
-  $("#audioBitrateSelect").value = String(state.audioBitrate);
-  $("#watermarkText").value = state.watermark;
-  $("#watermarkPosition").value = state.watermarkPosition;
-  $("#watermarkOpacity").value = String(Math.round(state.watermarkOpacity * 100));
-  $$(".export-ratio-chk").forEach((el) => { el.checked = state.exportRatios.includes(el.dataset.ratio); });
-  if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
-  if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
-  captionPosition.value = String(Math.round((state.captionPosition || 0.76) * 100));
-}
-
-function renderTemplateOptions() {
-  const select = $("#templateSelect");
-  select.innerHTML = '<option value="__default">Pilih template...</option>';
-  Object.entries(loadTemplates()).forEach(([name]) => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    select.appendChild(option);
-  });
-}
-
-$("#saveTemplateBtn").addEventListener("click", () => {
-  const name = window.prompt("Nama template:", "My template");
-  if (!name || !name.trim()) return;
-  const trimmed = name.trim();
-  const templates = loadTemplates();
-  templates[trimmed] = collectSettings();
-  saveTemplates(templates);
-  renderTemplateOptions();
-  $("#templateSelect").value = trimmed;
-  showToast(`Template "${trimmed}" disimpan.`);
-});
-
-$("#deleteTemplateBtn").addEventListener("click", () => {
-  const name = $("#templateSelect").value;
-  if (!name || name === "__default") return;
-  const templates = loadTemplates();
-  delete templates[name];
-  saveTemplates(templates);
-  renderTemplateOptions();
-  $("#templateSelect").value = "__default";
-  showToast(`Template "${name}" dihapus.`);
-});
-
-$("#templateSelect").addEventListener("change", (e) => {
-  const name = e.target.value;
-  if (!name || name === "__default") return;
-  const templates = loadTemplates();
-  const data = templates[name];
-  if (data) {
-    applyTemplateData(data);
-    saveSettings();
-    showToast(`Template "${name}" diterapkan.`);
-  }
-});
-
-renderTemplateOptions();
 renderClips();
 selectClip(clips[0]);
 loadProjects();

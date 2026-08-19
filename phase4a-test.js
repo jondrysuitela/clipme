@@ -161,9 +161,9 @@ for (const [label, input, expected] of durationCases) {
   await new Promise((r) => srv.server.close(r));
 
   // ---------- M-04 ratio state ----------
-  await t("M-04: layoutSelect value four5 (no square) with state sync in setRatio", () => {
-    if (/value="square"/.test(htmlSrc)) throw new Error("square option present");
-    if (!/layoutSelect\) layoutSelect\.value = ratio/.test(scriptSrc)) throw new Error("layoutSelect not synced in setRatio");
+  await t("M-04: ratio picker only via segmented buttons (no layoutSelect)", () => {
+    if (/id="layoutSelect"/.test(htmlSrc)) throw new Error("layoutSelect still present in settings");
+    if (!/setRatio\(currentRatio\(\)\)/.test(scriptSrc)) throw new Error("init normalization missing");
   });
 
   await t("M-04: setRatio normalizes unknown to portrait", () => {

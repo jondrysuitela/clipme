@@ -175,6 +175,9 @@
               <button class="ghost-button compact" id="applyTrim" type="button">Apply</button>
               <button class="secondary-button compact" id="playClip" type="button">Play clip</button>
                             <button class="primary-button compact" id="autoCaptionBtn" type="button">Auto Caption</button>
+              <label class="audio-opt" style="margin-bottom:0; display:flex; align-items:center; gap:5px; font-size:12px; white-space:nowrap" title="Matikan auto caption total: export tanpa teks terbakar, preview & generate caption nonaktif">
+                <input type="checkbox" id="autoCaptionToggle" checked> Auto caption
+              </label>
               <select id="fillerModeSelect" class="inspector-input" style="max-width:130px" title="Mode filter kata pengisi (filler)">
                 <option value="aggressive" selected>Filler: Aggressive</option>
                 <option value="light">Filler: Light</option>
@@ -208,7 +211,16 @@
           <div class="tab-panel" id="intelTab">
             <div class="intel-actions">
               <button class="primary-button compact" id="analyzeIntelBtn" type="button">Analyze clip</button>
+              <button class="ghost-button compact" id="intelRegenerate" type="button">Regenerate</button>
               <span class="caption-status" id="intelStatus"></span>
+            </div>
+            <div class="intel-controls">
+              <label class="audio-opt" style="margin-bottom:6px">
+                <input type="checkbox" id="keepOriginalToggle"> Keep original speech
+              </label>
+              <label class="audio-opt" style="margin-bottom:6px">
+                <input type="checkbox" id="disableRewriteToggle"> Disable rewrite
+              </label>
             </div>
             <div class="intel-meta" id="intelMeta">
               <div class="clip-info">
@@ -219,10 +231,22 @@
                 <span class="clip-info-label">Hook</span>
                 <span class="clip-info-value" id="intelHookType">--</span>
               </div>
+              <label class="field-label">Best opening</label>
+              <div class="intel-block intel-block--opening" id="intelBestOpening">--</div>
+              <div class="intel-opening-meta" id="intelOpeningMeta"></div>
               <label class="field-label">Original hook</label>
               <div class="intel-block" id="intelOriginalHook">--</div>
               <label class="field-label">Recommended hook</label>
               <div class="intel-block" id="intelRecommendedHook">--</div>
+              <div class="intel-badges" id="intelHookBadges"></div>
+              <label class="field-label">Editorial verdict</label>
+              <div class="intel-block" id="intelExplanation">--</div>
+              <label class="field-label">Hook alternatives</label>
+              <div class="intel-block" id="intelAlternatives">--</div>
+              <details class="intel-advanced" id="intelAdvanced">
+                <summary>Advanced hook scoring</summary>
+                <div class="intel-dims" id="intelDimensions">--</div>
+              </details>
               <label class="field-label">Key message</label>
               <div class="intel-block" id="intelKeyMessage">--</div>
               <label class="field-label">Payoff</label>
@@ -274,14 +298,6 @@
               </div>
               <div id="speakerTimelineMeta" class="caption-hint">Speaker timeline metadata akan muncul di sini.</div>
             </div>
-            <div class="field-label">Template preset</div>
-            <select id="templateSelect" class="inspector-input">
-              <option value="__default">Pilih template...</option>
-            </select>
-            <div class="template-actions">
-              <button class="ghost-button compact" id="saveTemplateBtn" type="button">Simpan template</button>
-              <button class="ghost-button compact" id="deleteTemplateBtn" type="button">Hapus</button>
-            </div>
             <div class="field-label">Caption size</div>
             <input type="range" id="captionSize" min="14" max="40" value="23" style="width:100%">
             <div class="field-label">Caption position</div>
@@ -316,45 +332,6 @@
             </select>
             <div class="field-label">Warna font</div>
             <input type="color" id="captionColor" value="#FFFFFF" style="width:100%; height:34px; padding:2px; border:1px solid var(--line); border-radius:8px; background:transparent; cursor:pointer">
-            <div class="field-label">Layout</div>
-            <select id="layoutSelect" class="inspector-input">
-              <option value="portrait">Portrait 9:16</option>
-              <option value="wide">Wide 16:9</option>
-              <option value="four5">4:5</option>
-            </select>
-            <div class="field-label">Export ke rasio</div>
-            <label class="audio-opt"><input type="checkbox" class="export-ratio-chk" data-ratio="portrait" checked> 9:16 (portrait)</label>
-            <label class="audio-opt"><input type="checkbox" class="export-ratio-chk" data-ratio="wide"> 16:9 (wide)</label>
-            <label class="audio-opt"><input type="checkbox" class="export-ratio-chk" data-ratio="four5"> 4:5</label>
-            <div class="caption-hint">Centang satu atau lebih rasio. Export akan membuat satu MP4 per rasio.</div>
-            <div class="field-label">Frame rate</div>
-            <select id="fpsSelect" class="inspector-input">
-              <option value="24">24 fps</option>
-              <option value="25" selected>25 fps</option>
-              <option value="30">30 fps</option>
-              <option value="60">60 fps</option>
-            </select>
-            <div class="field-label">Kualitas video</div>
-            <select id="qualitySelect" class="inspector-input">
-              <option value="18">Tinggi (lebih besar)</option>
-              <option value="23" selected>Standar</option>
-              <option value="28">Rendah (lebih kecil)</option>
-            </select>
-            <div class="field-label">Bitrate audio</div>
-            <select id="audioBitrateSelect" class="inspector-input">
-              <option value="96">96 kbps</option>
-              <option value="128" selected>128 kbps</option>
-              <option value="192">192 kbps</option>
-            </select>
-            <div class="field-label">Watermark</div>
-            <input class="inspector-input" id="watermarkText" type="text" placeholder="Nama channel / brand (kosongkan = tanpa watermark)">
-            <select id="watermarkPosition" class="inspector-input">
-              <option value="br">Pojok kanan bawah</option>
-              <option value="bl">Pojok kiri bawah</option>
-              <option value="tr">Pojok kanan atas</option>
-              <option value="tl">Pojok kiri atas</option>
-            </select>
-            <label class="audio-opt">Opacity <input type="range" id="watermarkOpacity" min="10" max="100" value="60" style="flex:1"></label>
             <div class="field-label">Model STT (offline)</div>
             <select id="sttModelSelect" class="inspector-input">
               <option value="">Auto (default)</option>

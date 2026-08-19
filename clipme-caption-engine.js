@@ -703,7 +703,7 @@ Berdasarkan transkrip di atas, buat segmen caption sesuai dengan instruksi.
     if (hookEngine && typeof hookEngine.selectHook === "function") {
       const lang = (hookEngine.langTag && hookEngine.langTag(language)) || "id";
       const result = hookEngine.selectHook(sentences, lang, {});
-      if (result && result.recommendedHook) return result.recommendedHook.slice(0, 90);
+      if (result && result.recommendedHook) return result.recommendedHook.slice(0, 140);
     }
     // Legacy fallback bila hook engine gagal dimuat.
     const candidates = sentences

@@ -13,7 +13,9 @@
 //   4. Klasifikasi berbasis struktur kalimat (REVELATION, PROBLEM, ...),
 //      bukan default CURIOSITY; intent dipisah dari type.
 //   5. Payoff divalidasi dari isi clip, bukan panjang teks.
-//   6. recommendedHook = minimal-edit (LEVEL 0-4), TIDAK pernah mengarang kata.
+//   6. recommendedHook = hasil CRAFT VIRAL (menyusun ulang kata/fakta sumber
+//      menjadi hook scroll-stop), BUKAN minimal-edit caption asli. Tidak pernah
+//      menambah fakta/angka baru — hanya framing viral + susunan ulang.
 //   7. Tanpa toggle baru, tanpa UI baru, backward compatible.
 // ============================================================================
 
@@ -276,7 +278,7 @@ function scoreHook(sentence, lang, context) {
 
   const cat = openerCategory(text, lang);
   if (cat !== "none") {
-    return { score: 0, evidence: {}, penalties: {}, excluded: true, reason: cat };
+    return { score: 0, evidence: {}, penalties: {}, excluded: true, reason: cat, deep: 0, dimensions: {} };
   }
 
   const words = wordsOf(text);
@@ -428,10 +430,16 @@ function scoreHook(sentence, lang, context) {
 
   score = Math.max(0, Math.min(100, Math.round(score)));
 
+  const evidence = { specificity, density, curiosity, tension, novelty, clarity: Math.min(8, wc >= 4 && wc <= 16 ? 6 : wc <= 22 ? 3 : 0) + (/[.!?…]$/.test(text) ? 2 : 0), context: contextInd, value, authenticity };
+  const deepResult = dimensionScores(text, lang, context, evidence, penalties);
+
   return {
     score,
-    evidence: { specificity, density, curiosity, tension, novelty, clarity: Math.min(8, wc >= 4 && wc <= 16 ? 6 : wc <= 22 ? 3 : 0) + (/[.!?…]$/.test(text) ? 2 : 0), context: contextInd, value, authenticity },
+    evidence,
     penalties,
+    deep: deepResult.deep,
+    dimensions: deepResult.dimensions,
+    deepWeights: deepResult.weights,
     excluded: false,
     reason: "ok"
   };
@@ -595,12 +603,494 @@ function normalizeHook(sentence, lang, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// VIRAL CRAFT — rekomendasi hook yang DIKARANG ulang untuk scroll-stop & viral.
+// Bukan salinan/parafrase ringan caption asli. Prinsip:
+//   - Hanya menyusun ulang kata/fakta yang BENAR-BENAR muncul di kalimat/
+//     transkrip. Tidak ada fakta, angka, atau klaim baru.
+//   - Framing viral ("jarang dibahas", "bikin nggak nyangka", "jangan ulangi
+//     kesalahan") adalah gaya bahasa tentang video itu sendiri, bukan klaim
+//     faktual baru tentang dunia.
+//   - Memakai slot yang diekstrak (angka, topik, kontras) agar hasil selalu
+//     konkret dan berbeda dari baris caption.
+// ---------------------------------------------------------------------------
+function capFirst(s) {
+  return String(s || "").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function lowerFirst(s) {
+  return String(s || "").replace(/^\w/, (c) => c.toLowerCase());
+}
+
+function stripLeading(sentence, markers) {
+  let t = String(sentence || "").trim();
+  for (const m of markers || []) {
+    const re = new RegExp(`^${escapeRe(m)}\\b[,\\s]*`, "i");
+    if (re.test(t)) {
+      t = t.replace(re, "").trim();
+      break;
+    }
+  }
+  return t;
+}
+
+function extractNumbers(text) {
+  const out = [];
+  const re = /\b\d{1,3}(?:[.,]\d+)?\s*(?:juta|miliar|ribu|tahun|bulan|minggu|hari|jam|menit|detik|persen|%|rupiah|dolar|kali|orang|poin|gol|kali lipat)\b/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    const full = m[0].trim();
+    if (!out.some((o) => o.full === full)) {
+      const num = (m[0].match(/\d[\d.,]*/) || [" "])[0];
+      const unit = (m[0].match(/[a-z%]+$/i) || [" "])[0];
+      out.push({ full, num, unit });
+    }
+  }
+  if (!out.length) {
+    const w = String(text).match(/\b(satu|dua|tiga|empat|lima|enam|tujuh|delapan|sembilan|sepuluh|belasan|puluhan|ratusan|ribuan|jutaan)\s+(kebiasaan|langkah|cara|tahun|bulan|hari|keputusan|hal|kali|orang|alasan|fakta|jam|menit)\b/i);
+    if (w) out.push({ full: w[0], num: w[1], unit: w[2] });
+  }
+  return out;
+}
+
+function extractTopic(text, lang) {
+  const stop = (HOOK_WORDS[lang] && HOOK_WORDS[lang].stopwords) || [];
+  const extra = ["kebanyakan", "kenapa", "mengapa", "apakah", "bagaimana", "gimana", "siapa", "kapan", "berapa", "harus", "bisa", "bakal", "akan", "para", "itu", "ini", "itu", "juga", "sudah", "telah", "sangat", "lebih", "nggak", "gak", "enggak", "tidak", "tak", "di", "ke", "dari", "yang", "dan", "atau", "dengan", "pada", "untuk", "dalam", "saat", "ketika", "tapi", "namun", "sedangkan", "sementara", "baru", "tadi", "kemarin", "semalam", "overnight", "today", "yesterday", "now", "just", "once", "lost", "make", "made", "know", "think", "found", "started", "became", "become", "keep", "kept", "does", "did", "have", "has", "had", "get", "got", "going", "want", "need", "work", "works", "bought", "sold", "went", "gone", "use", "used", "say", "said", "told", "my", "our", "their", "your", "his", "her", "its", "all", "about", "when", "where", "who", "what", "why", "how"];
+  const tokens = String(text).toLowerCase().split(/[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+/i).filter((w) => w.length > 1);
+  const isStop = (w) => stop.includes(w) || extra.includes(w);
+  const runs = [];
+  let cur = [];
+  for (const w of tokens) {
+    if (!isStop(w)) { cur.push(w); continue; }
+    if (cur.length) { runs.push(cur); cur = []; }
+  }
+  if (cur.length) runs.push(cur);
+  if (!runs.length) return [];
+  runs.sort((a, b) => b.length - a.length || b.join(" ").length - a.join(" ").length);
+  return [runs[0].join(" ")];
+}
+
+function extractContrastParts(text) {
+  const parts = String(text).split(/\b(bukan|tapi|namun|padahal|sedangkan|sementara|justru|versus|vs|not|but|whereas|while|instead of|unlike)\b/i);
+  const list = parts.map((p) => cleanText(p)).filter((p) => p.length > 3);
+  if (list.length >= 2) return { a: list[0], b: list[list.length - 1] };
+  // Kontras paralel tanpa konjungsi eksplisit: "Orang kaya membeli aset,
+  // orang miskin membeli gaya hidup" — dua sisi dipisah koma.
+  if (detectParallelStructure(text)) {
+    const comma = String(text).split(/\s*,\s+/).map((p) => cleanText(p)).filter((p) => p.length > 3);
+    if (comma.length >= 2) return { a: comma[0], b: comma[comma.length - 1] };
+  }
+  return null;
+}
+
+const ID_CRAFT = {
+  QUESTION: [
+    { id: "num-gap", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — dan gak banyak yang sadar kenapa` },
+    { id: "topic-answer", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: jawabannya nggak seperti yang kamu kira` },
+    { id: "wrong-most", need: () => true, make: (f) => `Kebanyakan orang salah paham soal ${f.clause}` }
+  ],
+  SURPRISE: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — fakta yang bikin nggak nyangka` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: faktanya bikin nggak nyangka` },
+    { id: "turns-out", need: () => true, make: (f) => `Ternyata ${f.clause}` }
+  ],
+  REVELATION: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — fakta yang bikin nggak nyangka` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: faktanya bikin nggak nyangka` },
+    { id: "turns-out", need: () => true, make: (f) => `Ternyata ${f.clause}` }
+  ],
+  SHOCK: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — fakta yang bikin nggak nyangka` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: faktanya bikin nggak nyangka` },
+    { id: "turns-out", need: () => true, make: (f) => `Ternyata ${f.clause}` }
+  ],
+  PROBLEM: [
+    { id: "topic-dont", need: (f) => !!f.topic, make: (f) => `Jangan ulangi kesalahan yang sama soal ${f.topic}` },
+    { id: "num-problem", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — kesalahan yang jarang disadari` },
+    { id: "problem-few", need: () => true, make: (f) => `Ini penyebab masalah yang jarang dibahas: ${f.clause}` }
+  ],
+  CONTRAST: [
+    { id: "contrast-vs", need: (f) => !!f.contrast, make: (f) => `${capFirst(f.contrast.a)} vs ${capFirst(f.contrast.b)} — mana yang kamu lakuin?` },
+    { id: "topic-contrast", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: dua hal yang sering tertukar` },
+    { id: "contrast-generic", need: () => true, make: (f) => `Dua hal yang sering tertukar: ${f.clause}` }
+  ],
+  "DIRECT VALUE": [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — langkah yang gak banyak orang sadari` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: cara yang jarang diketahui` },
+    { id: "value-generic", need: () => true, make: (f) => `Ini yang jarang dibahas: ${f.clause}` }
+  ],
+  EDUCATIONAL: [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — langkah yang gak banyak orang sadari` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: cara yang jarang diketahui` },
+    { id: "value-generic", need: () => true, make: (f) => `Ini yang jarang dibahas: ${f.clause}` }
+  ],
+  TRANSFORMATION: [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — langkah yang gak banyak orang sadari` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: cara yang jarang diketahui` },
+    { id: "value-generic", need: () => true, make: (f) => `Ini yang jarang dibahas: ${f.clause}` }
+  ],
+  STORY: [
+    { id: "topic-story", need: (f) => !!f.topic, make: (f) => `Cerita ${f.topic} yang nggak disangka-sangka` },
+    { id: "story-generic", need: () => true, make: (f) => `Awal mula yang jarang diceritakan: ${f.clause}` }
+  ],
+  CONFESSION: [
+    { id: "topic-confess", need: (f) => !!f.topic, make: (f) => `Gue gak nyangka ${f.topic} bakal jadi pelajaran berharga` },
+    { id: "confess-generic", need: () => true, make: (f) => `Jujur aja, ini bukan hal yang gampang: ${f.clause}` }
+  ],
+  EMOTIONAL: [
+    { id: "topic-confess", need: (f) => !!f.topic, make: (f) => `Gue gak nyangka ${f.topic} bakal jadi pelajaran berharga` },
+    { id: "confess-generic", need: () => true, make: (f) => `Jujur aja, ini bukan hal yang gampang: ${f.clause}` }
+  ],
+  CURIOSITY: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `Rahasia di balik ${f.topic} yang jarang dibahas` },
+    { id: "num-mystery", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — dan ini baru sebagian kecilnya` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: hal yang jarang orang sadari` }
+  ],
+  MYSTERY: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `Rahasia di balik ${f.topic} yang jarang dibahas` },
+    { id: "num-mystery", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — dan ini baru sebagian kecilnya` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: hal yang jarang orang sadari` }
+  ],
+  CONTROVERSY: [
+    { id: "topic-controversy", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: ini yang bikin perdebatan` },
+    { id: "controversy-generic", need: () => true, make: (f) => `Kontroversial tapi faktual — ${f.clause}` }
+  ],
+  HUMOR: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `Rahasia di balik ${f.topic} yang jarang dibahas` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: hal yang jarang orang sadari` }
+  ]
+};
+
+const EN_CRAFT = {
+  QUESTION: [
+    { id: "num-gap", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — and not many know why` },
+    { id: "topic-answer", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the answer isn't what you think` },
+    { id: "wrong-most", need: () => true, make: (f) => `Most people get this wrong: ${f.clause}` }
+  ],
+  SURPRISE: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the fact nobody saw coming` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the truth is surprising` },
+    { id: "turns-out", need: () => true, make: (f) => `Turns out ${f.clause}` }
+  ],
+  REVELATION: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the fact nobody saw coming` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the truth is surprising` },
+    { id: "turns-out", need: () => true, make: (f) => `Turns out ${f.clause}` }
+  ],
+  SHOCK: [
+    { id: "num-shock", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the fact nobody saw coming` },
+    { id: "topic-shock", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the truth is surprising` },
+    { id: "turns-out", need: () => true, make: (f) => `Turns out ${f.clause}` }
+  ],
+  PROBLEM: [
+    { id: "topic-dont", need: (f) => !!f.topic, make: (f) => `Don't repeat the same mistake about ${f.topic}` },
+    { id: "num-problem", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the mistake few notice` },
+    { id: "problem-few", need: () => true, make: (f) => `The problem few talk about: ${f.clause}` }
+  ],
+  CONTRAST: [
+    { id: "contrast-vs", need: (f) => !!f.contrast, make: (f) => `${capFirst(f.contrast.a)} vs ${capFirst(f.contrast.b)} — which one are you doing?` },
+    { id: "topic-contrast", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: two things people mix up` },
+    { id: "contrast-generic", need: () => true, make: (f) => `Two things people mix up: ${f.clause}` }
+  ],
+  "DIRECT VALUE": [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the steps most people miss` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the way few people know` },
+    { id: "value-generic", need: () => true, make: (f) => `What few people know: ${f.clause}` }
+  ],
+  EDUCATIONAL: [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the steps most people miss` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the way few people know` },
+    { id: "value-generic", need: () => true, make: (f) => `What few people know: ${f.clause}` }
+  ],
+  TRANSFORMATION: [
+    { id: "num-value", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — the steps most people miss` },
+    { id: "topic-value", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: the way few people know` },
+    { id: "value-generic", need: () => true, make: (f) => `What few people know: ${f.clause}` }
+  ],
+  STORY: [
+    { id: "topic-story", need: (f) => !!f.topic, make: (f) => `The story of ${f.topic} nobody expected` },
+    { id: "story-generic", need: () => true, make: (f) => `The beginning few people know: ${f.clause}` }
+  ],
+  CONFESSION: [
+    { id: "topic-confess", need: (f) => !!f.topic, make: (f) => `I never thought ${f.topic} would teach me this much` },
+    { id: "confess-generic", need: () => true, make: (f) => `Honestly, this wasn't easy: ${f.clause}` }
+  ],
+  EMOTIONAL: [
+    { id: "topic-confess", need: (f) => !!f.topic, make: (f) => `I never thought ${f.topic} would teach me this much` },
+    { id: "confess-generic", need: () => true, make: (f) => `Honestly, this wasn't easy: ${f.clause}` }
+  ],
+  CURIOSITY: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `The secret behind ${f.topic} few discuss` },
+    { id: "num-mystery", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — and that's just part of it` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: something people rarely realize` }
+  ],
+  MYSTERY: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `The secret behind ${f.topic} few discuss` },
+    { id: "num-mystery", need: (f) => !!f.num, make: (f) => `${capFirst(f.num)} — and that's just part of it` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: something people rarely realize` }
+  ],
+  CONTROVERSY: [
+    { id: "topic-controversy", need: (f) => !!f.topic, make: (f) => `${capFirst(f.topic)}: this is what sparks debate` },
+    { id: "controversy-generic", need: () => true, make: (f) => `Controversial but factual — ${f.clause}` }
+  ],
+  HUMOR: [
+    { id: "topic-secret", need: (f) => !!f.topic, make: (f) => `The secret behind ${f.topic} few discuss` },
+    { id: "curiosity-generic", need: () => true, make: (f) => `${capFirst(f.clause)}: something people rarely realize` }
+  ]
+};
+
+function craftViralHook(sentence, sentences, lang) {
+  const langKey = lang === "en" ? "en" : "id";
+  const text = cleanText(sentence || "");
+  const openerMarkers = langKey === "en"
+    ? ["so", "okay", "alright", "well", "right", "you know", "basically", "hey", "guys", "now", "actually", "look"]
+    : ["jadi", "oke", "nah", "ya", "baiklah", "gini", "begini", "kayaknya", "guys", "teman-teman", "biasanya", "intinya", "sebenarnya"];
+  const clause = stripLeading(text, openerMarkers);
+  const nums = extractNumbers(text);
+  const topics = extractTopic(text, langKey);
+  const contrast = extractContrastParts(text);
+  const type = classifyHookType(text, lang).toUpperCase();
+  const sets = langKey === "en" ? EN_CRAFT : ID_CRAFT;
+  const list = sets[type] || sets.CURIOSITY;
+  const slots = {
+    num: nums.length ? nums[0].full : "",
+    topic: topics[0] || "",
+    clause: lowerFirst(clause),
+    contrast
+  };
+  let chosen = null;
+  for (const tmpl of list) {
+    if (tmpl.need(slots)) { chosen = tmpl; break; }
+  }
+  if (!chosen) chosen = { id: "generic", need: () => true, make: (f) => `Ini yang jarang dibahas: ${f.clause}` };
+  let out = cleanText(chosen.make(slots));
+  out = out.replace(/\s+([.,?!])/g, "$1").replace(/[,.…]+$/g, "").trim();
+  // Safeguard: bila template menghasilkan fragmen menggantung (terlalu pendek
+  // atau berakhir preposisi/konjungsi), pakai template generik type tsb.
+  const danglingEnd = /\b(soal|tentang|dengan|karena|untuk|di|ke|dari|yang|behind|about|with|from|because|for|of|at|in|on|into|the)$/i.test(out);
+  if (out.length < 4 || danglingEnd) {
+    const generic = list.slice().reverse().find((tmpl) => tmpl.need(slots) && tmpl.make(slots));
+    if (generic && generic !== chosen) {
+      out = cleanText(generic.make(slots)).replace(/\s+([.,?!])/g, "$1").replace(/[,.…]+$/g, "").trim();
+      chosen = generic;
+    }
+  }
+  if (!out) out = cleanText(normalizeHook(sentence, lang, {}).text) || text;
+  // Panjang dinamis: jangan pernah memotong kalimat demi batas karakter.
+  // Cap 140 kata/c. Hanya dipotong di batas kata bila melampaui.
+  if (out.length > 140) out = out.slice(0, 140).replace(/\s\w+$/, "").trim();
+  return { text: out, type, pattern: chosen.id, slots };
+}
+
+// ---------------------------------------------------------------------------
+// PROFESSIONAL SCORING — 12 dimensi berbobot (total 100). Setiap dimensi
+// dinormalisasi 0..1, dikali bobot, dijumlah. Bisa di-tuning lewat `weights`.
+// `scoreHook` tetap mengembalikan `score` (skor legacy, backward compatible)
+// DAN `deep` (skor profesional) + `dimensions` untuk ranking/metadata.
+// ---------------------------------------------------------------------------
+const DEEP_WEIGHTS = {
+  contentStrength: 15,
+  curiosity: 15,
+  emotional: 10,
+  novelty: 10,
+  conflict: 10,
+  specificity: 10,
+  consequence: 10,
+  clarity: 5,
+  standalone: 5,
+  retention: 5,
+  sourceFidelity: 5,
+  delivery: 0
+};
+
+function dimensionScores(text, lang, context, ev, pen) {
+  const evi = ev || {};
+  const pens = pen || {};
+  const wc = wordsOf(text || "").length;
+  const low = String(text || "").toLowerCase();
+  const hasNum = /\d/.test(text);
+  const hasNumUnit = hasAny(text, lang, "numbers") >= 1;
+  const hasQuestion = detectQuestion(text);
+  const hasConflict = hasAny(text, lang, "conflict") >= 1;
+  const hasContrast = hasAny(text, lang, "contrast") >= 1;
+  const hasSurprise = hasAny(text, lang, "surprise") >= 1;
+  const hasTease = hasAny(text, lang, "curiosityTease") >= 1;
+  const hasConfession = hasAny(text, lang, "confession") >= 1;
+  const hasNarrative = hasAny(text, lang, "narrative") >= 1;
+  const hasValue = hasAny(text, lang, "value") >= 1;
+  const hasImperative = hasAny(text, lang, "imperative") >= 1;
+  const resultFirst = detectResultFirst(text);
+  const parallel = detectParallelStructure(text);
+  const selfAnswered = /(karena itu|it's because|the reason is|jawabannya|alasannya|the answer)/i.test(low);
+  const endsPunct = /[.!?…]$/.test(String(text || "").trim());
+
+  const specificity = Math.min(1, (hasNum ? 0.35 : 0) + (hasNumUnit ? 0.3 : 0) + ((evi.specificity || 0) >= 6 ? 0.2 : 0) + (resultFirst ? 0.15 : 0));
+  const contentStrength = Math.min(1, ((evi.density || 0) / 10) * 0.6 + (hasValue || hasImperative ? 0.2 : 0) + (resultFirst ? 0.2 : 0) + (hasConflict ? 0.1 : 0));
+  const curiosity = Math.max(0, Math.min(1, (hasQuestion ? 0.45 : 0) + (hasTease ? 0.4 : 0) + (hasSurprise ? 0.15 : 0) - (selfAnswered ? 0.35 : 0)));
+  const hasLossEvent = /\b(i lost|i've lost|i had lost|lost everything|lost all|kehilangan|bangkrut|went bankrupt|went broke|collapsed|hancur|gagal total|got fired|fired from|diagnosed with|almost died|habis tabungan|patah hati)\b/i.test(low);
+  const emotional = Math.min(1, (hasConfession ? 0.35 : 0) + (hasLossEvent ? 0.35 : 0) + (hasNarrative ? 0.15 : 0) + (hasConflict ? 0.15 : 0));
+  const novelty = Math.min(1, (hasSurprise ? 0.35 : 0) + (parallel ? 0.3 : 0) + (hasTease ? 0.2 : 0) + (hasNum ? 0.15 : 0));
+  const conflict = Math.min(1, (hasConflict ? 0.45 : 0) + (hasContrast ? 0.4 : 0) + (hasImperative ? 0.15 : 0));
+  const consequence = Math.min(1, (resultFirst ? 0.4 : 0) + (/\b(akhirnya|sehingga|kolaps|bangkrut|kehilangan|hancur|lost|collapsed|destroyed|ruined|cost me)\b/i.test(low) ? 0.3 : 0) + (hasConflict ? 0.2 : 0) + (/\b(semalam|sebulan|setahun|overnight|within|months|tahun)\b/i.test(low) ? 0.1 : 0));
+  const clarity = Math.max(0, Math.min(1, (wc >= 4 && wc <= 16 ? 0.7 : wc <= 24 ? 0.5 : 0.25) + (endsPunct ? 0.3 : 0) - (pens.filler ? 0.25 : 0) - (pens.hedge ? 0.15 : 0)));
+  const standalone = Math.max(0, Math.min(1, ((evi.context || 0) / 10) + (parallel ? 0.2 : 0)));
+  const retention = Math.min(1, (hasQuestion ? 0.3 : 0) + curiosity * 0.3 + consequence * 0.25 + (wc >= 3 && wc <= 20 ? 0.15 : 0) + (endsPunct ? 0.1 : 0));
+  const sourceFidelity = Math.max(0, 1 - (pens.hedge ? 0.25 : 0) - (pens.deictic ? 0.2 : 0) - (pens.pronounNoAntecedent ? 0.15 : 0));
+  // Delivery Strength — hanya terpakai bila data timing/prosody tersedia
+  // (bobot 0 → netral, tidak menggeser total). Ditunjang server bila ada.
+  const delivery = evi.delivery != null ? Math.max(0, Math.min(1, Number(evi.delivery))) : 0.5;
+
+  const dimensions = { contentStrength, curiosity, emotional, novelty, conflict, specificity, consequence, clarity, standalone, retention, sourceFidelity, delivery };
+  const weights = DEEP_WEIGHTS;
+  let deep = 0;
+  for (const k of Object.keys(weights)) deep += (dimensions[k] || 0) * weights[k];
+  deep -= (pens.filler || 0) + (pens.repetition || 0) * 0.7 + (pens.deictic || 0) * 0.5 + (pens.pronounNoAntecedent || 0) * 0.5;
+  if (pens.repetition >= 3) deep = Math.min(deep, 45);
+  if (pens.deictic + (pens.pronounNoAntecedent || 0) >= 10) deep = Math.min(deep, 60);
+  deep = Math.max(0, Math.round(deep));
+  return { dimensions, weights, deep };
+}
+
+// Editorial explanation — deterministik dari dimensi + type + payoff.
+function explainHook(hook, deepResult, type, payoff, lang) {
+  const dims = deepResult.dimensions;
+  const labels = {
+    contentStrength: "kekuatan isi", curiosity: "curiosity gap", emotional: "intensitas emosi",
+    novelty: "kebaruan informasi", conflict: "konflik/ketegangan", specificity: "spesifisitas",
+    consequence: "konsekuensi nyata", clarity: "kejelasan", standalone: "mandiri tanpa konteks",
+    retention: "alasan menonton lanjut", sourceFidelity: "kesetiaan ke sumber", delivery: "kekuatan penyampaian"
+  };
+  const reasons = [];
+  const strong = Object.keys(dims).filter((k) => dims[k] >= 0.5).sort((a, b) => dims[b] - dims[a]).slice(0, 3);
+  for (const k of strong) reasons.push(`${labels[k]} (${Math.round(dims[k] * 100)}%)`);
+  if (!reasons.length) reasons.push("struktur kalimat yang jelas");
+  const typeNote = {
+    QUESTION: "dibuka dengan pertanyaan yang membuka rasa penasaran",
+    CURIOSITY: "menciptakan gap informasi yang membuat penonton penasaran",
+    MYSTERY: "menggantung misteri yang ingin dipecahkan",
+    SURPRISE: "mematahkan ekspektasi dengan fakta tak terduga",
+    REVELATION: "mengungkap fakta yang sebelumnya tidak disadari",
+    SHOCK: "memberi kejutan langsung di detik pertama",
+    PROBLEM: "langsung menyentuh masalah yang relevan",
+    CONTRAST: "memperlihatkan perbedaan yang mencolok",
+    "DIRECT VALUE": "menjanjikan nilai langsung untuk penonton",
+    EDUCATIONAL: "menawarkan pengetahuan konkret",
+    TRANSFORMATION: "menunjukkan perubahan yang signifikan",
+    STORY: "mengajak masuk ke dalam cerita",
+    CONFESSION: "membangun koneksi emosional lewat kejujuran",
+    EMOTIONAL: "menggugah emosi penonton",
+    CONTROVERSY: "memicu perdebatan",
+    HUMOR: "menghibur dan relatable"
+  }[type] || "bukaannya kuat dan spesifik";
+  let text = `Terpilih karena ${reasons.join(", ")}; ${typeNote}.`;
+  if (payoff && payoff.fulfilled != null) {
+    text += ` Payoff terpenuhi (${payoff.confidence}%) — clip benar-benar menjawab hook.`;
+  }
+  return text;
+}
+
+// ---------------------------------------------------------------------------
+// VARIATION ENGINE — MODE A (DIRECT) & MODE B (EDITORIAL) + strategi varian.
+// Setiap varian tetap source-faithful: hanya menyusun ulang kata/fakta sumber.
+// ---------------------------------------------------------------------------
+function buildVariants(hook, sentences, lang) {
+  const langKey = lang === "en" ? "en" : "id";
+  const text = cleanText(hook || "");
+  if (!text) return [];
+  const clause = lowerFirst(stripLeading(text, langKey === "en"
+    ? ["so", "okay", "alright", "well", "right", "you know", "basically", "hey", "guys", "now", "actually", "look"]
+    : ["jadi", "oke", "nah", "ya", "baiklah", "gini", "begini", "kayaknya", "guys", "teman-teman", "biasanya", "intinya", "sebenarnya"]));
+  const nums = extractNumbers(text);
+  const topics = extractTopic(text, langKey);
+  const contrast = extractContrastParts(text);
+  const num = nums.length ? nums[0].full : "";
+  const topic = topics[0] || "";
+  const isQuestion = detectQuestion(text);
+  const variants = [];
+  const seen = new Set();
+
+  const push = (strategy, str) => {
+    const s = cleanText(str);
+    if (!s) return;
+    const key = s.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push({ strategy, text: s, type: strategy, sourceFidelity: true });
+  };
+
+  // MODE A — DIRECT: kalimat asli pembicara, dipertahankan verbatim.
+  push("Direct", text);
+
+  // MODE B — Editorial: hook ringkas yang diturunkan dari sumber.
+  if (langKey === "en") {
+    // CURIOSITY
+    push("Curiosity", num ? `${capFirst(num)} — and not many know why` : `${capFirst(topic || clause)}: the answer isn't what you think`);
+    // CONTRARIAN
+    push("Contrarian", `Just the opposite of what you'd expect: ${clause}`);
+    // QUESTION
+    push("Question", isQuestion ? text : `Why ${clause}?`);
+    // EMOTIONAL
+    push("Emotional", `Honestly, this wasn't easy: ${clause}`);
+    // STORY
+    push("Story", `The story behind ${topic || "this"} nobody expected`);
+  } else {
+    push("Curiosity", num ? `${capFirst(num)} — dan gak banyak yang sadar kenapa` : `${capFirst(topic || clause)}: jawabannya nggak seperti yang kamu kira`);
+    push("Contrarian", contrast ? `${capFirst(contrast.a)} bukan ${lowerFirst(contrast.b)} — padahal kebanyakan orang mengira sama` : `Justru kebalikannya dari yang kamu kira: ${clause}`);
+    push("Question", isQuestion ? text : `Kenapa ${clause}?`);
+    push("Emotional", `Jujur aja, ini bukan hal yang gampang: ${clause}`);
+    push("Story", `Cerita ${topic || "ini"} yang nggak disangka-sangka`);
+  }
+
+  return variants;
+}
+
+// ---------------------------------------------------------------------------
+// SEMANTIC DUPLICATE DETECTION — cluster kandidat yang maknanya mirip.
+// Cores dihitung dari kata-kata NON-stopword agar "mengubah segalanya untuk
+// saya" dan "benar-benar mengubah segalanya buat gue" dikenali kembar.
+// ---------------------------------------------------------------------------
+function contentWordsOf(sentence, lang) {
+  const stop = (HOOK_WORDS[lang] && HOOK_WORDS[lang].stopwords) || [];
+  const extraStop = ["ini", "itu", "saya", "aku", "gue", "gw", "kamu", "mereka", "kita", "kami", "my", "our", "their", "your", "his", "her", "its", "yang", "dan", "di", "ke", "dari", "untuk", "dengan", "pada", "the", "a", "an", "and", "to", "of", "in", "on", "for", "with", "at", "by", "is", "are", "was", "were"];
+  return new Set(
+    wordsOf(sentence || "").filter((w) => w.length > 2 && !stop.includes(w) && !extraStop.includes(w))
+  );
+}
+
+function clusterDuplicates(candidates, lang) {
+  const groups = [];
+  for (const c of candidates) {
+    const core = contentWordsOf(c.sentence, lang);
+    let placed = false;
+    for (const g of groups) {
+      const gCore = g.core;
+      const inter = [...core].filter((w) => gCore.has(w)).length;
+      const union = new Set([...core, ...gCore]);
+      const jac = union.size > 0 ? inter / union.size : 0;
+      // Kembar bila: jaccard tinggi, ATAU berbagi >= 2 kata isi dengan kemiripan
+      // sedang (mis. "mengubah segalanya" muncul di dua kalimat).
+      const sharedPhrase = inter >= 2 && jac >= 0.3;
+      if (jac >= 0.5 || sharedPhrase) {
+        g.items.push(c);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) groups.push({ core, items: [c] });
+  }
+  return groups.map((g) => ({
+    items: g.items,
+    best: g.items.slice().sort((a, b) => b.score - a.score || a.index - b.index)[0]
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // SELECTION — evaluasi semua kalimat, pilih hook terbaik (boleh reorder).
 // ---------------------------------------------------------------------------
 function selectHook(sentences, lang, options) {
+  const opts = options || {};
   const sents = (sentences || []).map((s) => cleanText(s)).filter(Boolean);
   if (!sents.length) {
-    return { hook: "", score: 0, type: "CURIOSITY", intent: "curiosity", confidence: 0, originalHook: "", recommendedHook: "", reordered: false, candidates: [], payoff: { confidence: 0, fulfilled: false, payoffSentence: "" }, contextIndependent: false };
+    return { hook: "", score: 0, deepScore: 0, dimensions: {}, weights: DEEP_WEIGHTS, type: "CURIOSITY", intent: "curiosity", confidence: 0, originalHook: "", recommendedHook: "", reordered: false, coldOpen: false, coldOpenStartIndex: -1, candidates: [], alternatives: [], variants: [], explanation: "", mode: "direct", payoff: { confidence: 0, fulfilled: false, payoffSentence: "" }, contextIndependent: false };
   }
 
   const candidates = [];
@@ -608,7 +1098,7 @@ function selectHook(sentences, lang, options) {
     const s = sents[i];
     const r = scoreHook(s, lang, { index: i, sentences: sents });
     if (r.excluded) {
-      candidates.push({ sentence: s, index: i, score: 0, excluded: true, reason: r.reason });
+      candidates.push({ sentence: s, index: i, score: 0, deep: 0, excluded: true, reason: r.reason });
       continue;
     }
     const type = classifyHookType(s, lang);
@@ -616,26 +1106,41 @@ function selectHook(sentences, lang, options) {
       sentence: s,
       index: i,
       score: r.score,
+      deep: r.deep,
       excluded: false,
       reason: "ok",
       type,
       intent: hookIntent(type, s, lang),
       evidence: r.evidence,
+      dimensions: r.dimensions,
       penalties: r.penalties
     });
   }
 
-  const viable = candidates.filter((c) => !c.excluded);
-  const best = viable.sort((a, b) => b.score - a.score || a.index - b.index)[0] || null;
+  // Semantic dedup: kandidat yang maknanya mirip dikelompokkan; hanya yang
+  // terbaik per cluster yang jadi pesaing (anti "Ini mengubah semuanya" x3).
+  const clusters = clusterDuplicates(candidates.filter((c) => !c.excluded), lang);
+  const unique = clusters.map((g) => g.best);
+  const rankScore = (c) => (c ? (c.deep || c.score) : 0);
+  const viable = unique.slice().sort((a, b) => rankScore(b) - rankScore(a) || a.index - b.index);
+  const best = viable[0] || null;
 
-  // Selection: pilih kandidat terbaik dengan skor layak; bila tidak ada yang
-  // layak, jatuh ke kalimat pertama (source fidelity > reorder).
-  let chosen = best && best.score >= 40 ? best : candidates.find((c) => c.index === 0) || best || candidates[0];
+  // Selection: pilih kandidat terbaik dengan skor layak. Bila tidak ada yang
+  // layak: pakai kalimat pertama HANYA bila tidak tereksklusi (pembuka/sapaan).
+  // Kalau pembuka cuma "Halo guys" → pilih kandidat viable terkuat, bukan
+  // sapaan (source fidelity > reorder, tapi isi > sapaan kosong).
+  let chosen = best && rankScore(best) >= 40 ? best : null;
+  if (!chosen) {
+    const first = candidates.find((c) => c.index === 0);
+    const topViable = viable[0] || null;
+    chosen = first && !first.excluded ? first : (topViable || first || candidates[0]);
+  }
 
   // Reorder hanya aman bila: kandidat terbaik BUKAN kalimat pertama, dan tidak
   // bergantung pada konteks sebelumnya (pronoun tanpa antecedent).
   const pronounNoAnte = chosen && chosen.penalties && chosen.penalties.pronounNoAntecedent > 0;
-  const reordered = !!best && best.index > 0 && best.score >= 40 && !pronounNoAnte && best.score > (candidates.find((c) => c.index === 0)?.score || 0) + 5;
+  const firstCandidate = candidates.find((c) => c.index === 0);
+  const reordered = !!best && best.index > 0 && rankScore(best) >= 40 && !pronounNoAnte && rankScore(best) > rankScore(firstCandidate) + 5;
 
   if (reordered) chosen = best;
 
@@ -643,26 +1148,65 @@ function selectHook(sentences, lang, options) {
   const type = classifyHookType(sentence, lang);
   const intent = hookIntent(type, sentence, lang);
   const norm = normalizeHook(sentence, lang, { stripContextPronoun: reordered });
+  // recommendedHook = hook VIRAL yang dikarang ulang dari kata/fakta sumber,
+  // BUKAN minimal-edit caption asli. hasil asli tetap tersedia di `hook`.
+  const crafted = craftViralHook(sentence, sents, lang);
 
   // Confidence: gap terhadap kandidat kedua + skor absolut.
-  const secondBest = viable.filter((c) => c !== best).sort((a, b) => b.score - a.score)[0] || null;
-  const gap = best && secondBest ? Math.max(0, best.score - secondBest.score) : (best ? 10 : 0);
-  const confidence = Math.max(0, Math.min(100, Math.round((best ? best.score : 0) * 0.5 + gap * 3 + 10)));
+  const secondBest = viable.filter((c) => c !== best).sort((a, b) => rankScore(b) - rankScore(a))[0] || null;
+  const gap = best && secondBest ? Math.max(0, rankScore(best) - rankScore(secondBest)) : (best ? 10 : 0);
+  const confidence = Math.max(0, Math.min(100, Math.round(rankScore(best) * 0.5 + gap * 3 + 10)));
 
   const payoff = validatePayoff(sentence, sents, lang);
 
   const contextIndependent = !(chosen.penalties && (chosen.penalties.deictic > 0 || chosen.penalties.pronounNoAntecedent > 0));
 
+  // MODE A/B: DIRECT bila kalimat asli sudah terkuat, EDITORIAL bila dikarang
+  // ulang. Kedua varian tetap tersedia di `alternatives`.
+  const mode = crafted.text === sentence || (norm.level === 0 && crafted.text === norm.text) ? "direct" : "editorial";
+
+  // Variation engine — strategi berbeda, source-faithful.
+  const variants = buildVariants(sentence, sents, lang);
+  const alternatives = variants.slice(0, 6);
+
+  const deepResult = {
+    dimensions: chosen.dimensions || {},
+    deep: rankScore(chosen),
+    weights: DEEP_WEIGHTS
+  };
+  const explanation = explainHook(sentence, deepResult, type, payoff, lang);
+
+  // Cold open: hook terkuat bukan pembuka clip → rekomendasi mulai di sana.
+  const coldOpen = reordered && chosen.index > 0;
+
+  // Length/platform intelligence: target kata per platform (tidak memotong
+  // kalimat; hanya memandu varian pendek).
+  const platform = opts.platform || "generic";
+  const lengthTargets = { tiktok: 6, reels: 6, shorts: 7, generic: 9 };
+  const lengthTarget = lengthTargets[platform] || 9;
+
   return {
     hook: sentence,
     score: chosen.score,
+    deepScore: rankScore(chosen),
+    dimensions: chosen.dimensions || {},
+    weights: DEEP_WEIGHTS,
     type,
     intent,
     confidence,
     originalHook: sentence,
-    recommendedHook: norm.text,
+    recommendedHook: crafted.text,
+    craftPattern: crafted.pattern,
     normalizeLevel: norm.level,
+    mode,
     reordered,
+    coldOpen,
+    coldOpenStartIndex: coldOpen ? chosen.index : -1,
+    lengthTarget,
+    platform,
+    explanation,
+    alternatives,
+    variants,
     candidates,
     payoff,
     contextIndependent
@@ -720,14 +1264,23 @@ module.exports = {
   hookIntent,
   validatePayoff,
   normalizeHook,
+  craftViralHook,
   selectHook,
   diversifyHooks,
+  DEEP_WEIGHTS,
+  dimensionScores,
+  explainHook,
+  buildVariants,
+  clusterDuplicates,
   helpers: {
     detectQuestion,
     detectParallelStructure,
     detectResultFirst,
     openerCategory,
     startsWithFiller,
-    wordsOf
+    wordsOf,
+    extractNumbers,
+    extractTopic,
+    extractContrastParts
   }
 };

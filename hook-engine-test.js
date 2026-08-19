@@ -277,6 +277,41 @@ t("17 clipmeAssemble memakai hook engine (integrasi server)", () => {
   assert(!/pickOptimizedHook/.test(serverSrc), "pickOptimizedHook masih ada");
 });
 
+// ============================================================================
+// 18-20. VIRAL CRAFT — recommendedHook harus DIKARANG ulang (bukan salinan
+//        caption asli), tetap jujur ke sumber.
+// ============================================================================
+t("18 craftViralHook menghasilkan hook berbeda dari caption asli", () => {
+  const s = "Kenapa kebanyakan orang gagal jadi kaya?";
+  const c = HE.craftViralHook(s, [s], "id");
+  assert(c.text.length > 0, "hook kosong");
+  assert(c.text.length <= 90, `hook kepanjangan: ${c.text.length}`);
+  assert(c.text.toLowerCase() !== s.toLowerCase(), `masih salinan caption: ${c.text}`);
+  assert(/gak|nggak|jarang|jawabannya|rahasia|vs|kesalahan|fakta|ternyata/.test(c.text.toLowerCase()), `tidak ada framing viral: ${c.text}`);
+});
+
+t("19 craftViralHook jujur ke sumber (tidak menambah angka baru)", () => {
+  const s = "5 kebiasaan kecil bikin saya menabung 2 juta dalam sebulan";
+  const c = HE.craftViralHook(s, [s], "id");
+  const numsInHook = c.text.match(/\d[\d.,]*/gi) || [];
+  for (const n of numsInHook) {
+    assert(s.includes(n), `angka ${n} tidak ada di sumber`);
+  }
+});
+
+t("20 selectHook.recommendedHook = hasil viral craft (bukan minimal-edit)", () => {
+  const sents = [
+    "Jadi gini teman-teman, di video ini saya mau kasih tips.",
+    "Kenapa kebanyakan orang gagal jadi kaya?",
+    "Ternyata jawabannya cuma satu kebiasaan kecil yang jarang disadari."
+  ];
+  const r = HE.selectHook(sents, "id", {});
+  const expected = HE.craftViralHook(r.hook, sents, "id").text;
+  assert(r.recommendedHook === expected, `recommendedHook="${r.recommendedHook}" != craft="${expected}"`);
+  assert(r.recommendedHook !== r.hook, "recommendedHook masih sama dengan caption asli");
+  assert(typeof r.craftPattern === "string" && r.craftPattern.length > 0, "craftPattern kosong");
+});
+
 for (const r of results) {
   console.log(`${r.status} ${r.name}${r.error ? ` :: ${r.error}` : ""}`);
 }

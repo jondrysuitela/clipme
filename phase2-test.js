@@ -71,10 +71,9 @@ async function runWaitForJobScenario({ statuses }) {
     if (tokens.includes("square")) throw new Error("square should not be canonical");
   });
 
-  enqueue("C-01 index layoutSelect has four5 (no square)", () => {
-    const opt = htmlSrc.match(/layoutSelect[\s\S]*?<\/select>/)[0];
-    if (!opt.includes('value="four5"')) throw new Error("four5 option missing");
-    if (opt.includes('value="square"')) throw new Error("square option still present");
+  enqueue("C-01 ratio picker only via segmented buttons (no layoutSelect)", () => {
+    if (/id="layoutSelect"/.test(htmlSrc)) throw new Error("layoutSelect should be removed from settings");
+    if (!/class="segmented"[^>]*>/.test(htmlSrc)) throw new Error("segmented ratio buttons missing");
   });
 
   enqueue("C-01 backend ratios resolve to same three tokens", () => {
