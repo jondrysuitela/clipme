@@ -3481,7 +3481,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
       projectId: payload.projectId, clipId: payload.clipId, start: payload.start, end: payload.end,
       audioPath: audioAnalysisPath, videoPath: videoFilePath, pythonPath: VENV_PYTHON,
       speakerScript: SPEAKER_DETECT_PY, faceScript: FACE_DETECT_PY, ffmpegPath: FFMPEG, modelsRoot: MODELS_ROOT,
-      sampleFps: 1, minSegmentMs: 300, noiseDb: -35,
+      sampleFps: 3, minSegmentMs: 300, noiseDb: -35,
       enableFaceTracking: payload.faceTrack, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
       targetAspect: resolveRatio(payload.ratio),
       faceStartSeconds: analysisSourceIsClipSection ? 0 : originalStart,
@@ -5302,7 +5302,7 @@ async function handleLocalAIAnalyze(req, res) {
 
   const manifest = readProjectManifest(projectDir);
   const clip = clipPayloadToClip(payload);
-  const sampleFps = Math.max(1, Math.min(5, Number(payload.sampleFps || 1)));
+  const sampleFps = Math.max(1, Math.min(5, Number(payload.sampleFps || 3)));
   const speakerCutEnabled = !!payload.speakerCut;
   const targetAspect = Math.max(0.1, Math.min(4, Number(payload.targetAspect || 9 / 16)));
 
@@ -5404,7 +5404,13 @@ async function handleLocalAIDownloadModel(req, res) {
     sendJson(res, 400, { error: "Python venv tidak ditemukan." });
     return;
   }
-  const out = await localAIModule.runPython(pythonPath, modelKind === "speaker" ? SPEAKER_DETECT_PY : FACE_DETECT_PY, ["analyze"], 60_000)
+  // YuNet/Haar diunduh hanya lewat tombol eksplisit ini (requirement 15).
+  // Speaker-light built-in tidak perlu unduhan apa pun.
+  if (modelKind === "speaker") {
+    sendJson(res, 200, { kind: modelKind, status: "builtin", output: "speaker-light sudah tersedia (tanpa unduhan)." });
+    return;
+  }
+  const out = await localAIModule.runPython(pythonPath, FACE_DETECT_PY, ["yunet-download", "--models-root", MODELS_ROOT], 60_000)
     .catch(e => ({ error: e.message || String(e) }));
   sendJson(res, 200, {
     kind: modelKind,
@@ -5573,7 +5579,7 @@ async function handleSttModels(req, res) {
 
 // Only these exact web assets are served from the project root.
 // Media (upload/preview/output) is served through dedicated /media/, /sections/, /outputs/ routes.
-const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/build/icon.png"]);
+const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/clipme-active-speaker.js", "/build/icon.png"]);
 
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);

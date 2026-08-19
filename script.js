@@ -644,8 +644,29 @@ function selectClip(clip) {
   state.activeClip = clip;
   state.liveActive = false;
   state.captionSelected = -1;
-  if (state.captionLoadedFor !== captionTimelineKey()) {
+  // Sinkronkan preview dengan timeline: kalau clip ini sudah punya segmen
+  // caption di cache (captionByClip), pulihkan liveSegments + overlay langsung
+  // supaya preview tidak tertinggal bahasa lama (mis. Inggris) saat timeline
+  // sudah berubah (Indonesia). Kalau belum ada cache, kosongkan segmen live
+  // agar caption clip sebelumnya tidak bocor ke clip baru.
+  const cachedSegments = state.captionByClip[captionTimelineKey()];
+  if (Array.isArray(cachedSegments) && cachedSegments.length) {
+    state.captionSegments = cachedSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+    state.liveSegments = state.captionSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+    state.captionLoadedFor = captionTimelineKey();
+    state.liveOffset = state.youtubeUrl ? 0 : (Number(clip.start) || 0);
+    captionTimelinePanel.style.display = "block";
+    loadCaptionTimeline(state.liveSegments);
+    // Static box juga ikut bahasa segmen (bukan clip.caption lama yang asing).
+    const combined = state.captionSegments.map((s) => s.text).join(" ").trim().slice(0, 155);
+    if (combined) {
+      captionBox.textContent = `"${combined}"`;
+      captionInput.value = combined;
+    }
+  } else {
     state.captionSegments = [];
+    state.liveSegments = [];
+    state.captionLoadedFor = captionTimelineKey();
     captionTimelinePanel.style.display = "none";
   }
   const translateFromSel = $("#translateFrom");
@@ -653,10 +674,15 @@ function selectClip(clip) {
   liveCaption.innerHTML = "";
   liveCaption.style.display = "none";
   previewTitle.textContent = `Clip ${String(clip.id).padStart(2, "0")} - ${clip.title}`;
-  captionBox.textContent = `"${clip.caption}"`;
+  // Kalau segmen cache sudah tersedia (bahasa target), JANGAN timpa static
+  // box dengan clip.caption lama (bahasa asing). clip.caption hanya dipakai
+  // saat clip belum punya segmen caption.
+  if (!(Array.isArray(cachedSegments) && cachedSegments.length)) {
+    captionBox.textContent = `"${clip.caption}"`;
+    captionInput.value = clip.caption;
+  }
   renderStaticCaption();
   hookInput.value = clip.hook;
-  captionInput.value = clip.caption;
   clipTime.textContent = clipRange(clip);
   $("#clipScore").textContent = clip.score != null && !clip.placeholder ? `${clip.score}%` : "--";
   $("#clipDuration").textContent = clipRange(clip);
@@ -920,7 +946,7 @@ async function analyzeSpeakerForClip() {
         clipId: requestedClip.id,
         start: requestedClip.start,
         end: requestedClip.end,
-        sampleFps: 1,
+        sampleFps: 3,
         minSegmentMs: 300,
         noiseDb: -35,
         speakerCut: true,
@@ -956,14 +982,24 @@ async function analyzeSpeakerForClip() {
     dbgHtml += `<b>Face frames:</b> ${faceCount}<br>`;
 
     if (associationCount > 0) {
-      dbgHtml += `<br><b>CSS Cut-to-Face preview aktif (${associationCount} cuts):</b><br>`;
+      dbgHtml += `<br><b>CSS Cut-to-Face preview aktif (${associationCount} cuts, max 48):</b><br>`;
       data.associations.forEach((a) => {
         const s = (a.start_ms / 1000).toFixed(1);
         const e = (a.end_ms / 1000).toFixed(1);
         const confidence = Number(a.face && a.face.confidence);
         const confidenceText = Number.isFinite(confidence) ? confidence.toFixed(2) : "-";
-        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id || "speaker"} → Face {x:${a.face?.x ?? "-"}, y:${a.face?.y ?? "-"}, conf:${confidenceText}}</div>`;
+        const trackId = a.track_id != null ? a.track_id : (a.face && a.face.track_id != null ? a.face.track_id : null);
+        const trackText = trackId != null && trackId >= 0 ? `track #${trackId}` : "no-track";
+        const mouth = Number(a.mouth_motion != null ? a.mouth_motion : (a.face && a.face.mouth_motion));
+        const mouthText = Number.isFinite(mouth) && mouth > 0 ? mouth.toFixed(2) : "-";
+        dbgHtml += `<div style="font-family: monospace; font-size: 9px; padding: 2px 0;">[${s}s - ${e}s] ${a.speaker_id || "speaker"} → Face {x:${a.face?.x ?? "-"}, y:${a.face?.y ?? "-"}, conf:${confidenceText}, ${trackText}, mouth:${mouthText}}</div>`;
       });
+      // Active-track + mouth-motion summary (requirement 13)
+      const tracked = data.associations.filter((a) => a.track_id != null && a.track_id >= 0);
+      const avgMouth = tracked.length
+        ? (tracked.reduce((sum, a) => sum + (Number(a.mouth_motion) || 0), 0) / tracked.length)
+        : 0;
+      dbgHtml += `<br><b>Active track:</b> ${tracked.length ? `${tracked.length} association(s) dengan track_id` : "n/a"} · <b>Avg mouth-motion:</b> ${avgMouth > 0 ? avgMouth.toFixed(2) : "n/a"}`;
     } else {
       dbgHtml += "<br><b>Cut-to-Face:</b> wajah aktif belum ditemukan; preview tetap center-crop.";
     }
@@ -1430,6 +1466,14 @@ function playSelectedClip() {
   window.clearInterval(state.loopTimer);
   previewVideo.currentTime = state.noDownload ? 0 : state.activeClip.start;
   previewVideo.play();
+
+  // Pastikan overlay live caption aktif saat play — selectClip mematikan
+  // liveActive, jadi tanpa ini preview tidak pernah menampilkan segmen
+  // (mis. hasil terjemahan) walau timeline sudah berubah bahasa.
+  if (!state.liveActive && state.liveSegments && state.liveSegments.length && $("#captionStyleSelect").value !== "off") {
+    state.liveActive = true;
+  }
+  updateLiveCaption();
 
   state.loopTimer = window.setInterval(() => {
     const stopAt = state.noDownload ? state.activeClip.end - state.activeClip.start : state.activeClip.end;
@@ -2161,6 +2205,17 @@ function exportCaptionSrt() {
   showToast(`SRT diexport: ${name}`);
 }
 
+function getSpeakerColor(speakerId) {
+  // Palet stabil per speaker — updateLiveCaption memanggil fungsi ini untuk
+  // mewarnai teks per speaker_id; sebelumnya undefined dan membuat overlay
+  // caption crash (ReferenceError) sehingga preview tidak pernah update.
+  const palette = ["#FFD700", "#00E5FF", "#FF6B6B", "#7CFF6B", "#C77DFF", "#FF9E5E", "#5E9EFF", "#FF5EF0"];
+  const id = String(speakerId || "");
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return palette[hash % palette.length];
+}
+
 function updateLiveCaption() {
   if (!state.liveActive || !state.liveSegments.length) return;
   const t = previewVideo.currentTime - state.liveOffset;
@@ -2254,6 +2309,14 @@ function loadCaptionTimeline(segments) {
   state.captionSegments = normalizeCaptionSegments(segments, 0, dur);
   state.captionSelected = -1;
   state.captionLoadedFor = captionTimelineKey();
+  // Sinkronkan liveSegments dengan timeline — sebelumnya jalur restore
+  // (captionByClip -> loadCaptionTimeline) tidak menyentuh liveSegments,
+  // sehingga overlay preview memakai data basi (bahasa lama) padahal
+  // timeline sudah berubah (mis. hasil terjemahan).
+  state.liveSegments = state.captionSegments.map((s) => ({
+    ...s,
+    words: Array.isArray(s.words) ? s.words.slice() : []
+  }));
   state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({
     ...s,
     words: Array.isArray(s.words) ? s.words.slice() : []

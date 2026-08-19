@@ -54,6 +54,58 @@ http://localhost:4173
 - **Terjemahkan caption (offline)**: tombol `Terjemahkan` di panel Caption Timeline menerjemahkan semua segmen ke bahasa pilihan (Indonesia/English) via Argos Translate lokal — tanpa API key. Auto-caption juga diterjemahkan otomatis ke bahasa pilihan bila bahasa asli video berbeda.
 - **Pilih model STT**: dropdown `Model STT (offline)` di tab Settings menampilkan model Faster-Whisper yang tersedia di server.
 
+## Cut-to-Face Mode Lite (active-speaker tracking offline)
+
+Mode ini mengikuti wajah **speaker aktif** secara otomatis untuk crop dinamis
+(Speaker Cut). Seluruh pipeline gratis, offline, dan open-source:
+
+- **OpenCV FaceDetectorYN (YuNet)** — API resmi `cv2.FaceDetectorYN.create`
+  dari OpenCV Zoo (lisensi **MIT**), menggantikan `readNetFromONNX` manual.
+- **Haar cascade profile** (`haarcascade_profileface.xml`, lisensi **Apache-2.0**)
+  membantu mendeteksi wajah menyamping kiri/kanan yang terlewat YuNet.
+- **Adaptive face sampling**: default **3 FPS**, maksimal **5 FPS**.
+- **Persistent `track_id`** via IoU + centroid tracking — tanpa face
+  recognition/identity embedding.
+- **Mouth-motion scoring**: normalized mouth ROI pixel difference + Farneback
+  optical flow.
+- **Pemilihan active speaker** berdasarkan mouth motion, detector confidence,
+  track confidence, speaker timeline, dan kontinuitas track.
+- **Hysteresis minimal dua frame** agar kamera tidak pindah karena satu frame
+  noise.
+- **Hold ~1,1 detik** ketika deteksi wajah aktif hilang sementara.
+- **Look-room**: framing bergeser ke arah pandangan wajah.
+- Association di-compact ke **maksimal 48** agar command FFmpeg tidak melewati
+  batas panjang Windows (`CreateProcess` ~8191 karakter).
+- Preview CSS Cut-to-Face dan dynamic crop FFmpeg memakai **association
+  timeline yang sama**.
+- UI **Analyze Speaker Cut** menampilkan `track_id` aktif dan metadata
+  mouth-motion per association.
+- Cache lama (schema v1: hanya `x, y, w, h, confidence` tanpa `track_id`)
+  tetap kompatibel.
+
+### Kebijakan model & offline (requirement pipeline)
+
+- **Tidak** menggunakan SCRFD, InsightFace, TalkNet, cloud API, atau model
+  berlisensi komersial yang belum jelas.
+- Analisis video **tidak melakukan request jaringan apa pun**.
+- YuNet diunduh **hanya** lewat tombol **"Download Models"** (subcommand
+  `yunet-download`), bukan otomatis saat analisis.
+- Metadata lisensi model disimpan di `models/MODELS-METADATA.json` setelah
+  unduhan.
+
+### File terkait
+
+- `clipme-face-detect.py` — deteksi + tracking + mouth motion (backend Python).
+- `clipme-active-speaker.js` — engine pemilihan active speaker + look-room +
+  kompaksi association (browser & Node).
+- `clipme-localai.js` — integrasi provider, asosiasi speaker↔wajah, filter FFmpeg.
+- `clipme-cut-to-face.js` — transform CSS preview.
+- `mode-lite-test.js` — verifikasi Mode Lite JS.
+- `test_face_lite.py` — verifikasi Python (tanpa cv2).
+
+Keduanya (`clipme-face-detect.py` & `clipme-speaker-detect.py`) sudah masuk
+`asarUnpack` agar dapat dieksekusi langsung di Electron packaged app.
+
 ## Catatan
 
 Gunakan hanya video yang memang boleh kamu download/proses. Jika video tidak punya subtitle/manual caption/auto caption dan tidak ada STT provider aktif, aplikasi tetap membuat clip dari durasi video sebagai fallback.
