@@ -2989,6 +2989,7 @@ function renderIntel(a) {
     openingMeta.appendChild(meta);
   }
   renderIntelDuration(a);
+  renderDeepIntel(a);
   $("#intelOriginalHook").textContent = a.originalHook || "--";
   $("#intelRecommendedHook").textContent = a.recommendedHook || "--";
   $("#intelKeyMessage").textContent = a.keyMessage || "--";
@@ -3125,6 +3126,113 @@ function renderIntelDuration(a) {
     $("#intelOpeningMeta").appendChild(chip);
   }
 }
+
+function renderDeepIntel(a) {
+  const titleEl = $("#intelDeepTitle");
+  const hasTitle = a.deepTitle && String(a.deepTitle).trim() !== "";
+  titleEl.textContent = hasTitle ? a.deepTitle : "--";
+  titleEl.classList.toggle("intel-block--empty", !hasTitle);
+
+  const metaEl = $("#intelDeepTitleMeta");
+  metaEl.innerHTML = "";
+  if (hasTitle) {
+    const score = Number(a.deepTitleScore);
+    if (Number.isFinite(score) && score > 0) {
+      const b = document.createElement("span");
+      b.className = "intel-badge intel-badge--active";
+      b.textContent = `Title score ${Math.round(score)}/100`;
+      metaEl.appendChild(b);
+    }
+    if (a.deepTopic) {
+      const b = document.createElement("span");
+      b.className = "intel-badge";
+      b.textContent = `Topik: ${a.deepTopic.slice(0, 40)}`;
+      metaEl.appendChild(b);
+    }
+    if (Array.isArray(a.deepNumbers) && a.deepNumbers.length) {
+      const b = document.createElement("span");
+      b.className = "intel-badge";
+      b.textContent = `Angka: ${a.deepNumbers.map((n) => n.full).join(", ")}`;
+      metaEl.appendChild(b);
+    }
+    if (a.deepOpenQuestion) {
+      const b = document.createElement("span");
+      b.className = "intel-badge";
+      b.textContent = `Pertanyaan: ${a.deepOpenQuestion.slice(0, 48)}`;
+      metaEl.appendChild(b);
+    }
+  }
+  $("#intelDeepTitleReason").textContent = a.deepTitleReason || "";
+
+  $("#intelDeepHook").textContent = a.deepHook || "--";
+  $("#intelDeepHookReason").textContent = a.deepHookReason || "";
+
+  const altEl = $("#intelDeepAlternatives");
+  altEl.innerHTML = "";
+  if (Array.isArray(a.deepTitleAlternatives) && a.deepTitleAlternatives.length) {
+    a.deepTitleAlternatives.forEach((alt) => {
+      const row = document.createElement("div");
+      row.className = "intel-alt";
+      const text = document.createElement("span");
+      text.className = "intel-alt-text";
+      text.textContent = alt.text;
+      const useBtn = document.createElement("button");
+      useBtn.type = "button";
+      useBtn.className = "ghost-button compact";
+      useBtn.textContent = "Gunakan";
+      useBtn.addEventListener("click", () => {
+        if (state.activeClip) state.activeClip.hook = alt.text;
+        hookInput.value = alt.text;
+        $("#intelDeepTitle").textContent = alt.text;
+        showToast("Judul alternatif diterapkan sebagai hook.");
+      });
+      row.appendChild(text);
+      row.appendChild(useBtn);
+      altEl.appendChild(row);
+    });
+  } else {
+    altEl.textContent = "--";
+  }
+
+  const thinkEl = $("#intelDeepThinking");
+  thinkEl.innerHTML = "";
+  if (Array.isArray(a.deepThinking) && a.deepThinking.length) {
+    for (const step of a.deepThinking) {
+      const row = document.createElement("div");
+      row.className = "intel-dim";
+      row.innerHTML = "";
+      const name = document.createElement("span");
+      name.className = "intel-dim-name";
+      name.textContent = (step.step || "Langkah") + ":";
+      const detail = document.createElement("span");
+      detail.className = "intel-dim-val";
+      detail.textContent = step.detail || "";
+      row.appendChild(name);
+      row.appendChild(detail);
+      thinkEl.appendChild(row);
+    }
+  } else {
+    thinkEl.textContent = "--";
+  }
+}
+
+$("#intelUseTitle").addEventListener("click", () => {
+  const value = $("#intelDeepTitle").textContent;
+  if (value && value !== "--") {
+    hookInput.value = value;
+    if (state.activeClip) { state.activeClip.hook = value; state.activeClip.title = value; }
+    showToast("Judul rekomendasi dipakai sebagai judul & hook.");
+  }
+});
+
+$("#intelUseDeepHook").addEventListener("click", () => {
+  const value = $("#intelDeepHook").textContent;
+  if (value && value !== "--") {
+    hookInput.value = value;
+    if (state.activeClip) state.activeClip.hook = value;
+    showToast("Deep hook dipakai sebagai hook.");
+  }
+});
 
 $("#exportButton").addEventListener("click", exportSelectedClip);
 

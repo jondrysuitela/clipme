@@ -138,6 +138,21 @@ function loadClipmeHookEngine() {
 
 const hookEngineModule = loadClipmeHookEngine();
 
+const CLIPME_DEEP_TITLE_ENGINE_MODULE = path.join(ROOT, "clipme-deep-title-engine.js");
+
+function loadClipmeDeepTitleEngine() {
+  try {
+    if (fs.existsSync(CLIPME_DEEP_TITLE_ENGINE_MODULE)) {
+      return require(CLIPME_DEEP_TITLE_ENGINE_MODULE);
+    }
+  } catch (e) {
+    console.error("Gagal memuat clipme-deep-title-engine.js:", e.message);
+  }
+  return null;
+}
+
+const deepTitleEngineModule = loadClipmeDeepTitleEngine();
+
 const CLIPME_OPENING_ENGINE_MODULE = path.join(ROOT, "clipme-opening-engine.js");
 
 function loadClipmeOpeningEngine() {
@@ -469,6 +484,21 @@ function normalizeLlmAnalysis(raw, fallbackAnalysis) {
       payoff: String(g("sourceEvidence", null) ? (raw && raw.sourceEvidence && raw.sourceEvidence.payoff || fallbackAnalysis.sourceEvidence.payoff) : fallbackAnalysis.sourceEvidence.payoff)
     },
     qualityGate,
+    // Deep title/hook SELALU dari engine deterministik (hard gate source
+    // fidelity) — schema LLM tidak memuat field ini.
+    deepTitle: String(fallbackAnalysis.deepTitle || ""),
+    deepTitleScore: fallbackAnalysis.deepTitleScore != null ? fallbackAnalysis.deepTitleScore : 0,
+    deepTitleReason: String(fallbackAnalysis.deepTitleReason || ""),
+    deepTitleAlternatives: Array.isArray(fallbackAnalysis.deepTitleAlternatives) ? fallbackAnalysis.deepTitleAlternatives : [],
+    deepHook: String(fallbackAnalysis.deepHook || ""),
+    deepHookReason: String(fallbackAnalysis.deepHookReason || ""),
+    deepHookAlternatives: Array.isArray(fallbackAnalysis.deepHookAlternatives) ? fallbackAnalysis.deepHookAlternatives : [],
+    deepThinking: Array.isArray(fallbackAnalysis.deepThinking) ? fallbackAnalysis.deepThinking : [],
+    deepTopic: String(fallbackAnalysis.deepTopic || ""),
+    deepKeyIdea: String(fallbackAnalysis.deepKeyIdea || ""),
+    deepNumbers: Array.isArray(fallbackAnalysis.deepNumbers) ? fallbackAnalysis.deepNumbers : [],
+    deepOpenQuestion: String(fallbackAnalysis.deepOpenQuestion || ""),
+    deepEvidence: fallbackAnalysis.deepEvidence || null,
     llmGenerated: true
   };
 }
@@ -1738,6 +1768,18 @@ function clipmeAssemble(sentences, segments, lang, targetLength, options) {
   const criteria = clipmeCriterionScores({ sentences, fullText, hits, starter, starterScore, lang });
   const contextWarning = clipmeContextWarning(sentences, lang);
   const criterionPenalty = clipmeContextPenalty(sentences, lang);
+
+  // ---- DEEP TITLE & HOOK ENGINE ----
+  // Sintesis judul/hook lintas kalimat (bukan kutip verbatim). Deterministik,
+  // selalu grounded ke transkrip. Tidak mengubah hook/opening di atas.
+  let deep = null;
+  if (deepTitleEngineModule && typeof deepTitleEngineModule.analyzeDeepTitle === "function") {
+    try {
+      deep = deepTitleEngineModule.analyzeDeepTitle(sentences, segments, lang, {});
+    } catch (e) {
+      deep = null;
+    }
+  }
   const hasPayoff = payoffInfo.fulfilled || hits.payoff >= 1 || sentences.length >= 4;
   const hookFulfilled = payoffInfo.fulfilled || clipmeHookFulfilled(fullText, criteria.hook);
 
@@ -1819,7 +1861,20 @@ function clipmeAssemble(sentences, segments, lang, targetLength, options) {
     storyStructure: clipmeStoryStructure(sentences, hits),
     contextWarning,
     quoteLine: quote ? quote.sentence : "",
-    qualityGate
+    qualityGate,
+    deepTitle: deep && deep.title ? deep.title : "",
+    deepTitleScore: deep ? deep.titleScore : 0,
+    deepTitleReason: deep ? deep.titleReason : "",
+    deepTitleAlternatives: deep && Array.isArray(deep.titleAlternatives) ? deep.titleAlternatives : [],
+    deepHook: deep && deep.deepHook ? deep.deepHook : "",
+    deepHookReason: deep ? deep.deepHookReason : "",
+    deepHookAlternatives: deep && Array.isArray(deep.deepHookAlternatives) ? deep.deepHookAlternatives : [],
+    deepThinking: deep && Array.isArray(deep.thinking) ? deep.thinking : [],
+    deepTopic: deep ? deep.topic : "",
+    deepKeyIdea: deep ? deep.keyIdea : "",
+    deepNumbers: deep && Array.isArray(deep.numbers) ? deep.numbers : [],
+    deepOpenQuestion: deep ? deep.openQuestion : "",
+    deepEvidence: deep && deep.evidence ? deep.evidence : null
   };
 }
 
@@ -1976,7 +2031,12 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
 
       return {
         id: index + 1,
-        title: CLIPME_TITLES[index] || CLIPME_TITLES[CLIPME_TITLES.length - 1],
+        title: analysis.deepTitle || CLIPME_TITLES[index] || CLIPME_TITLES[CLIPME_TITLES.length - 1],
+        deepTitle: analysis.deepTitle || "",
+        deepTitleReason: analysis.deepTitleReason || "",
+        deepTitleAlternatives: analysis.deepTitleAlternatives || [],
+        deepHook: analysis.deepHook || "",
+        deepThinking: analysis.deepThinking || [],
         start: clipStart,
         end: clipEnd,
         score: analysis.score,
@@ -2422,7 +2482,7 @@ function resolveRatio(value) {
   return isSupportedRatio(value) ? (value || "portrait") : null;
 }
 
-function buildVideoFilter(payload, contentCrop = null) {
+function buildVideoFilter(payload, contentCrop = null, opts = {}) {
   const ratio = payload.ratio;
   const requested = resolveRatio(ratio);
   if (!requested) throw new Error(`Rasio tidak didukung: ${ratio}`);
@@ -2434,20 +2494,36 @@ function buildVideoFilter(payload, contentCrop = null) {
   const crop = `crop=${size.width}:${size.height}`;
 
   const pre = [...debar, scale, crop];
+  // Sharpen when the source is smaller than the target (upscaling softens the
+  // picture). Applied last so it hits the final frame; skipped on native/sharp
+  // sources to avoid halos. Amount 0.5 is mild, threshold 0 keeps flat areas.
+  const unsharp = opts.sharpen ? "unsharp=5:5:0.5:5:5:0.0" : "";
+  if (unsharp) pre.push(unsharp);
 
-  return { scale: pre[0], crop: pre[pre.length - 1], pre, size, ratio: requested };
+  return { scale, crop, unsharp, debar, pre, size, ratio: requested };
+}
+
+// Rasio upscale linier source -> target (1 = pas, >1 = diperbesar).
+function upscaleFactor(probe, size) {
+  if (!probe || !probe.width || !probe.height || !size) return 1;
+  return Math.max(size.width / probe.width, size.height / probe.height);
+}
+
+// Hanya sharpening bila source nyata-nyata lebih kecil dari target (upscale
+// > 1.2x). Sumber sudah tajam tidak perlu di-unsharp (hindari halo/over-sharp).
+function shouldSharpen(probe, size) {
+  return upscaleFactor(probe, size) > 1.2;
 }
 
 // Compare the source resolution against the export target size. The pipeline
 // always scales/crops to the target (e.g. 1080x1920 portrait), so a much smaller
 // source gets upscaled hard and the export looks blurry. Warn only when the
 // upscale factor is > 2x — 1080p->1080x1920 portrait (~1.8x) is the normal case.
-async function buildResolutionWarnings(sourcePath, targetSize) {
+function buildResolutionWarnings(probe, targetSize) {
   try {
-    const probe = await probeVideo(sourcePath);
     if (!probe || !probe.width || !probe.height) return [];
     const { width: sw, height: sh } = probe;
-    const upscale = Math.max(targetSize.width / sw, targetSize.height / sh);
+    const upscale = upscaleFactor(probe, targetSize);
     if (upscale > 2) {
       return [(
         `Sumber video hanya ${sw}x${sh} — di-upscale ${upscale.toFixed(1)}x ke ` +
@@ -3795,9 +3871,11 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }
 
   // Detect & remove baked-in black bars from the source window before cropping.
+  const srcProbe = await probeVideo(sourcePath).catch(() => null);
+  const targetSize = RATIO_PRESETS[resolveRatio(payload.ratio)];
   const contentCrop = await detectContentCrop(sourcePath, start, cutDuration, children);
-  const filterParts = buildVideoFilter(payload, contentCrop);
-  const warnings = await buildResolutionWarnings(sourcePath, filterParts.size);
+  const filterParts = buildVideoFilter(payload, contentCrop, { sharpen: shouldSharpen(srcProbe, targetSize) });
+  const warnings = buildResolutionWarnings(srcProbe, filterParts.size);
   const segments = payload.captionStyle !== "off"
     ? resolveExportSegments(payload, projectDir, manifest)
     : [];
@@ -3829,8 +3907,9 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   if (speakerCutFilter) {
     // Face coordinates are measured in the original source coordinate space,
     // therefore this crop must run before any black-bar/content crop.
-    filterParts.pre = [speakerCutFilter, filterParts.scale, filterParts.crop];
+    filterParts.pre = [speakerCutFilter, ...filterParts.debar, filterParts.scale, filterParts.crop];
   }
+  if (filterParts.unsharp) filterParts.pre.push(filterParts.unsharp);
   const preFilter = filterParts.pre.join(",");
 
   if (payload.captionStyle === "off") {
@@ -3951,7 +4030,7 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
     const section = `*${start}-${end}`;
     const format = options.preview
       ? "bv*[height<=360][vcodec^=avc1]+ba/b[height<=360]/best[height<=360]/best"
-      : `bv*[height<=${heightCap}][vcodec^=avc1]+ba/b[height<=${heightCap}]/best[height<=${heightCap}]/best`;
+      : `bv*[height<=${heightCap}]+ba/bv*[height<=${heightCap}][vcodec^=avc1]+ba/b[height<=${heightCap}]/best[height<=${heightCap}]/best`;
 
     const ytdlpBase = [
       "--no-playlist",

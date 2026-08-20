@@ -740,6 +740,20 @@ label {
   flex-wrap: wrap;
 }
 
+.intel-block--title {
+  font-size: 16px;
+  font-weight: 700;
+  border-color: var(--accent);
+  background: #12161b;
+  color: var(--accent);
+}
+
+.intel-block--empty {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
 .intel-dur-main {
   font-size: 20px;
   font-weight: 700;
@@ -840,6 +854,16 @@ label {
   border-radius: 5px;
   border: 1px solid var(--line);
   background: #101417;
+}
+
+.intel-dim-name {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.intel-dim-val {
+  color: var(--text);
 }
 
 .intel-dim b {
