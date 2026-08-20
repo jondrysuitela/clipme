@@ -31,6 +31,7 @@
       "server.js",
       "clipme-prompt.js",
       "clipme-hook-engine.js",
+      "clipme-deep-title-engine.js",
       "clipme-opening-engine.js",
       "clipme-duration-engine.js",
       "clipme-caption-engine.js",
