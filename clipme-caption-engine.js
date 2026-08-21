@@ -443,9 +443,14 @@ function AutoCaptionEngine(options = {}) {
 
   // Main LLM integration
   async function processWithLLM(transcript, style, fillerMode, speaker, language) {
-    if (!OPENAI_API_KEY) {
+    // Provider dapat dikonfigurasi: default OpenAI. Untuk DeepSeek V4 Flash set
+    // CLIPFORGE_AI_BASE_URL=https://api.deepseek.com & CLIPFORGE_AI_MODEL=deepseek-v4-flash.
+    const apiKey = process.env.CLIPFORGE_AI_API_KEY || OPENAI_API_KEY;
+    if (!apiKey) {
       throw new Error('OPENAI_API_KEY tidak tersedia');
     }
+    const baseUrl = (process.env.CLIPFORGE_AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const model = process.env.CLIPFORGE_AI_MODEL || OPENAI_MODEL;
     
     const systemPrompt = loadClipmeCaptionPrompt();
     if (!systemPrompt) {
@@ -454,14 +459,14 @@ function AutoCaptionEngine(options = {}) {
     
     const userPrompt = buildUserPrompt(transcript, style, fillerMode, speaker, language);
     
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -473,25 +478,27 @@ function AutoCaptionEngine(options = {}) {
     
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI API error: ${error}`);
+      throw new Error(`AI API error: ${error}`);
     }
     
     const data = await response.json();
     const content = data.choices[0]?.message?.content;
     
     if (!content) {
-      throw new Error('OpenAI tidak mengembalikan konten');
+      throw new Error('Model tidak mengembalikan konten');
     }
     
     try {
-      const parsedContent = JSON.parse(content);
+      // FIX: toleransi fenced code block (```json ... ```) di respons model.
+      const cleaned = String(content).replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+      const parsedContent = JSON.parse(cleaned);
       return {
         segments: parsedContent.segments || [],
         provider: 'llm',
         confidence: parsedContent.confidence || 85
       };
     } catch (parseError) {
-      throw new Error('Gagal memparsing respons OpenAI: ' + parseError.message);
+      throw new Error('Gagal memparsing respons AI: ' + parseError.message);
     }
   }
 

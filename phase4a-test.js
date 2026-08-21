@@ -89,7 +89,10 @@ for (const [label, input, expected] of durationCases) {
 
   await t("M-02 handleUpload uses targetClipLength for duration", () => {
     const up = serverSrc.slice(serverSrc.indexOf("async function handleUpload"), serverSrc.indexOf("function isSupportedVideoUrl"));
-    if (!/targetClipLength\(parsed\.parts\.duration\?\.text\)/.test(up)) throw new Error("duration not routed through targetClipLength");
+    if (!/targetClipLength\(/.test(up)) throw new Error("duration not routed through targetClipLength");
+    if (!/parsed\.parts\.durationMode\?\.text/.test(up) || !/parsed\.parts\.fixedDuration\?\.text/.test(up)) {
+      throw new Error("durationMode/fixedDuration not honored on upload");
+    }
   });
 
   // ---------- M-03 serveStatic ----------

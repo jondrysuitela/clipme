@@ -33,7 +33,7 @@ function serverFn(name) {
 }
 
 const sandbox = new Function(
-  ["cleanCaptionText", "parseJson3Transcript", "flattenTranscriptWords"].map((n) => {
+  ["cleanCaptionText", "parseJson3Transcript", "flattenTranscriptWords", "wordsAlignWithSegmentText"].map((n) => {
     const { params, body } = serverFn(n);
     return `function ${n}(${params}) { ${body} }`;
   }).join("\n") +

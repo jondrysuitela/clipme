@@ -845,12 +845,12 @@ async function loadEngineCompute() {
     const rt = info.runtime || {};
 
     const mode = String(rt.mode || accel.mode || "AUTO").toUpperCase();
-    set("engineRuntime", mode, mode === "GPU" ? "busy" : "ok", rt.reason || "");
+    setEngineVal("engineRuntime", mode, mode === "GPU" ? "busy" : "ok", rt.reason || "");
 
     const cpuLabel = cpu.model
       ? `${cpu.model}${cpu.cores ? ` · ${cpu.cores} core` : ""}`.slice(0, 42)
       : "✓ Available";
-    set("engineCpu", cpuLabel, "ok", `CPU: ${cpu.model || "?"} (${cpu.cores || "?"} core)`);
+    setEngineVal("engineCpu", cpuLabel, "ok", `CPU: ${cpu.model || "?"} (${cpu.cores || "?"} core)`);
 
     if (gpu.present) {
       const gpuLabel = `${gpu.name}${gpu.vramGb ? ` · ${gpu.vramGb} GB` : ""}`.slice(0, 42);
@@ -858,9 +858,9 @@ async function loadEngineCompute() {
       const gpuTitle = cuda.available
         ? `${gpu.name} — CUDA ✓ (${cuda.deviceCount} device)`
         : `${gpu.name} terdeteksi, tapi Python runtime tidak punya CUDA — fallback CPU`;
-      set("engineGpu", gpuLabel, gpuCls, gpuTitle);
+      setEngineVal("engineGpu", gpuLabel, gpuCls, gpuTitle);
     } else {
-      set("engineGpu", "— Not detected", "idle", "Tidak ada GPU terdeteksi — mode CPU");
+      setEngineVal("engineGpu", "— Not detected", "idle", "Tidak ada GPU terdeteksi — mode CPU");
     }
 
     const accelParts = [];
@@ -868,12 +868,12 @@ async function loadEngineCompute() {
     else if (String(rt.sttDevice || "") === "auto") accelParts.push("STT: AUTO");
     else accelParts.push("STT: CPU");
     accelParts.push(`ENC: ${nvenc.available ? "NVENC" : "CPU"}`);
-    set("engineAccel", accelParts.join(" · "), rt.gpuUsed ? "busy" : "ok", rt.reason || accel.reason || "");
+    setEngineVal("engineAccel", accelParts.join(" · "), rt.gpuUsed ? "busy" : "ok", rt.reason || accel.reason || "");
   } catch {
-    set("engineRuntime", "OFFLINE", "idle");
-    set("engineCpu", "—", "idle");
-    set("engineGpu", "—", "idle");
-    set("engineAccel", "—", "idle");
+    setEngineVal("engineRuntime", "OFFLINE", "idle");
+    setEngineVal("engineCpu", "—", "idle");
+    setEngineVal("engineGpu", "—", "idle");
+    setEngineVal("engineAccel", "—", "idle");
   }
 }
 
@@ -1300,6 +1300,9 @@ function loadProject(data) {
   $("#fileMeta").textContent = `${formatTime(data.probe.duration)} - ${data.transcriptStatus || "No transcript"} - ${data.probe.codec}`;
   uploadStatus.textContent = `${clips.length} clips ready`;
 
+  // FIX: jangan duplikasi entri library saat project yang sudah ada dibuka lagi,
+  // dan pastikan tombol generate aktif (bisa saja ter-disable dari alur sebelumnya).
+  state.projects = state.projects.filter((p) => p.id !== data.id);
   state.projects.unshift({
     id: data.id,
     name: data.name,
@@ -1310,6 +1313,7 @@ function loadProject(data) {
   });
   state.projects = state.projects.slice(0, 20);
   renderLibrary();
+  $("#generateButton").disabled = false;
 }
 
 async function waitForJob(jobId) {
@@ -1512,6 +1516,7 @@ async function loadPreviewClip() {
   showToast("Mengambil potongan clip ringan untuk preview di aplikasi.");
 
   try {
+    const requestedClip = state.activeClip;
     const response = await fetch("/api/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1540,6 +1545,14 @@ async function loadPreviewClip() {
 
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Preview gagal.");
+
+    // Race guard: user berpindah clip saat request berjalan — jangan menimpa
+    // clip lain dengan caption/hook/status preview milik clip yang lama.
+    if (state.activeClip !== requestedClip) {
+      requestedClip.previewLoading = false;
+      renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
+      return;
+    }
 
     if (data.transcript?.caption || (data.segments && data.segments.length > 0)) {
       // Prioritize segments text over basic transcript caption to ensure translated version shows up
@@ -1735,7 +1748,7 @@ $("#generateButton").addEventListener("click", async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Gagal generate ulang clips.");
     clips = data.clips;
-    setActiveClipOrEmpty();
+    setActiveClipOrEmpty(clips[0]);
     uploadStatus.textContent = `${clips.length} clips ready`;
     showToast(`${clips.length} clip dibuat dari transcript.`);
   } catch (err) {

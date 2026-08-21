@@ -313,10 +313,15 @@ function postJson(url, body, headers = {}) {
 
 // Call a chat-completion LLM with the ClipMe system prompt; returns raw JSON message content.
 async function callClipmeLLM(content, targetLanguage) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  // Provider AI dapat dikonfigurasi: default OpenAI (gpt-4o-mini). Untuk DeepSeek
+  // V4 Flash atur CLIPFORGE_AI_BASE_URL=https://api.deepseek.com dan
+  // CLIPFORGE_AI_MODEL=deepseek-v4-flash (API-nya kompatibel OpenAI ChatCompletions).
+  const apiKey = process.env.CLIPFORGE_AI_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return { ok: false, error: "OPENAI_API_KEY tidak tersedia." };
   }
+  const aiBaseUrl = (process.env.CLIPFORGE_AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const aiModel = process.env.CLIPFORGE_AI_MODEL || CLIPME_ANALYZE_MODEL;
   const systemPrompt = loadClipmeSystemPrompt();
   if (!systemPrompt) {
     return { ok: false, error: "clipme-prompt.js tidak ditemukan." };
@@ -359,9 +364,9 @@ async function callClipmeLLM(content, targetLanguage) {
   ].join("\n");
 
   const result = await postJson(
-    "https://api.openai.com/v1/chat/completions",
+    `${aiBaseUrl}/chat/completions`,
     {
-      model: CLIPME_ANALYZE_MODEL,
+      model: aiModel,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -375,7 +380,10 @@ async function callClipmeLLM(content, targetLanguage) {
   const text = result && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content;
   if (!text) return { ok: false, error: "Model tidak mengembalikan konten." };
   try {
-    return { ok: true, data: JSON.parse(text) };
+    // FIX: toleransi model yang membungkus JSON dengan fenced code block
+    // (markdown ```json ... ```) — AI output diperlakukan sebagai untrusted input.
+    const cleaned = String(text).replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+    return { ok: true, data: JSON.parse(cleaned) };
   } catch {
     return { ok: false, error: "Respons model bukan JSON valid." };
   }
@@ -896,8 +904,12 @@ function run(command, args, timeoutMs = 300000, childSink = null, onProgress = n
     const emitProgress = () => {
       if (typeof onProgress !== "function") return;
       if (usesProgressFlag) {
-        const m = /out_time_ms=(\d+)/.exec(stdout);
-        if (m && totalSeconds > 0) {
+        // out_time_ms muncul berulang di stdout kumulatif; tanpa /g, exec selalu
+        // mengembalikan kemunculan pertama sehingga progress macet di nilai awal.
+        const msMatches = stdout.match(/out_time_ms=(\d+)/g);
+        if (msMatches && msMatches.length && totalSeconds > 0) {
+          const lastOut = msMatches[msMatches.length - 1];
+          const m = /(\d+)/.exec(lastOut);
           const pct = Math.min(100, Math.round((Number(m[1]) / 1e6 / totalSeconds) * 100));
           if (pct > lastPctFromStderr) onProgress(Math.max(0, pct));
           lastPctFromStderr = pct;
@@ -966,6 +978,10 @@ function getJson(url, redirects = 0) {
         body += chunk;
       });
       response.on("end", () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
         try {
           resolve(JSON.parse(body));
         } catch (error) {
@@ -3347,7 +3363,17 @@ async function handleUpload(req, res) {
 
   try {
     const probe = await probeVideo(sourcePath);
-    const clips = buildClips(probe.duration, targetClipLength(parsed.parts.duration?.text));
+    // FIX: hormati durationMode/fixedDuration dari form (sama seperti /api/youtube
+    // dan generate). Sebelumnya hanya membaca field "duration" yang tidak pernah
+    // dikirim frontend, sehingga FIXED selalu jatuh ke default 90s.
+    const uploadDurMode = String(parsed.parts.durationMode?.text || "AUTO");
+    const uploadFixed = Number(parsed.parts.fixedDuration?.text);
+    const clips = buildClips(
+      probe.duration,
+      uploadDurMode === "FIXED" && uploadFixed > 0
+        ? targetClipLength(uploadFixed)
+        : targetClipLength(undefined)
+    );
 
     writeProjectManifest(projectDir, {
       id,
@@ -3853,7 +3879,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
         fs.writeFileSync(localaiCachePath, JSON.stringify(t), "utf8");
         return t;
       });
-      analyzeResult = await waitForJob(analyzeJob.id);
+      analyzeResult = await analyzeJob.promise;
       if (analyzeResult.error) throw new Error(`LocalAI Analyze job failed: ${analyzeResult.error}`);
     }
     setProgress(55);
@@ -3965,8 +3991,12 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
 
 function sectionFileName(payload, suffix = "export", heightCap = 0) {
   const clipId = String(payload.clipId || 1).padStart(2, "0");
-  const start = Math.max(0, Math.floor(Number(payload.start || 0)));
-  const end = Math.max(start + 1, Math.ceil(Number(payload.end || start + 30)));
+  // FIX: pakai presisi desimal (toFixed(1)) bukan floor/ceil — dua clip dengan
+  // boundary berbeda bisa memuat start/end bulat yang sama dan bertabrakan di
+  // satu file cache (konten basi terpakai untuk boundary yang lain).
+  const fmt = (v) => String(Number(v).toFixed(1)).replace(".", "p").replace("-", "m");
+  const start = fmt(Math.max(0, Number(payload.start || 0)));
+  const end = fmt(Math.max(Number(payload.start || 0) + 1, Number(payload.end || Number(payload.start || 0) + 30)));
   return `${suffix}-${clipId}-${start}-${end}${heightCap ? `-h${heightCap}` : ""}.mp4`;
 }
 
@@ -4023,6 +4053,14 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
 
   return singleFlight(`section:${stablePath}`, async () => {
     if (fs.existsSync(stablePath)) return stablePath;
+
+    // FIX: bersihkan temp yt-dlp (`.part`/`.ytdl`) milik clip ini dari download
+    // yang pernah gagal — dulu file tersebut menumpuk selamanya di sections/.
+    for (const name of fs.readdirSync(sectionDir)) {
+      if (!/\.(part|ytdl)$/i.test(name)) continue;
+      if (!name.includes(`-raw-${clipId}-`) && !name.includes(`-full-${clipId}-`)) continue;
+      try { fs.unlinkSync(path.join(sectionDir, name)); } catch {}
+    }
 
     const rawTemplate = path.join(sectionDir, `${suffix}-raw-${clipId}-%(id)s.%(ext)s`);
     const start = Math.max(0, Number(payload.start || 0));
@@ -4279,7 +4317,9 @@ async function downloadYouTubeAudioSection(projectDir, videoUrl, clip, children 
   fs.mkdirSync(audioDir, { recursive: true });
 
   const clipId = String(clip.id).padStart(2, "0");
-  const outputPath = path.join(audioDir, `audio-${clipId}.mp3`);
+  // FIX: sertakan start/end agar audio section lama tidak terpakai ulang saat
+  // boundary clip diubah (transkripsi/analisis basi).
+  const outputPath = path.join(audioDir, `audio-${clipId}-${Math.floor(Number(clip.start))}-${Math.ceil(Number(clip.end))}.mp3`);
   if (fs.existsSync(outputPath)) return outputPath;
 
   return singleFlight(`audio:${outputPath}`, async () => {
@@ -4506,7 +4546,9 @@ async function downloadLocalAudioSection(projectDir, clip, children = null) {
   fs.mkdirSync(audioDir, { recursive: true });
 
   const clipId = String(clip.id).padStart(2, "0");
-  const outputPath = path.join(audioDir, `audio-${clipId}.mp3`);
+  // FIX: sertakan start/end agar audio section lama tidak terpakai ulang saat
+  // boundary clip diubah (transkripsi/analisis basi).
+  const outputPath = path.join(audioDir, `audio-${clipId}-${Math.floor(Number(clip.start))}-${Math.ceil(Number(clip.end))}.mp3`);
   if (fs.existsSync(outputPath)) return outputPath;
 
   return singleFlight(`audio:${outputPath}`, async () => {
@@ -5255,6 +5297,10 @@ function handleGetProject(req, res, params) {
     transcriptPath: manifest.transcriptPath || "",
     transcriptProvider: manifest.transcriptProvider || "none",
     url: manifest.url || "",
+    noDownload: !!manifest.noDownload,
+    transcriptStatus: manifest.transcriptProvider && manifest.transcriptProvider !== "none"
+      ? `${manifest.transcriptProvider}: ${(Array.isArray(manifest.clips) ? manifest.clips.length : 0)} clips`
+      : "No transcript",
     previewUrl: sourceExists ? `/media/${projectId}` : ""
   });
 }
@@ -5478,6 +5524,7 @@ function handleExportBatch(req, res) {
               watermark: String(clipDef.watermark || ""),
               watermarkPosition: clipDef.watermarkPosition || "br",
               watermarkOpacity: Number(clipDef.watermarkOpacity) || 0.6,
+              watermarkFontSize: clipDef.watermarkFontSize || 0,
               speakerCut: !!clipDef.speakerCut,
               faceTrack: !!clipDef.faceTrack,
               segments: clipDef.segments || []
@@ -5801,10 +5848,14 @@ async function handleLocalAIDownloadModel(req, res) {
   }
   const out = await localAIModule.runPython(pythonPath, FACE_DETECT_PY, ["yunet-download", "--models-root", MODELS_ROOT], 60_000)
     .catch(e => ({ error: e.message || String(e) }));
+  if (out && out.error) {
+    sendJson(res, 500, { kind: modelKind, status: "failed", error: out.error });
+    return;
+  }
   sendJson(res, 200, {
     kind: modelKind,
     status: "completed",
-    output: out && out.error ? null : (out && out.stdout ? out.stdout.toString().slice(-500) : "ok")
+    output: out && out.stdout ? out.stdout.toString().slice(-500) : "ok"
   });
 }
 
@@ -5842,6 +5893,13 @@ async function handleSttTranscribe(req, res) {
     const payload = JSON.parse((await collectRequest(req, 200)).toString("utf8"));
     const audioPath = payload.audioPath || "";
     const model = payload.model || "";
+    // FIX: validasi nama model dari klien — hanya alfanumerik, titik, garis bawah,
+    // dan strip (nama HF lokal). Blokir separators/.. yang bisa menyalahi MODELS_ROOT
+    // atau memicu download repo arbitrary ke faster-whisper.
+    if (model && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model)) {
+      sendJson(res, 400, { error: "Nama model tidak valid." });
+      return;
+    }
     const format = payload.format || "json";
     const language = payload.language || "";
     const noiseReduction = !!payload.noiseReduction;

@@ -49,8 +49,9 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   if (server) {
-    try { server.server.close(); } catch {}
-    if (server.shutdown) server.shutdown();
+    // shutdown() = server.close(). Panggil sekali saja; server.server.close()
+    // diikuti shutdown() memicu ERR_SERVER_NOT_RUNNING (double close).
+    try { server.shutdown(); } catch {}
   }
 });
 

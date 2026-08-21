@@ -41,7 +41,8 @@ const sandbox = new Function(
     "let getClipTranscriptSegments = null;",
     f("resolveExportSegments"),
     f("clipPayloadToClip"),
-    f("getPreviewTimedSegments")
+    f("getPreviewTimedSegments"),
+    f("wordsAlignWithSegmentText")
   ].join("\n") +
     "\nreturn (payload, fallback) => { getClipTranscriptSegments = fallback; return getPreviewTimedSegments(null, null, payload); };"
 )();
