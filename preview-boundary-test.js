@@ -88,7 +88,7 @@ test("server: endpoint analyze-hook menjalankan job analisis (progres via pollin
   assert.match(h, /analyzeLocalUpload\(projectDir/, "worker must be wired");
   const w = server.slice(server.indexOf("async function analyzeLocalUpload"), server.indexOf("async function handleUpload"));
   assert.match(w, /transcribeAudio\(audioPath/, "must run STT");
-  assert.match(w, /setProgress\(20 \+ Math\.min\(65, Math\.round\(pct \* 0\.65\)\)\)/, "STT progress must feed the job");
+  assert.match(w, /setProgress\(20 \+ Math\.min\(65, Math\.round\(pct \* 0\.65\)\), "Transkripsi suara \(STT\)"\)/, "STT progress must feed the job");
   assert.match(w, /buildTranscriptClips\(transcript, probe\.duration, targetLen, language/, "must use full intelligence pipeline");
   assert.match(w, /mode: durMode,\s*fixedDuration:/, "duration mode must reach the engine");
   assert.match(w, /transcriptPath: "transcript\.json"/, "manifest must persist transcript for preview/generate");
@@ -100,6 +100,76 @@ test("klien: tombol memanggil endpoint & mem-poll jobId (progres % di UI)", () =
   assert.match(btn, /\/api\/projects\/\$\{state\.projectId\}\/analyze-hook/, "must call the analyze-hook endpoint");
   assert.match(btn, /waitForJob\(data\.jobId\)/, "client must poll the analysis job (progress % in UI)");
   assert.match(btn, /clips = analyzed;/, "analyzed clips replace placeholders after job done");
+});
+
+// ── Banner progres job di dashboard utama ───────────────────────────────────
+test("banner: komponen jobProgress ada di dashboard utama (bukan bar timeline video)", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  const topbar = html.indexOf('class="topbar"');
+  const banner = html.indexOf('id="jobProgress"');
+  assert.ok(banner > -1, "jobProgress banner must exist");
+  assert.ok(topbar > -1 && banner > topbar && banner - topbar < 700, "banner must sit right under the topbar");
+  for (const id of ["jpFill", "jpPct", "jpLabel", "jpStage", "jpSpinner"]) {
+    assert.ok(html.includes(`id="${id}"`), `banner part ${id} must exist`);
+  }
+});
+
+test("banner: animasi gradient flow + sheen + indeterminate + state sukses/gagal", () => {
+  const css = fs.readFileSync("styles.css", "utf8");
+  const block = css.slice(css.indexOf(".job-progress {"));
+  assert.match(block, /@keyframes jpFlow/, "gradient must flow while running");
+  assert.match(block, /@keyframes jpSheen/, "sheen sweep animation required");
+  assert.match(block, /\.indeterminate/, "indeterminate mode required (upload phase)");
+  assert.match(block, /\.success/, "success state required");
+  assert.match(block, /\.error/, "error state required");
+  assert.match(block, /@keyframes jpShake/, "error shake required");
+  assert.match(block, /prefers-reduced-motion/, "accessibility: respect reduced motion");
+});
+
+test("klien: waitForJob memakai banner + stage server, tidak merusak bar timeline video", () => {
+  const wj = script.slice(script.indexOf("async function waitForJob"), script.indexOf("async function processYouTubeUrl"));
+  assert.match(wj, /setJobProgress\(job\.progress, job\.stage \|\| ""\)/, "server stage label must reach the banner");
+  assert.match(wj, /settleJobProgress\("success"/, "done must settle the banner as success");
+  assert.match(wj, /settleJobProgress\("error"/, "failed/cancelled must settle the banner as error");
+  assert.doesNotMatch(wj, /\$\("#progressBar"\)/, "video timeline bar must NOT be hijacked by jobs anymore");
+});
+
+test("server: job membawa label tahap (stage) dari worker", () => {
+  assert.match(server, /if \(stage\) job\.stage = String\(stage\)\.slice\(0, 80\)/, "worker stage updates must be stored");
+  assert.match(server, /stage: job\.stage \|\| ""/, "/api/jobs/:id must expose stage");
+  const w = server.slice(server.indexOf("async function analyzeLocalUpload"), server.indexOf("async function handleUpload"));
+  assert.match(w, /"Ekstraksi audio"/, "audio extraction stage labeled");
+  assert.match(w, /"Transkripsi suara \(STT\)"/, "STT stage labeled");
+  assert.match(w, /"Analisis hook viral"/, "hook analysis stage labeled");
+});
+
+// ── Indikator dropzone + tombol analyze menunggu upload ─────────────────────
+test("dropzone: tag indikator file (uploading/loaded/error) ada di UI & CSS", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dzFileTag", "dzFileName", "dzFileSize"]) {
+    assert.ok(html.includes(`id="${id}"`), `dropzone indicator part ${id} must exist`);
+  }
+  const css = fs.readFileSync("styles.css", "utf8");
+  assert.match(css, /\.dropzone\[data-state="loaded"\]/, "loaded state styled (video sudah masuk)");
+  assert.match(css, /\.dropzone\[data-state="uploading"\]/, "uploading state styled");
+  assert.match(css, /\.dropzone\[data-state="error"\]/, "error state styled");
+});
+
+test("klien: attachFile menandai dropzone & mencatat promise upload berjalan", () => {
+  const af = script.slice(script.indexOf("function markDropzone"), script.indexOf("function playSelectedClip"));
+  assert.match(af, /markDropzone\("uploading", file\)/, "uploading marker before request");
+  assert.match(af, /markDropzone\("loaded", file\)/, "loaded marker on success (tanda video sudah masuk)");
+  assert.match(af, /markDropzone\("error", file\)/, "error marker on failure");
+  assert.match(af, /state\.localUploadPromise = uploadPromise;/, "in-flight upload must be trackable");
+});
+
+test("klien: tombol analyze menunggu upload berjalan, bukan langsung menolak", () => {
+  const btn = script.slice(script.indexOf('$("#analyzeHookBtn").addEventListener'), script.indexOf('$("#analyzeHookBtn").addEventListener') + 2600);
+  const guardPos = btn.indexOf("if (!state.projectId)");
+  const waitPos = btn.indexOf("await state.localUploadPromise;");
+  assert.ok(guardPos > -1 && waitPos > guardPos, "analyze must await in-flight upload when projectId not set yet");
+  assert.match(btn, /Upload masih berjalan/, "user must be told the upload is still running");
+  assert.match(btn, /Upload video dulu sebelum analisis/, "plain alert only when nothing was dropped");
 });
 
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

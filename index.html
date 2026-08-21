@@ -77,6 +77,19 @@
       </div>
     </div>
 
+    <!-- Banner progres job (dashboard utama): upload / analisis hook / generate / export -->
+    <div class="job-progress" id="jobProgress" hidden aria-live="polite">
+      <div class="jp-row">
+        <span class="jp-spinner" id="jpSpinner"><span class="jp-check">✓</span></span>
+        <span class="jp-label" id="jpLabel">Memproses</span>
+        <span class="jp-stage" id="jpStage"></span>
+        <span class="jp-pct" id="jpPct">0%</span>
+      </div>
+      <div class="jp-track">
+        <div class="jp-fill" id="jpFill"></div>
+      </div>
+    </div>
+
     <!-- STUDIO VIEW -->
     <div class="app-view page-view active" data-view-panel="studio">
       <div class="studio-grid">
@@ -92,6 +105,11 @@
             <div class="drop-icon">+</div>
             <span>Drop video or click to upload</span>
             <span>MP4, MOV, MKV, WebM</span>
+            <div class="dz-file-tag" id="dzFileTag" hidden>
+              <span class="dz-check">✓</span>
+              <span class="dz-name" id="dzFileName"></span>
+              <span class="dz-size" id="dzFileSize"></span>
+            </div>
           </div>
           <button class="secondary-button" id="analyzeHookBtn" type="button" style="width:100%; margin-top:8px" title="Analisis hook viral untuk video ini: STT transkrip penuh lalu skor hook + judul Deep AI (proses lebih lama, progres tampil di status)">
             Analyze Hook Viral

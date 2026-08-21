@@ -572,6 +572,106 @@ button {
   letter-spacing: 0.05em;
 }
 
+/* ── Dropzone: indikator file masuk ───────────────────────────────────── */
+/* State via data-state: uploading | loaded | error (diset markDropzone). */
+.dropzone[data-state="uploading"] {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  border-style: solid;
+  animation: dzPulse 1.15s ease-in-out infinite;
+}
+@keyframes dzPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198, 242, 74, 0.28); }
+  50%      { box-shadow: 0 0 0 7px rgba(198, 242, 74, 0); }
+}
+.dropzone[data-state="loaded"] {
+  border-color: rgba(198, 242, 74, 0.75);
+  border-style: solid;
+  background:
+    linear-gradient(135deg, rgba(198, 242, 74, 0.10), transparent 50%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(255, 255, 255, 0.02) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, rgba(255, 255, 255, 0.02) 23px 24px),
+    #12170f;
+}
+.dropzone[data-state="error"] {
+  border-color: rgba(255, 93, 93, 0.75);
+  border-style: solid;
+  animation: dzShake .4s cubic-bezier(.36,.07,.19,.97);
+}
+@keyframes dzShake {
+  20% { transform: translateX(-3px); } 40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); } 80% { transform: translateX(2px); }
+}
+
+/* Saat file masuk, redupkan hint default supaya tag nama file menonjol. */
+.dropzone[data-state="loaded"] > span:not(.dz-file-tag span) { opacity: .38; transition: opacity .3s ease; }
+
+.dz-file-tag {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(198, 242, 74, 0.45);
+  background: rgba(16, 20, 14, 0.92);
+  backdrop-filter: blur(4px);
+  font-size: 13px;
+  animation: dzTagIn .42s cubic-bezier(.34,1.56,.64,1) both;
+  pointer-events: none;
+  z-index: 2;
+}
+@keyframes dzTagIn {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.dz-file-tag[hidden] { display: none; }
+.dz-check {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 900;
+  animation: dzCheckPop .45s cubic-bezier(.34,1.56,.64,1) .08s both;
+}
+@keyframes dzCheckPop {
+  from { transform: scale(0); }
+  70%  { transform: scale(1.25); }
+  to   { transform: scale(1); }
+}
+.dropzone[data-state="uploading"] .dz-check {
+  background: transparent;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: dzSpin .8s linear infinite;
+}
+@keyframes dzSpin { to { transform: rotate(360deg); } }
+.dropzone[data-state="error"] .dz-check {
+  background: #ff5d5d;
+  color: #fff;
+}
+.dz-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.dz-size {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
 .url-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2116,3 +2216,176 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
+
+/* ── Banner progres job (dashboard utama) ─────────────────────────────── */
+.job-progress {
+  margin: 10px 0 2px;
+  padding: 12px 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(198,242,74,.06), rgba(198,242,74,0) 55%), var(--panel);
+  box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity .32s ease, transform .32s cubic-bezier(.22,1,.36,1);
+}
+.job-progress[hidden] { display: none; }
+.job-progress.enter { animation: jpEnter .45s cubic-bezier(.22,1,.36,1) both; }
+.job-progress.leaving { opacity: 0; transform: translateY(-8px); }
+@keyframes jpEnter {
+  from { opacity: 0; transform: translateY(-14px) scale(.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.jp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+  min-width: 0;
+}
+
+/* Spinner cincin conic-gradient; berubah jadi centang saat sukses */
+.jp-spinner {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--accent), rgba(198,242,74,.12) 62%, transparent);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.6px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.6px));
+  animation: jpSpin .9s linear infinite;
+}
+@keyframes jpSpin { to { transform: rotate(360deg); } }
+.jp-spinner .jp-check {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+  -webkit-mask: none;
+          mask: none;
+  background: none;
+  animation: none;
+}
+.job-progress.success .jp-spinner {
+  animation: none;
+  background: none;
+  -webkit-mask: none;
+          mask: none;
+}
+.job-progress.success .jp-spinner .jp-check { display: flex; animation: jpPop .38s cubic-bezier(.34,1.56,.64,1) both; }
+.job-progress.error .jp-spinner { animation: jpSpin .5s linear infinite; background: conic-gradient(from 0deg, #ff5d5d, rgba(255,93,93,.12) 62%, transparent); }
+
+.jp-label {
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+.jp-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12.5px;
+  transition: color .25s ease;
+}
+.jp-pct {
+  flex: 0 0 auto;
+  min-width: 46px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 13.5px;
+  color: var(--accent);
+}
+.jp-pct.pop { animation: jpPop .28s cubic-bezier(.34,1.56,.64,1); }
+@keyframes jpPop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+/* Track + fill */
+.jp-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.jp-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #86c232, var(--accent) 35%, var(--accent-strong) 60%, #7ee8a2 85%, #59d9ff);
+  background-size: 220% 100%;
+  animation: jpFlow 2.4s linear infinite;
+  box-shadow: 0 0 14px rgba(198,242,74,.4), 0 0 4px rgba(126,232,162,.5);
+  transition: width .5s cubic-bezier(.22,1,.36,1), background .4s ease, box-shadow .4s ease;
+}
+@keyframes jpFlow { from { background-position: 0% 0; } to { background-position: -220% 0; } }
+
+/* Kilau menyapu melintasi fill */
+.jp-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,.5) 48%, transparent 72%);
+  background-size: 240% 100%;
+  animation: jpSheen 1.7s ease-in-out infinite;
+  mix-blend-mode: overlay;
+}
+@keyframes jpSheen {
+  from { background-position: 220% 0; }
+  to   { background-position: -120% 0; }
+}
+
+/* Mode indeterminate (upload / menunggu % pertama dari job) */
+.job-progress.indeterminate .jp-fill {
+  width: 34% !important;
+  transition: none;
+  animation: jpFlow 2.4s linear infinite, jpSlide 1.35s cubic-bezier(.45,0,.55,1) infinite alternate;
+}
+@keyframes jpSlide {
+  from { left: -12%; }
+  to   { left: 78%; }
+}
+
+/* Sukses */
+.job-progress.success { border-color: rgba(198,242,74,.55); }
+.job-progress.success .jp-fill {
+  background: linear-gradient(90deg, #79d24b, var(--accent));
+  animation: none;
+  box-shadow: 0 0 18px rgba(198,242,74,.55);
+}
+.job-progress.success .jp-pct { color: var(--accent); }
+
+/* Gagal */
+.job-progress.error { border-color: rgba(255,93,93,.55); animation: jpShake .42s cubic-bezier(.36,.07,.19,.97); }
+.job-progress.error .jp-fill {
+  background: linear-gradient(90deg, #ff5d5d, #ff8a5d);
+  animation: none;
+  box-shadow: 0 0 14px rgba(255,93,93,.45);
+}
+.job-progress.error .jp-pct { color: #ff8a8a; }
+@keyframes jpShake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-progress.enter, .jp-spinner, .jp-fill, .jp-fill::after, .jp-pct.pop { animation: none !important; }
+}

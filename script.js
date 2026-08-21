@@ -19,6 +19,7 @@ const state = {
   youtubeUrl: "",
   noDownload: false,
   projectId: "",
+  localUploadPromise: null,
   projects: [],
   exports: [],
   isExporting: false,
@@ -1245,14 +1246,22 @@ async function uploadToBackend(file) {
 
   uploadStatus.textContent = "Uploading";
   $("#generateButton").disabled = true;
+  showJobProgress("Mengunggah video", { indeterminate: true });
 
-  const response = await fetch("/api/upload", {
-    method: "POST",
-    body: form
-  });
+  try {
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: form
+    });
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Upload gagal.");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Upload gagal.");
+    setJobProgress(100, `${data.probe ? formatTime(data.probe.duration) : ""} - metadata siap`);
+    settleJobProgress("success", `${Array.isArray(data.clips) ? data.clips.length : 0} clip placeholder dibuat`);
+  } catch (err) {
+    settleJobProgress("error", err.message);
+    throw err;
+  }
 
   state.projectId = data.id;
   // FIX: reset state turunan YouTube dari sesi sebelumnya — kalau tidak,
@@ -1285,6 +1294,8 @@ function loadProject(data) {
   state.projectId = data.id;
   state.facePreviewByClip = Object.create(null);
   resetPreviewFaceTransform();
+  // Project library (bukan drop baru) — hapus indikator file di dropzone.
+  markDropzone("");
   state.sourceUrl = data.previewUrl || "";
   state.previewClipKey = "";
   state.selectedClipIds = new Set();
@@ -1326,6 +1337,95 @@ function loadProject(data) {
   $("#generateButton").disabled = false;
 }
 
+// ── Banner progres job di dashboard utama ──────────────────────────────────
+const JOB_LABELS = {
+  "upload-analyze": "Analisis hook viral",
+  "localai-analyze": "Generate clips (AI lokal)",
+  "export": "Export clip",
+  "batch-export": "Export semua clip",
+  "export-combined": "Menggabungkan clip"
+};
+const JOB_DONE = {
+  "upload-analyze": "Analisis selesai",
+  "localai-analyze": "Clips siap",
+  "export": "Export selesai",
+  "batch-export": "Semua clip ter-export",
+  "export-combined": "Clip gabungan siap"
+};
+
+const jobProgress = {
+  el: null, fill: null, pct: null, label: null, stage: null,
+  lastPct: -1, hideTimer: 0
+};
+
+function jpRefs() {
+  if (!jobProgress.el) {
+    jobProgress.el = $("#jobProgress");
+    jobProgress.fill = $("#jpFill");
+    jobProgress.pct = $("#jpPct");
+    jobProgress.label = $("#jpLabel");
+    jobProgress.stage = $("#jpStage");
+  }
+  return jobProgress.el;
+}
+
+function showJobProgress(label, { indeterminate = false } = {}) {
+  const el = jpRefs();
+  if (!el) return;
+  window.clearTimeout(jobProgress.hideTimer);
+  el.hidden = false;
+  el.classList.remove("leaving", "success", "error", "indeterminate");
+  // Restart animasi entrance.
+  el.classList.remove("enter");
+  void el.offsetWidth;
+  el.classList.add("enter");
+  if (jobProgress.label) jobProgress.label.textContent = label || "Memproses";
+  jobProgress.lastPct = -1;
+  setJobProgress(0, "");
+  if (indeterminate) el.classList.add("indeterminate");
+}
+
+function setJobProgress(pct, stage) {
+  const el = jpRefs();
+  if (!el || el.hidden) return;
+  const clamped = Math.max(0, Math.min(100, Math.round(pct) || 0));
+  if (clamped > 0) el.classList.remove("indeterminate");
+  if (clamped !== jobProgress.lastPct && jobProgress.fill && jobProgress.pct) {
+    jobProgress.fill.style.width = `${Math.max(clamped, 2)}%`;
+    jobProgress.pct.textContent = `${clamped}%`;
+    if (clamped > jobProgress.lastPct) {
+      jobProgress.pct.classList.remove("pop");
+      void jobProgress.pct.offsetWidth;
+      jobProgress.pct.classList.add("pop");
+    }
+    jobProgress.lastPct = clamped;
+  }
+  if (jobProgress.stage && stage != null) jobProgress.stage.textContent = stage;
+}
+
+function settleJobProgress(mode, message) {
+  const el = jpRefs();
+  if (!el || el.hidden) return;
+  el.classList.remove("indeterminate", "enter");
+  if (mode === "success") {
+    el.classList.add("success");
+    setJobProgress(100, message || "Selesai");
+  } else {
+    el.classList.add("error");
+    setJobProgress(jobProgress.lastPct < 0 ? 0 : jobProgress.lastPct, message || "Gagal");
+  }
+  jobProgress.hideTimer = window.setTimeout(() => {
+    el.classList.add("leaving");
+    window.setTimeout(() => {
+      el.hidden = true;
+      el.classList.remove("leaving", "success", "error");
+      jobProgress.lastPct = -1;
+      if (jobProgress.fill) jobProgress.fill.style.width = "0%";
+      if (jobProgress.pct) jobProgress.pct.textContent = "0%";
+    }, 340);
+  }, mode === "success" ? 2300 : 3600);
+}
+
 async function waitForJob(jobId) {
   const startedAt = Date.now();
   const timeoutMs = 20 * 60 * 1000;
@@ -1334,6 +1434,7 @@ async function waitForJob(jobId) {
 
   while (true) {
     if (Date.now() - startedAt >= timeoutMs) {
+      settleJobProgress("error", "Timeout");
       throw new Error("Export tidak selesai dalam batas waktu. Coba lagi.");
     }
 
@@ -1342,17 +1443,22 @@ async function waitForJob(jobId) {
     if (!response.ok) throw new Error(job.error || "Job tidak ditemukan.");
 
     uploadStatus.textContent = `${job.status} ${job.progress}%`;
+    const jpEl = jpRefs();
+    if (jpEl && jpEl.hidden) showJobProgress(JOB_LABELS[job.type] || "Memproses");
+    setJobProgress(job.progress, job.stage || "");
 
-    if (typeof $ === "function") {
-      const progressBar = $("#progressBar");
-      const progressText = $("#progressText");
-      if (progressBar) progressBar.style.width = `${Math.max(5, Math.min(100, job.progress || 5))}%`;
-      if (progressText) progressText.textContent = `${job.status} ${job.progress || 0}%`;
+    if (job.status === "done") {
+      settleJobProgress("success", JOB_DONE[job.type] || "Selesai");
+      return job.result;
     }
-
-    if (job.status === "done") return job.result;
-    if (job.status === "failed") throw new Error(job.error || "Export gagal.");
-    if (job.status === "cancelled") throw new Error(job.error || "Export dibatalkan.");
+    if (job.status === "failed") {
+      settleJobProgress("error", job.error || "Gagal");
+      throw new Error(job.error || "Export gagal.");
+    }
+    if (job.status === "cancelled") {
+      settleJobProgress("error", "Dibatalkan");
+      throw new Error(job.error || "Export dibatalkan.");
+    }
 
     await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
     intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
@@ -1457,6 +1563,44 @@ async function processYouTubeUrl() {
   }
 }
 
+// Indikator visual dropzone: video sudah masuk / sedang diunggah / gagal.
+function formatDzSize(bytes) {
+  const mb = Number(bytes) / (1024 * 1024);
+  if (!Number.isFinite(mb) || mb <= 0) return "";
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+}
+
+function markDropzone(mode, file) {
+  const dz = $("#dropzone");
+  if (!dz) return;
+  if (!mode) {
+    delete dz.dataset.state;
+    const tag = $("#dzFileTag");
+    if (tag) tag.hidden = true;
+    return;
+  }
+  dz.dataset.state = mode;
+  const tag = $("#dzFileTag");
+  if (!tag) return;
+  tag.hidden = false;
+  // Restart animasi masuk tag.
+  tag.style.animation = "none";
+  void tag.offsetWidth;
+  tag.style.animation = "";
+  const nameEl = $("#dzFileName");
+  const sizeEl = $("#dzFileSize");
+  const checkEl = tag.querySelector(".dz-check");
+  if (mode === "error") {
+    if (nameEl) nameEl.textContent = file ? `${file.name} - gagal diunggah` : "Gagal diunggah";
+    if (sizeEl) sizeEl.textContent = "coba lagi";
+    if (checkEl) checkEl.textContent = "!";
+  } else {
+    if (nameEl) nameEl.textContent = file ? file.name : "video";
+    if (sizeEl) sizeEl.textContent = mode === "uploading" ? "mengunggah..." : (formatDzSize(file && file.size) || "siap");
+    if (checkEl) checkEl.textContent = "✓";
+  }
+}
+
 async function attachFile(file) {
   if (!file) return;
 
@@ -1465,13 +1609,21 @@ async function attachFile(file) {
     return;
   }
 
+  markDropzone("uploading", file);
   try {
     setLocalPreview(file);
-    await uploadToBackend(file);
+    const uploadPromise = uploadToBackend(file);
+    // Diingat agar tombol Analyze bisa menunggu upload yang masih berjalan
+    // (projectId baru terisi SETELAH request upload selesai).
+    state.localUploadPromise = uploadPromise;
+    await uploadPromise;
+    markDropzone("loaded", file);
   } catch (error) {
+    markDropzone("error", file);
     uploadStatus.textContent = "Failed";
     showToast(error.message);
   } finally {
+    state.localUploadPromise = null;
     $("#generateButton").disabled = false;
   }
 }
@@ -1801,11 +1953,23 @@ $("#generateButton").addEventListener("click", async () => {
 $("#playClip").addEventListener("click", playSelectedClip);
 
 // Tombol "Analyze Hook Viral": analisis video AKTIF (lokal) via job — progres
-// persen tampil di status & progress bar lewat waitForJob.
+// persen + tahap tampil di banner dashboard lewat waitForJob.
 $("#analyzeHookBtn").addEventListener("click", async () => {
   if (!state.projectId) {
-    showToast("Upload video dulu sebelum analisis.");
-    return;
+    // Video sudah di-drop tapi request upload masih berjalan? Tunggu dulu —
+    // jangan langsung menolak dengan "upload video dulu".
+    if (state.localUploadPromise) {
+      showToast("Upload masih berjalan - menunggu selesai dulu...");
+      showJobProgress("Mengunggah video", { indeterminate: true });
+      try {
+        await state.localUploadPromise;
+      } catch {
+        return; // toast gagal sudah ditampilkan attachFile
+      }
+    } else {
+      showToast("Upload video dulu sebelum analisis.");
+      return;
+    }
   }
   const btn = $("#analyzeHookBtn");
   if (btn.disabled) return;
@@ -1813,6 +1977,7 @@ $("#analyzeHookBtn").addEventListener("click", async () => {
   const oldLabel = btn.textContent;
   btn.textContent = "Analyzing...";
   uploadStatus.textContent = "Analisis hook viral dimulai...";
+  showJobProgress(JOB_LABELS["upload-analyze"], { indeterminate: true });
   try {
     const response = await fetch(`/api/projects/${state.projectId}/analyze-hook`, {
       method: "POST",
@@ -1831,6 +1996,7 @@ $("#analyzeHookBtn").addEventListener("click", async () => {
     uploadStatus.textContent = `${clips.length} clips ready`;
     showToast(`Analisis hook viral selesai: ${(result && result.transcriptStatus) || ""} - ${clips.length} clip.`);
   } catch (err) {
+    settleJobProgress("error", err.message);
     showToast(err.message);
     uploadStatus.textContent = "Failed";
   } finally {

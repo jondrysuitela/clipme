@@ -96,7 +96,9 @@ let srv = null;
     const jobId = exp.json.jobId;
     const j = await get(port, `/api/jobs/${jobId}`);
     if (j.status !== 200) throw new Error("job fetch failed: " + j.status);
-    const allowed = ["id", "type", "status", "progress", "createdAt", "result", "error"];
+    // "stage" adalah label tahap proses (string pendek dari worker) untuk
+    // banner progres dashboard — field publik yang disengaja.
+    const allowed = ["id", "type", "status", "progress", "stage", "createdAt", "result", "error"];
     const keys = Object.keys(j.json);
     for (const k of keys) {
       if (!allowed.includes(k)) throw new Error(`leaked field: ${k}`);

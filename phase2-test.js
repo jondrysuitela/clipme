@@ -39,9 +39,19 @@ async function runWaitForJobScenario({ statuses }) {
     window: { setTimeout },
     uploadStatus: { textContent: "" },
     Date,
+    // Kolaborator banner progres (fitur dashboard) — no-op di unit test.
+    JOB_LABELS: {},
+    JOB_DONE: {},
+    jpRefs: () => null,
+    showJobProgress: () => {},
+    setJobProgress: () => {},
+    settleJobProgress: () => {},
   };
-  const fn = new Function("fetch", "window", "uploadStatus", "Date", `return (async function(jobId){ ${body} })`);
-  const run = fn(sandbox.fetch, sandbox.window, sandbox.uploadStatus, sandbox.Date);
+  const fn = new Function("fetch", "window", "uploadStatus", "Date",
+    "JOB_LABELS", "JOB_DONE", "jpRefs", "showJobProgress", "setJobProgress", "settleJobProgress",
+    `return (async function(jobId){ ${body} })`);
+  const run = fn(sandbox.fetch, sandbox.window, sandbox.uploadStatus, sandbox.Date,
+    sandbox.JOB_LABELS, sandbox.JOB_DONE, sandbox.jpRefs, sandbox.showJobProgress, sandbox.setJobProgress, sandbox.settleJobProgress);
   return run("test-job");
 }
 

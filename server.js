@@ -3331,23 +3331,23 @@ async function parseMultipartStreaming(rawPath, contentType, destDir) {
 async function analyzeLocalUpload(projectDir, sourcePath, probe, projectId, filename, targetLen, durMode, fixedDur, setProgress, children) {
   const audioPath = path.join(TMP_DIR, `upload-analyze-${projectId}.mp3`);
   try {
-    setProgress(4);
+    setProgress(4, "Menyiapkan berkas");
     await run(FFMPEG, [
       "-y", "-i", sourcePath,
       "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", audioPath
-    ], 600000, children, (p) => setProgress(5 + Math.round(p * 0.15)));
+    ], 600000, children, (p) => setProgress(5 + Math.round(p * 0.15), "Ekstraksi audio"));
     // STT video panjang di CPU butuh waktu — laporkan progres ke job (tampil di UI).
     let lastPct = -10;
     const stt = await transcribeAudio(audioPath, "", "", children, (pct) => {
-      if (pct >= lastPct + 5) { lastPct = pct; setProgress(20 + Math.min(65, Math.round(pct * 0.65))); }
+      if (pct >= lastPct + 5) { lastPct = pct; setProgress(20 + Math.min(65, Math.round(pct * 0.65)), "Transkripsi suara (STT)"); }
     });
     if (!stt.segments.length) throw new Error(stt.error || "STT tidak menghasilkan transkrip.");
-    setProgress(87);
+    setProgress(87, "Analisis hook viral");
     const langMap = { id: "Indonesia", en: "English" };
     const language = langMap[String(stt.language || "").toLowerCase()] || "Indonesia";
     const transcript = stt.segments.map((s) => ({ start: Number(s.start), end: Number(s.end), text: String(s.text || "") }));
     fs.writeFileSync(path.join(projectDir, "transcript.json"), JSON.stringify(transcript));
-    setProgress(92);
+    setProgress(92, "Skor & judul Deep AI");
     let clips = buildTranscriptClips(transcript, probe.duration, targetLen, language, {
       mode: durMode,
       fixedDuration: fixedDur > 0 ? fixedDur : 0
@@ -3745,6 +3745,7 @@ function createJob(type, worker) {
     type,
     status: "queued",
     progress: 0,
+    stage: "",
     createdAt: Date.now(),
     result: null,
     error: "",
@@ -3782,8 +3783,9 @@ function pumpJobs() {
       .then(() => {
         // Cancel yang mendarat antara pumpJobs dan eksekusi worker: jangan jalankan.
         if (job.cancelled) throw new Error("Cancelled");
-        return job.worker((progress) => {
+        return job.worker((progress, stage) => {
           job.progress = Math.max(job.progress, Math.min(99, progress));
+          if (stage) job.stage = String(stage).slice(0, 80);
         }, job.children);
       })
       .then((result) => {
@@ -5340,6 +5342,7 @@ function handleJob(req, res, jobId) {
     type: job.type,
     status: job.status,
     progress: job.progress,
+    stage: job.stage || "",
     createdAt: job.createdAt,
     result: job.result,
     error: job.error
