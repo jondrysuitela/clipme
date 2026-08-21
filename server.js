@@ -2854,7 +2854,8 @@ function generateKaraokeFilters(segments, opts) {
 
     const allLines = splitText(seg.text);
     const numLines = allLines.length;
-    const marginV = Math.round(height - (baseY + numLines * lineHeight * 0.5));
+    // MarginV per segmen dari posisi pilihan user (slider Caption position).
+    const marginV = Math.max(10, Math.round(height - (baseY + numLines * lineHeight * 0.5)));
 
     // Rebuild text with \K karaoke tags per word, keeping the same line
     // breaks as splitText so multi-line captions wrap like other styles.
@@ -2877,7 +2878,7 @@ function generateKaraokeFilters(segments, opts) {
     lineText = textParts.join("\\N");
     const colourTag = karaokeColour ? `{\\1c&H${karaokeColour}&}` : "";
 
-    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Karaoke,,0,0,0,,${colourTag}${lineText}`);
+    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Karaoke,,0,0,${marginV},,${colourTag}${lineText}`);
   }
 
   fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -2947,9 +2948,11 @@ function generateAssStaticFilters(segments, opts) {
     const segEnd = Math.max(segStart + 0.1, seg.end - startOffset);
     const textLines = splitText(seg.text);
     if (!textLines.length) continue;
-    const marginV = Math.round(height - (baseY + textLines.length * lineHeight * 0.5));
+    // FIX: sama seperti karaoke — kirim marginV hasil hitung posisi user,
+    // jangan biarkan jatuh ke 120 hardcode dari baris Style.
+    const marginV = Math.max(10, Math.round(height - (baseY + textLines.length * lineHeight * 0.5)));
     const text = textLines.map((l) => String(l).replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}")).join("\\N");
-    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Caption,,0,0,0,,${text}`);
+    lines.push(`Dialogue: 0,${assTime(segStart)},${assTime(segEnd)},Caption,,0,0,${marginV},,${text}`);
   }
 
   fs.mkdirSync(TMP_DIR, { recursive: true });

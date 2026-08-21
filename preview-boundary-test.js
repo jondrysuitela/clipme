@@ -220,4 +220,35 @@ test("translate: timing kata karaoke dibangun ulang dari teks hasil terjemahan",
   assert.doesNotMatch(seg, /return \{ \.\.\.s, text: keep \};/, "must not keep stale foreign words array");
 });
 
+// ── Settings harus benar-benar berfungsi sampai export (bukan mock) ─────────
+test("settings: caption position dipakai filter ASS export (karaoke & static), bukan MarginV hardcode", () => {
+  const karaoke = server.slice(server.indexOf("function generateKaraokeFilters"), server.indexOf("function buildFilterChain"));
+  assert.match(karaoke, /Karaoke,,0,0,\$\{marginV\},,/, "karaoke Dialogue must use computed marginV from user position");
+  const stat = server.slice(server.indexOf("function generateAssStaticFilters"), server.indexOf("function buildFilterCommandArgs"));
+  assert.match(stat, /Caption,,0,0,\$\{marginV\},,/, "static ASS Dialogue must use computed marginV from user position");
+  // marginV wajib diturunkan dari captionPosition yang dikirim client.
+  assert.match(karaoke, /captionPosition = 0\.76/);
+  assert.match(karaoke, /baseY = Math\.round\(height \* Math\.max\(0\.3, Math\.min\(0\.95, Number\(captionPosition\)\)\)\)/);
+});
+
+test("settings: size/style/font/warna terkirim di SEMUA jalur export", () => {
+  for (const [a, b] of [
+    ["const basePayload = {", "let response;"],
+    ['fetch("/api/export-batch"', "Batch export gagal"],
+    ["function exportClipPayloadFor", '$("#exportCombinedBtn").addEventListener']
+  ]) {
+    const s = script.indexOf(a);
+    const seg = script.slice(s, script.indexOf(b, s));
+    for (const field of ["captionStyle:", "captionSize:", "fontFamily:", "captionColor:", "captionPosition:"]) {
+      assert.ok(seg.includes(field), `${field} missing in export payload near "${a.slice(0, 30)}"`);
+    }
+  }
+});
+
+test("settings: speakerCut & faceTrack benar-benar masuk analisis lokal server", () => {
+  const ex = server.slice(server.indexOf("async function exportClip"), server.indexOf("// Detect & remove baked-in black bars"));
+  assert.match(ex, /payload\.speakerCut = !!payload\.speakerCut;/, "speakerCut sanitized");
+  assert.match(ex, /enableFaceTracking: payload\.faceTrack/, "faceTrack feeds local AI analysis");
+});
+
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);
