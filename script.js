@@ -464,6 +464,12 @@ function activeClipKey() {
   return `${state.projectId}:${state.activeClip.id}:${state.activeClip.start}:${state.activeClip.end}`;
 }
 
+// FIX: source preview berupa section terpotong (/sections/...) — waktunya
+// relatif terhadap clip (0..durasi), bukan absolut terhadap video sumber.
+function sourceIsBoundedSection(url) {
+  return /\/sections\//.test(String(url || state.sourceUrl || ""));
+}
+
 function renderClips(list = clips) {
   clipList.innerHTML = "";
 
@@ -660,7 +666,7 @@ function selectClip(clip) {
     state.captionSegments = cachedSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
     state.liveSegments = state.captionSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
     state.captionLoadedFor = captionTimelineKey();
-    state.liveOffset = state.youtubeUrl ? 0 : (Number(clip.start) || 0);
+    state.liveOffset = (state.youtubeUrl || sourceIsBoundedSection()) ? 0 : (Number(clip.start) || 0);
     captionTimelinePanel.style.display = "block";
     loadCaptionTimeline(state.liveSegments);
     // Static box juga ikut bahasa segmen (bukan clip.caption lama yang asing).
@@ -1249,6 +1255,10 @@ async function uploadToBackend(file) {
   if (!response.ok) throw new Error(data.error || "Upload gagal.");
 
   state.projectId = data.id;
+  // FIX: reset state turunan YouTube dari sesi sebelumnya — kalau tidak,
+  // noDownload=true membuat play video lokal masuk jalur preview tanpa batas.
+  state.noDownload = false;
+  state.youtubeUrl = "";
   clips = Array.isArray(data.clips) ? data.clips : [];
   state.sourceDuration = data.probe && data.probe.duration;
   state.sorted = false;
@@ -1257,7 +1267,7 @@ async function uploadToBackend(file) {
   $("#fileTitle").textContent = data.name;
   $("#fileMeta").textContent = `${formatTime(data.probe.duration)} - ${data.probe.width}x${data.probe.height} - ${data.probe.codec}`;
   uploadStatus.textContent = `${clips.length} clips ready`;
-  showToast(`${clips.length} clip dibuat. Kamu bisa preview dan export MP4.`);
+  showToast(`${clips.length} clip dibuat. Klik "Analyze Hook Viral" untuk analisis lengkap.`);
 
   state.projects.unshift({
     id: data.id,
@@ -1477,7 +1487,11 @@ function playSelectedClip() {
   }
 
   window.clearInterval(state.loopTimer);
-  previewVideo.currentTime = state.noDownload ? 0 : state.activeClip.start;
+  // FIX: source section (/sections/) relatif terhadap clip — mulai dari 0 dan
+  // stop relatif; media penuh memakai waktu absolut. Tanpa ini, replay clip
+  // YouTube/download & lokal men-seek di luar durasi section.
+  const bounded = state.noDownload || sourceIsBoundedSection();
+  previewVideo.currentTime = bounded ? 0 : state.activeClip.start;
   previewVideo.play();
 
   // Pastikan overlay live caption aktif saat play — selectClip mematikan
@@ -1489,7 +1503,11 @@ function playSelectedClip() {
   updateLiveCaption();
 
   state.loopTimer = window.setInterval(() => {
-    const stopAt = state.noDownload ? state.activeClip.end - state.activeClip.start : state.activeClip.end;
+    const playingClip = state.activeClip;
+    // Guard: clip aktif hilang diganti — jangan biarkan TypeError mematikan
+    // pengecekan stop secara diam-diam (playback jalan tanpa batas).
+    if (!playingClip) { previewVideo.pause(); window.clearInterval(state.loopTimer); return; }
+    const stopAt = bounded ? playingClip.end - playingClip.start : playingClip.end;
     if (previewVideo.currentTime >= stopAt) {
       previewVideo.pause();
       window.clearInterval(state.loopTimer);
@@ -1590,12 +1608,33 @@ async function loadPreviewClip() {
     state.captionByClip[captionTimelineKey()] = state.captionSegments.map(s => ({...s, words: Array.isArray(s.words) ? s.words.slice() : []}));
     
     state.liveActive = state.liveSegments.length > 0 && data.baked !== true && effectiveCaptionStyle() !== "off";
-    state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
+    // FIX: file section (/sections/) relatif terhadap clip — offset harus 0;
+    // media penuh (/media/ atau blob) memakai start absolut.
+    const sectionBounded = String(data.previewUrl || "").includes("/sections/");
+    state.liveOffset = sectionBounded ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     previewVideo.src = data.previewUrl;
     previewVideo.controls = true;
     previewFrame.classList.add("has-video");
     previewVideo.currentTime = state.liveOffset;
     await previewVideo.play();
+    // FIX: pasang timer stop — section (/sections/) relatif (end-start),
+    // media penuh absolut (end). File section sendiri sudah membatasi durasi;
+    // timer ini pengaman untuk fallback media penuh.
+    window.clearInterval(state.loopTimer);
+    const previewedClip = state.activeClip;
+    state.loopTimer = window.setInterval(() => {
+      if (!previewedClip || state.activeClip !== previewedClip) {
+        window.clearInterval(state.loopTimer);
+        return;
+      }
+      const stopAt = sectionBounded
+        ? Number(previewedClip.end) - Number(previewedClip.start)
+        : Number(previewedClip.end);
+      if (previewVideo.currentTime >= stopAt) {
+        previewVideo.pause();
+        window.clearInterval(state.loopTimer);
+      }
+    }, 120);
     loadCaptionTimeline(state.liveSegments);
     uploadStatus.textContent = `${clips.length} clips ready`;
     setProcessStep("", ["metadata", "clips", "preview"]);
@@ -1760,6 +1799,45 @@ $("#generateButton").addEventListener("click", async () => {
 });
 
 $("#playClip").addEventListener("click", playSelectedClip);
+
+// Tombol "Analyze Hook Viral": analisis video AKTIF (lokal) via job — progres
+// persen tampil di status & progress bar lewat waitForJob.
+$("#analyzeHookBtn").addEventListener("click", async () => {
+  if (!state.projectId) {
+    showToast("Upload video dulu sebelum analisis.");
+    return;
+  }
+  const btn = $("#analyzeHookBtn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const oldLabel = btn.textContent;
+  btn.textContent = "Analyzing...";
+  uploadStatus.textContent = "Analisis hook viral dimulai...";
+  try {
+    const response = await fetch(`/api/projects/${state.projectId}/analyze-hook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(durationSettingsPayload())
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memulai analisis.");
+    const result = await waitForJob(data.jobId);
+    const analyzed = result && Array.isArray(result.clips) ? result.clips : [];
+    if (!analyzed.length) throw new Error((result && result.warning) || "Analisis tidak menghasilkan clip.");
+    clips = analyzed;
+    state.selectedClipIds = new Set();
+    state.sorted = false;
+    setActiveClipOrEmpty(clips[0]);
+    uploadStatus.textContent = `${clips.length} clips ready`;
+    showToast(`Analisis hook viral selesai: ${(result && result.transcriptStatus) || ""} - ${clips.length} clip.`);
+  } catch (err) {
+    showToast(err.message);
+    uploadStatus.textContent = "Failed";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
+});
 
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
@@ -2119,7 +2197,7 @@ $("#translateBtn").addEventListener("click", async () => {
     state.captionByClip[captionTimelineKey()] = state.captionSegments.map((s) => ({ ...s }));
     state.liveSegments = state.captionSegments.map((s) => ({ ...s }));
     state.liveActive = state.liveSegments.length > 0 && effectiveCaptionStyle() !== "off";
-    state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
+    state.liveOffset = (state.youtubeUrl || sourceIsBoundedSection()) ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
     renderCaptionTimeline();
     // Refresh preview: live caption saat play/pause dan caption box statis saat idle.
     
@@ -2770,8 +2848,8 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
     // clip-relative (0..duration), so liveOffset must match this clip's start
     // — otherwise captions drift onto the wrong part of the video (mirrors
     // loadPreviewClip) and go empty once playback leaves the segment window.
-    state.liveOffset = state.youtubeUrl ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
-    try { previewVideo.currentTime = state.noDownload ? 0 : state.liveOffset; } catch {}
+    state.liveOffset = (state.youtubeUrl || sourceIsBoundedSection()) ? 0 : (state.activeClip ? Number(state.activeClip.start) || 0 : 0);
+    try { previewVideo.currentTime = (state.noDownload || sourceIsBoundedSection()) ? 0 : state.liveOffset; } catch {}
     loadCaptionTimeline(state.liveSegments);
     updateLiveCaption();
     if (data.hook || data.caption) {

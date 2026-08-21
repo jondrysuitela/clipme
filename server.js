@@ -1954,6 +1954,25 @@ function analyzeTranscriptToClips(transcript, duration, targetLength = 90, langu
     windows.push({ start, end, segments: segs, text });
   }
 
+  // FIX: video pendek (seluruh transkrip lebih pendek dari window minimum)
+  // tidak boleh menghasilkan nol clip — buat satu window dari transkrip yang ada.
+  if (!windows.length) {
+    const first = sentencesIndexed[0];
+    const last = sentencesIndexed[sentencesIndexed.length - 1];
+    const start = Math.max(0, Number(first.start) || 0);
+    let end = Math.min(Number(duration) || Number(last.end) || start + 1, Number(last.end) || start + 1);
+    if (!(end - start >= 1)) end = start + 1;
+    const segs = sentencesIndexed.filter((s) => s.end > start - 0.5 && s.start < end + 0.5);
+    if (segs.length) {
+      windows.push({
+        start,
+        end,
+        segments: segs,
+        text: cleanCaptionText(segs.map((s) => s.text).join(" "))
+      });
+    }
+  }
+
   const enriched = windows
     .map((w) => {
       const sentences = splitSentences(w.text);
@@ -3122,10 +3141,21 @@ function getClipTranscriptSegments(projectDir, manifest, payload) {
 
 function writeStreamChunk(ws, chunk) {
   return new Promise((resolve, reject) => {
+    // FIX: listener error/drain harus dilepas setelah selesai — dulu setiap chunk
+    // backpressure meninggalkan listener "error" baru (MaxListenersExceededWarning).
+    let onError;
+    let onDrain;
+    const cleanup = () => {
+      if (onError) ws.removeListener("error", onError);
+      if (onDrain) ws.removeListener("drain", onDrain);
+    };
+    onError = (err) => { cleanup(); reject(err); };
+    onDrain = () => { cleanup(); resolve(); };
     if (!ws.write(chunk)) {
-      ws.once("drain", () => resolve());
-      ws.once("error", reject);
+      ws.on("drain", onDrain);
+      ws.on("error", onError);
     } else {
+      cleanup();
       resolve();
     }
   });
@@ -3133,8 +3163,11 @@ function writeStreamChunk(ws, chunk) {
 
 function closeWriteStream(ws) {
   return new Promise((resolve, reject) => {
-    ws.end(() => resolve());
-    ws.once("error", reject);
+    const onError = (err) => { ws.removeListener("finish", onFinish); reject(err); };
+    const onFinish = () => { ws.removeListener("error", onError); resolve(); };
+    ws.once("error", onError);
+    ws.once("finish", onFinish);
+    ws.end();
   });
 }
 
@@ -3293,6 +3326,64 @@ async function parseMultipartStreaming(rawPath, contentType, destDir) {
   return { parts };
 }
 
+// Worker job analisis hook viral untuk video lokal (toggle drop video).
+// Selalu resolve: sukses -> clips ter-analisis; gagal -> fallback clip polos + warning.
+async function analyzeLocalUpload(projectDir, sourcePath, probe, projectId, filename, targetLen, durMode, fixedDur, setProgress, children) {
+  const audioPath = path.join(TMP_DIR, `upload-analyze-${projectId}.mp3`);
+  try {
+    setProgress(4);
+    await run(FFMPEG, [
+      "-y", "-i", sourcePath,
+      "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", audioPath
+    ], 600000, children, (p) => setProgress(5 + Math.round(p * 0.15)));
+    // STT video panjang di CPU butuh waktu — laporkan progres ke job (tampil di UI).
+    let lastPct = -10;
+    const stt = await transcribeAudio(audioPath, "", "", children, (pct) => {
+      if (pct >= lastPct + 5) { lastPct = pct; setProgress(20 + Math.min(65, Math.round(pct * 0.65))); }
+    });
+    if (!stt.segments.length) throw new Error(stt.error || "STT tidak menghasilkan transkrip.");
+    setProgress(87);
+    const langMap = { id: "Indonesia", en: "English" };
+    const language = langMap[String(stt.language || "").toLowerCase()] || "Indonesia";
+    const transcript = stt.segments.map((s) => ({ start: Number(s.start), end: Number(s.end), text: String(s.text || "") }));
+    fs.writeFileSync(path.join(projectDir, "transcript.json"), JSON.stringify(transcript));
+    setProgress(92);
+    let clips = buildTranscriptClips(transcript, probe.duration, targetLen, language, {
+      mode: durMode,
+      fixedDuration: fixedDur > 0 ? fixedDur : 0
+    });
+    // Jaring pengaman: engine tidak boleh melawan hasil kosong untuk video pendek.
+    if (!clips.length) clips = buildClips(probe.duration, targetLen);
+    const provider = `stt-${stt.provider || "local"}`;
+    writeProjectManifest(projectDir, {
+      id: projectId,
+      type: "local",
+      name: filename,
+      probe,
+      clips,
+      transcriptPath: "transcript.json",
+      transcriptProvider: provider
+    });
+    console.log(`[Upload] Analisis selesai: ${provider}: ${transcript.length} lines -> ${clips.length} clip`);
+    return { clips, transcriptStatus: `${provider}: ${transcript.length} lines` };
+  } catch (err) {
+    console.error("[Upload] Analisis hook gagal, fallback clip polos:", err.message);
+    const clips = buildClips(probe.duration, targetLen);
+    writeProjectManifest(projectDir, {
+      id: projectId,
+      type: "local",
+      name: filename,
+      probe,
+      clips,
+      transcriptPath: "",
+      transcriptProvider: "none"
+    });
+    return { clips, warning: `Analisis hook dilewati: ${err.message}` };
+  } finally {
+    try { fs.unlinkSync(audioPath); } catch {}
+  }
+}
+
 async function handleUpload(req, res) {
   if (!/boundary=/i.test(req.headers["content-type"] || "")) {
     sendJson(res, 400, { error: "Missing multipart boundary." });
@@ -3368,12 +3459,11 @@ async function handleUpload(req, res) {
     // dikirim frontend, sehingga FIXED selalu jatuh ke default 90s.
     const uploadDurMode = String(parsed.parts.durationMode?.text || "AUTO");
     const uploadFixed = Number(parsed.parts.fixedDuration?.text);
-    const clips = buildClips(
-      probe.duration,
-      uploadDurMode === "FIXED" && uploadFixed > 0
-        ? targetClipLength(uploadFixed)
-        : targetClipLength(undefined)
-    );
+    const targetLen = uploadDurMode === "FIXED" && uploadFixed > 0
+      ? targetClipLength(uploadFixed)
+      : targetClipLength(undefined);
+
+    const clips = buildClips(probe.duration, targetLen);
 
     writeProjectManifest(projectDir, {
       id,
@@ -3389,7 +3479,8 @@ async function handleUpload(req, res) {
       id,
       name: file.filename,
       probe,
-      clips
+      clips,
+      transcriptStatus: "No transcript"
     });
   } catch (err) {
     fs.unlink(sourcePath, () => {});
@@ -4205,6 +4296,52 @@ async function downloadYouTubeSection(projectDir, manifest, payload, options = {
   });
 }
 
+// FIX: preview video lokal sebelumnya memakai video sumber PENUH (/media/...)
+// sehingga batas durasi hanya bisa dipaksakan timer JS di klien. Potong section
+// [start-end] sungguhan (cached, pola sama dengan YouTube) supaya file preview
+// sendiri yang membatasi durasi playback.
+async function downloadLocalSection(projectDir, payload, options = {}, children = null) {
+  const sectionDir = path.join(projectDir, "sections");
+  fs.mkdirSync(sectionDir, { recursive: true });
+
+  const clipId = String(payload.clipId || 1).padStart(2, "0");
+  const suffix = options.preview ? "preview" : "export";
+  const stablePath = path.join(sectionDir, sectionFileName(payload, suffix, 0));
+  if (fs.existsSync(stablePath)) return stablePath;
+
+  return singleFlight(`section:${stablePath}`, async () => {
+    if (fs.existsSync(stablePath)) return stablePath;
+
+    const sourcePath = findSourceFile(projectDir);
+    if (!sourcePath) throw new Error("Source video tidak ditemukan.");
+
+    const start = Math.max(0, Number(payload.start || 0));
+    const duration = Math.max(0.5, Number(payload.end || start + 30) - start);
+    // Tulis ke tmp lalu rename — file setengah jadi tidak boleh dianggap cache valid.
+    const tmpPath = path.join(sectionDir, `${suffix}-tmp-${clipId}-${Date.now()}.mp4`);
+    try {
+      await run(FFMPEG, [
+        "-y",
+        "-ss", String(start),
+        "-i", sourcePath,
+        "-t", String(duration),
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", options.preview ? "35" : "23",
+        "-c:a", "aac",
+        "-b:a", options.preview ? "96k" : "128k",
+        "-movflags", "+faststart",
+        tmpPath
+      ], 300000, children);
+      fs.renameSync(tmpPath, stablePath);
+    } catch (err) {
+      try { fs.unlinkSync(tmpPath); } catch {}
+      throw err;
+    }
+    return stablePath;
+  });
+}
+
 async function handlePreview(req, res) {
   const payload = JSON.parse((await collectRequest(req, 20)).toString("utf8"));
   const projectId = sanitizeString(payload.projectId || "");
@@ -4233,11 +4370,26 @@ async function handlePreview(req, res) {
       return;
     }
     let transcriptError = "";
-    await enqueueAndAwait("preview", (setProgress, children) =>
-      ensureClipTranscriptLocal(projectDir, manifest, payload, children, (pct) => setProgress(Math.max(5, Math.min(50, pct))))
-    ).catch((err) => { transcriptError = String(err.message || err); });
+    let sectionPath = "";
+    await enqueueAndAwait("preview", async (setProgress, children) => {
+      const [cut] = await Promise.all([
+        downloadLocalSection(projectDir, payload, { preview: true }, children),
+        ensureClipTranscriptLocal(projectDir, manifest, payload, children, (pct) => setProgress(Math.max(5, Math.min(50, pct))))
+          .catch((err) => { transcriptError = String(err.message || err); })
+      ]);
+      sectionPath = cut;
+    }).catch((err) => { transcriptError = String(err.message || err); });
     const segments = getPreviewTimedSegments(projectDir, manifest, payload);
-    sendJson(res, 200, { previewUrl: `/media/${projectId}`, segments, baked: false, transcriptError });
+    // Fallback ke media penuh bila pemotongan gagal — klien tetap membatasi
+    // playback lewat timer stop (URL bukan /sections/ → stop absolut di end).
+    sendJson(res, 200, {
+      previewUrl: sectionPath
+        ? `/sections/${projectId}/${path.basename(sectionPath)}`
+        : `/media/${projectId}`,
+      segments,
+      baked: false,
+      transcriptError
+    });
     return;
   }
 
@@ -5246,6 +5398,34 @@ function handleGenerateClips(req, res, params) {
   }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
 }
 
+// Tombol "Analyze Hook Viral": analisis ulang project AKTIF via job — progres
+// persen dipoll klien lewat /api/jobs/:id. Worker sama dengan jalur upload.
+async function handleAnalyzeHook(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
+  const manifest = readProjectManifest(projectDir);
+  const sourcePath = findSourceFile(projectDir);
+  if (!sourcePath) { sendJson(res, 404, { error: "Source video tidak ditemukan." }); return; }
+  const probe = manifest.probe || {};
+  if (!Number(probe.duration)) { sendJson(res, 400, { error: "Durasi video tidak diketahui." }); return; }
+  collectRequest(req, 10).then((buf) => {
+    let body = {};
+    try { body = JSON.parse(buf.toString("utf8") || "{}"); } catch {}
+    const durMode = String(body.durationMode || "AUTO");
+    const fixedDur = Number(body.fixedDuration) > 0 ? Number(body.fixedDuration) : 0;
+    const targetLen = durMode === "FIXED" && fixedDur > 0
+      ? targetClipLength(fixedDur)
+      : targetClipLength(undefined);
+    console.log(`[Analyze] Hook viral dimulai: ${manifest.name || projectId}`);
+    const job = createJob("upload-analyze", (setProgress, children) =>
+      analyzeLocalUpload(projectDir, sourcePath, probe, projectId, manifest.name || "project", targetLen, durMode, fixedDur, setProgress, children)
+    );
+    sendJson(res, 200, { jobId: job.id });
+  }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
+}
+
 function handleDeleteProject(req, res, params) {
   const projectId = params.projectId || "";
   if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
@@ -6063,6 +6243,7 @@ router
   .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)
+  .add("POST", "/api/projects/:projectId/analyze-hook", handleAnalyzeHook)
   .add("GET", "/api/projects/:projectId", handleGetProject)
   .add("DELETE", "/api/projects/:projectId", handleDeleteProject)
   .add("GET", "/api/exports", handleListExports)
