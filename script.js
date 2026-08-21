@@ -1248,13 +1248,17 @@ async function uploadToBackend(file) {
   $("#generateButton").disabled = true;
   showJobProgress("Mengunggah video", { indeterminate: true });
 
+  // FIX: `data` harus di scope fungsi — dipakai lagi SETELAH blok try.
+  // Sebelumnya const di dalam try membuat ReferenceError setelah upload SUKSES,
+  // sehingga projectId tak pernah terisi & dropzone salah ditandai gagal.
+  let data;
   try {
     const response = await fetch("/api/upload", {
       method: "POST",
       body: form
     });
 
-    const data = await response.json();
+    data = await response.json();
     if (!response.ok) throw new Error(data.error || "Upload gagal.");
     setJobProgress(100, `${data.probe ? formatTime(data.probe.duration) : ""} - metadata siap`);
     settleJobProgress("success", `${Array.isArray(data.clips) ? data.clips.length : 0} clip placeholder dibuat`);
@@ -1484,6 +1488,7 @@ async function processYouTubeUrl() {
   renderClipSkeleton();
   $("#attachUrl").disabled = true;
   $("#generateButton").disabled = true;
+  showJobProgress("Analyze YouTube", { indeterminate: true });
 
   try {
     if (urls.length === 1) {
@@ -1502,6 +1507,7 @@ async function processYouTubeUrl() {
       setProcessStep("clips", ["metadata"]);
       loadProject(data);
       setProcessStep("", ["metadata", "clips"]);
+      settleJobProgress("success", `${clips.length} clip dibuat`);
       showToast(data.fastMode ? `${clips.length} clip dibuat instan. Preview akan mengambil section asli.` : `${clips.length} clip dibuat. ${data.transcriptStatus || "Transcript tidak ditemukan."}`);
       return;
     }
@@ -1548,12 +1554,14 @@ async function processYouTubeUrl() {
     }
 
     const summary = `${ok.length}/${urls.length} berhasil`;
+    settleJobProgress("success", summary);
     if (failed.length) {
       showToast(`${summary}. ${failed.length} gagal (${failed[0].error || "error"}).`);
     } else {
       showToast(`${summary}. ${ok.length} project siap di Library.`);
     }
   } catch (error) {
+    settleJobProgress("error", error.message);
     uploadStatus.textContent = "Failed";
     setProcessStep("");
     showToast(error.message);
@@ -1683,6 +1691,7 @@ async function loadPreviewClip() {
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   uploadStatus.textContent = "Previewing";
   setProcessStep("preview", ["metadata", "clips"]);
+  showJobProgress("Menyiapkan preview", { indeterminate: true });
   showToast("Mengambil potongan clip ringan untuk preview di aplikasi.");
 
   try {
@@ -1721,6 +1730,7 @@ async function loadPreviewClip() {
     if (state.activeClip !== requestedClip) {
       requestedClip.previewLoading = false;
       renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
+      settleJobProgress("success", "Ganti clip");
       return;
     }
 
@@ -1790,7 +1800,9 @@ async function loadPreviewClip() {
     loadCaptionTimeline(state.liveSegments);
     uploadStatus.textContent = `${clips.length} clips ready`;
     setProcessStep("", ["metadata", "clips", "preview"]);
+    settleJobProgress("success", "Preview siap");
   } catch (error) {
+    settleJobProgress("error", error.message);
     state.activeClip.previewLoading = false;
     uploadStatus.textContent = "Failed";
     setProcessStep("");
@@ -1930,6 +1942,7 @@ $("#generateButton").addEventListener("click", async () => {
   $("#generateButton").disabled = true;
   uploadStatus.textContent = "Regenerating clips...";
   renderClipSkeleton();
+  showJobProgress("Generate clips", { indeterminate: true });
   try {
     const response = await fetch(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
@@ -1941,8 +1954,10 @@ $("#generateButton").addEventListener("click", async () => {
     clips = data.clips;
     setActiveClipOrEmpty(clips[0]);
     uploadStatus.textContent = `${clips.length} clips ready`;
+    settleJobProgress("success", `${clips.length} clip dari transcript`);
     showToast(`${clips.length} clip dibuat dari transcript.`);
   } catch (err) {
+    settleJobProgress("error", err.message);
     showToast(err.message);
     renderClips(clips);
   } finally {
@@ -2331,6 +2346,7 @@ $("#translateBtn").addEventListener("click", async () => {
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Menerjemahkan...";
+  showJobProgress("Menerjemahkan caption", { indeterminate: true });
   try {
     const res = await fetch("/api/stt/translate", {
       method: "POST",
@@ -2354,9 +2370,16 @@ $("#translateBtn").addEventListener("click", async () => {
       // atau Argos mengembalikan teks hampir identik) — biar tidak ada typo.
       const keep = newText && textSimilarity(s.text, newText) < 0.7 ? newText : s.text;
       if (keep !== s.text) changedCount += 1;
-      return { ...s, text: keep };
+      // FIX: timing kata karaoke milik bahasa ASAL (dari STT). Setelah translate,
+      // teksnya tidak cocok lagi — overlay preview masih menampilkan kata bahasa
+      // lama walau timeline sudah berbahasa baru. Bangun ulang timing kata dari
+      // teks hasil terjemahan (pola sama dengan edit manual segmen).
+      const next = { ...s, text: keep };
+      if (keep !== s.text) rebuildSegmentKaraoke(next);
+      return next;
     });
     if (!changedCount) {
+      settleJobProgress("success", "Tidak ada perubahan");
       showToast("Tidak ada segmen yang berubah — caption tampaknya sudah dalam bahasa target.");
       return;
     }
@@ -2382,8 +2405,10 @@ $("#translateBtn").addEventListener("click", async () => {
     updateLiveCaption();
     
     renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
+    settleJobProgress("success", `${changedCount}/${translated.length} segmen berubah`);
     showToast(`Terjemahan selesai (${changedCount}/${translated.length} segmen berubah). Klik "Simpan Perubahan" untuk menyimpan.`);
   } catch (err) {
+    settleJobProgress("error", err.message || "Terjemahan gagal.");
     showToast(err.message || "Terjemahan gagal.");
   } finally {
     btn.disabled = false;
@@ -2976,6 +3001,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
   const btn = $("#autoCaptionBtn");
   btn.disabled = true;
   btn.textContent = "Processing...";
+  showJobProgress("Auto caption", { indeterminate: true });
   try {
     const response = await fetch("/api/auto-captions", {
       method: "POST",
@@ -2998,6 +3024,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
     const segs = Array.isArray(data.segments) ? data.segments : [];
     if (!segs.length) throw new Error("Auto caption tidak menghasilkan segmen.");
     showToast(`Auto caption siap: ${segs.length} segmen (${data.provider})`);
+    settleJobProgress("success", `${segs.length} segmen (${data.provider})`);
     $("#captionStatus").textContent = `${data.provider}: ${segs.length} segmen`;
     // BUG FIX: Paksa sinkronisasi penuh antara liveSegments dan captionSegments agar UI dan Video Overlay tidak desync
     state.captionSegments = segs.map((s) => ({
@@ -3032,6 +3059,7 @@ $("#autoCaptionBtn").addEventListener("click", async () => {
       renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
     }
   } catch (err) {
+    settleJobProgress("error", err.message);
     showToast(err.message);
     uploadStatus.textContent = "Auto caption failed";
   } finally {

@@ -172,4 +172,52 @@ test("klien: tombol analyze menunggu upload berjalan, bukan langsung menolak", (
   assert.match(btn, /Upload video dulu sebelum analisis/, "plain alert only when nothing was dropped");
 });
 
+test("regresi: variabel respons upload di scope fungsi, bukan terjebak blok try", () => {
+  const start = script.indexOf("async function uploadToBackend");
+  const end = script.indexOf("function loadProject", start);
+  const fn = script.slice(start, end);
+  assert.doesNotMatch(fn, /const data = await response\.json\(\);/, "const inside try breaks code after the block (ReferenceError)");
+  assert.match(fn, /let data;\s*\n\s*try \{/, "data must be declared at function scope before try");
+});
+
+// ── Semua operasi berdurasi pakai banner progres ────────────────────────────
+test("banner: semua flow panjang menampilkan progres (upload/youtube/analyze/preview/caption/translate/generate/export)", () => {
+  for (const label of ["Mengunggah video", "Analyze YouTube", "Menyiapkan preview", "Auto caption", "Menerjemahkan caption", "Generate clips"]) {
+    assert.ok(script.includes(`"${label}"`), `flow label "${label}" must drive the banner`);
+  }
+  // Job-based flows (export, batch, gabung, analyze-hook, cut-to-face) otomatis
+  // lewat waitForJob -> auto-show banner.
+  const wj = script.slice(script.indexOf("async function waitForJob"), script.indexOf("async function processYouTubeUrl"));
+  assert.match(wj, /showJobProgress\(JOB_LABELS\[job\.type\]/, "job flows auto-show the banner");
+});
+
+test("banner: setiap flow punya penutup (settle sukses/gagal) di semua jalur keluar", () => {
+  const flows = [
+    ["async function processYouTubeUrl", "async function attachFile"],
+    ["async function loadPreviewClip", "async function exportSelectedClip"],
+    ["async function exportSelectedClip", "$(\"#translateBtn\")"],
+    ['$("#autoCaptionBtn").addEventListener', "$(\"#autoCaptionToggle\")"],
+    ['$("#translateBtn").addEventListener', "function parseSrtVtt"],
+    ['$("#generateButton").addEventListener', '$("#playClip")']
+  ];
+  for (const [a, b] of flows) {
+    const startPos = script.indexOf(a);
+    assert.ok(startPos > -1, `${a} must exist`);
+    const endPos = script.indexOf(b, startPos + a.length);
+    const seg = script.slice(startPos, endPos > -1 ? endPos : undefined);
+    const settles = (seg.match(/settleJobProgress\(/g) || []).length;
+    assert.ok(settles >= 2, `${a} must settle success AND error paths (found ${settles})`);
+  }
+});
+
+// ── Translate: overlay preview harus ikut bahasa baru ──────────────────────
+test("translate: timing kata karaoke dibangun ulang dari teks hasil terjemahan", () => {
+  const start = script.indexOf('$("#translateBtn").addEventListener');
+  const seg = script.slice(start, script.indexOf("function parseSrtVtt", start));
+  // Karaoke overlay me-render seg.words (bukan text) — words basi = bahasa lama
+  // tetap tampil di preview walau timeline sudah berubah.
+  assert.match(seg, /rebuildSegmentKaraoke\(next\)/, "translated segments must rebuild karaoke word timings");
+  assert.doesNotMatch(seg, /return \{ \.\.\.s, text: keep \};/, "must not keep stale foreign words array");
+});
+
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);
