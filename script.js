@@ -159,6 +159,7 @@ function durationSettingsPayload() {
   return {
     durationMode: mode,
     fixedDuration: fixed,
+    maxClips: Number(($("#maxClipsSelect") && $("#maxClipsSelect").value) || 6) || 6,
     hookStrategy: ($("#hookStrategySelect") && $("#hookStrategySelect").value) || "balanced",
     focus: ($("#focusInput") && $("#focusInput").value.trim()) || ""
   };
@@ -2162,6 +2163,36 @@ async function startHookAnalysis() {
 }
 
 $("#analyzeHookBtn").addEventListener("click", () => startHookAnalysis());
+
+// RE-RANK (#25-26): ranking ulang dari cache transkrip — tanpa STT.
+$("#rerankBtn").addEventListener("click", async () => {
+  const btn = $("#rerankBtn");
+  if (!state.projectId) { showToast("Upload & analisis dulu sebelum re-rank."); return; }
+  if (btn.disabled) return;
+  btn.disabled = true;
+  showJobProgress("Re-rank kandidat", { indeterminate: true });
+  try {
+    const response = await fetch(`/api/projects/${state.projectId}/rerank`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(durationSettingsPayload())
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Re-rank gagal.");
+    clips = data.clips;
+    state.selectedClipIds = new Set();
+    state.sorted = false;
+    setActiveClipOrEmpty(clips[0]);
+    uploadStatus.textContent = `${clips.length} clips (re-ranked)`;
+    settleJobProgress("success", `${data.intel ? data.intel.candidates + " kandidat -> " : ""}${clips.length} clip`);
+    showToast(`Re-rank selesai${data.intel ? `: ${data.intel.candidates} kandidat` : ""}.`);
+  } catch (err) {
+    settleJobProgress("error", err.message);
+    showToast(err.message || "Re-rank gagal.");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
@@ -4651,6 +4682,8 @@ const PIPELINE_STAGES = {
     "Ekstraksi audio",
     "Transkripsi suara (STT)",
     "Analisis hook viral",
+    "Menganalisis struktur cerita",
+    "Menyiapkan clip",
     "Skor & judul Deep AI"
   ]
 };
@@ -4661,7 +4694,9 @@ const PROC_ENGINES = [
   { chip: "engFfmpeg", stage: PIPELINE_STAGES["upload-analyze"][1], label: "FFMPEG" },
   { chip: "engWhisper", stage: PIPELINE_STAGES["upload-analyze"][2], label: "WHISPER" },
   { chip: "engHook", stage: PIPELINE_STAGES["upload-analyze"][3], label: "HOOK" },
-  { chip: "engDeep", stage: PIPELINE_STAGES["upload-analyze"][4], label: "DEEP TITLE" }
+  { chip: "engStory", stage: PIPELINE_STAGES["upload-analyze"][4], label: "STORY" },
+  { chip: "engScore", stage: PIPELINE_STAGES["upload-analyze"][5], label: "SCORING" },
+  { chip: "engDeep", stage: PIPELINE_STAGES["upload-analyze"][6], label: "DEEP TITLE" }
 ];
 
 function setProcEngine(chipId, state, text) {

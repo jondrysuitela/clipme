@@ -24,6 +24,20 @@ function initDirector(options = {}) {
   lexicons = options.clipmeWords || null;
 }
 
+// Configuration contract validation (#27-28) — toleran null/NaN/negatif.
+const VALID_STRATEGIES = ["balanced", "curiosity", "story", "educational", "direct", "controversy"];
+function clampMaxClips(n, def = 6) {
+  const v = Math.floor(Number(n));
+  return Number.isFinite(v) ? Math.max(1, Math.min(12, v)) : def;
+}
+function clampCeiling(n, def = 90) {
+  const v = Math.floor(Number(n));
+  return Number.isFinite(v) ? Math.max(15, Math.min(600, v)) : def;
+}
+function validStrategy(s) {
+  return VALID_STRATEGIES.includes(String(s || "").toLowerCase()) ? String(s).toLowerCase() : "balanced";
+}
+
 function clamp01(n) {
   return Math.max(0, Math.min(1, n));
 }
@@ -535,6 +549,9 @@ function rankCandidates(vu, candidates, options = {}) {
 
 module.exports = {
   initDirector,
+  clampMaxClips,
+  clampCeiling,
+  validStrategy,
   buildVideoUnderstanding,
   detectHooks,
   matchSignals,

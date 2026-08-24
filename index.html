@@ -353,6 +353,17 @@
             <input class="inspector-input" id="focusInput" type="text" maxlength="120" placeholder="Focus topik (opsional) — mis: margin bisnis">
           </div>
           <div class="settings-grid">
+            <label>Max clips
+              <select id="maxClipsSelect" title="Jumlah clip final setelah ranking (kandidat pool selalu lebih besar)">
+                <option value="4">4</option>
+                <option value="6" selected>6</option>
+                <option value="8">8</option>
+                <option value="10">10</option>
+              </select>
+            </label>
+            <button class="secondary-button" id="rerankBtn" type="button" title="Ubah ranking tanpa STT ulang — pakai cache transkrip" style="align-self:end">RE-RANK</button>
+          </div>
+          <div class="settings-grid">
             <label>Clip length mode
               <select id="durationModeSelect" title="Durasi clip ditentukan editor AI dari hook viral (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
                 <option value="AUTO" selected>AUTO — sesuai hook viral</option>
@@ -717,6 +728,8 @@
             <span class="engine-chip" id="engFfmpeg" data-state="unknown"><i aria-hidden="true"></i>FFMPEG<b>&mdash;</b></span>
             <span class="engine-chip" id="engWhisper" data-state="unknown"><i aria-hidden="true"></i>WHISPER<b>&mdash;</b></span>
             <span class="engine-chip" id="engHook" data-state="unknown"><i aria-hidden="true"></i>HOOK<b>&mdash;</b></span>
+            <span class="engine-chip" id="engStory" data-state="unknown"><i aria-hidden="true"></i>STORY<b>&mdash;</b></span>
+            <span class="engine-chip" id="engScore" data-state="unknown"><i aria-hidden="true"></i>SCORING<b>&mdash;</b></span>
             <span class="engine-chip" id="engDeep" data-state="unknown"><i aria-hidden="true"></i>DEEP TITLE<b>&mdash;</b></span>
           </div>
         </div>
