@@ -287,11 +287,263 @@ function directStories(vu, hooksResult, options = {}) {
   return { available: true, stories };
 }
 
+// ---------------------------------------------------------------------------
+// STEP 4 - CLIP DIRECTOR: candidate generation VARIATIF
+// Dari tiap story dibuat varian akhir yang alami:
+//   A = akhir natural (payoff/pause)   B = diperpanjang 1-2 kalimat
+//   C = dipadatkan tepat setelah key (hanya bila aman)
+// ---------------------------------------------------------------------------
+function generateCandidates(vu, stories, options = {}) {
+  const maxDur = Math.max(10, Number(options.maxDuration) || 90);
+  const out = [];
+  for (const story of stories || []) {
+    const idxFrom = vu.sentences.findIndex((s) => s.index === story.sentenceRange.from);
+    const idxTo = vu.sentences.findIndex((s) => s.index === story.sentenceRange.to);
+    if (idxFrom === -1 || idxTo === -1) continue;
+
+    const makeVariant = (endIdx, kind) => {
+      const endSentence = vu.sentences[endIdx];
+      const startSentence = vu.sentences[idxFrom];
+      let duration = round1(endSentence.end - startSentence.start);
+      if (duration > maxDur) {
+        // geser mundur ke kalimat yang masih muat
+        let e = endIdx;
+        while (e > idxFrom && vu.sentences[e].end - startSentence.start > maxDur) e--;
+        duration = round1(Math.min(maxDur, vu.sentences[e].end - startSentence.start));
+        return { endIdx: e, duration, kind };
+      }
+      return { endIdx, duration, kind };
+    };
+
+    const variants = [];
+    const vA = makeVariant(idxTo, "natural");
+    if (vA.duration >= 5) variants.push(vA);
+
+    const vB = makeVariant(Math.min(vu.sentences.length - 1, idxTo + 2), "extended");
+    if (vB.endIdx > vA.endIdx && vB.duration >= 8) variants.push(vB);
+
+    // Varian padat hanya bila payoff ada dan berada SETELAH key (tidak memotong resolusi).
+    if (!story.structure.payoffFound || story.structure.payoffSentence) {
+      const keyIdxGuess = vu.sentences.findIndex(
+        (s) => story.structure.keyStatement && s.text.slice(0, 140) === story.structure.keyStatement
+      );
+      if (keyIdxGuess > idxFrom && keyIdxGuess < vA.endIdx) {
+        const vC = makeVariant(keyIdxGuess, "tightened");
+        if (vC.duration >= 10 && vC.duration < vA.duration) variants.push(vC);
+      }
+    }
+
+    for (const v of variants) {
+      const endSentence = vu.sentences[v.endIdx];
+      out.push({
+        start: story.start,
+        end: round1(startEndSafe(vu.sentences[idxFrom], endSentence)),
+        duration: round1(endSentence.end - vu.sentences[idxFrom].start),
+        kind: v.kind,
+        story,
+        endSentenceIndex: v.endIdx,
+        text: sliceClipText(vu.sentences, idxFrom, v.endIdx)
+      });
+    }
+  }
+  return out;
+}
+
+function startEndSafe(startSentence, endSentence) {
+  return Math.max(startSentence.start, endSentence.end);
+}
+
+function sliceClipText(sentences, from, to) {
+  return sentences.slice(from, to + 1).map((s) => s.text).join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// STEP 5 - VIRAL SCORING (evidence-based)
+// Setiap dimensi dihitung dari sinyal nyata kandidat. Tanpa Math.random.
+// Dimensi tanpa data (mis. emotion saat lexicon kosong) bernilai null dan
+// tidak diikutkan rata-rata overall.
+// ---------------------------------------------------------------------------
+function tokenize(text) {
+  return String(text || "").toLowerCase().match(/[a-zà-ÿ0-9']{3,}/g) || [];
+}
+
+function jaccard(aTokens, bTokens) {
+  const A = new Set(aTokens);
+  const B = new Set(bTokens);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return inter / new Set([...A, ...B]).size;
+}
+
+function scoreCandidate(vu, cand, options = {}) {
+  const langKey = options.langKey || "id";
+  const sents = vu.sentences.filter((s) => s.start >= cand.start - 0.05 && s.end <= cand.end + 0.05);
+  const text = cand.text;
+  const { out: sig } = matchSignals(text, langKey);
+  const wordsInClip = sents.reduce((n, s) => n + s.wordCount, 0) || 1;
+  const durSec = Math.max(1, cand.duration);
+  const wps = wordsInClip / durSec;
+
+  const signalHits = (names) => names.reduce((n, k) => n + (sig[k] || 0), 0);
+  const per10w = (hits) => clamp01(hits / (wordsInClip / 10) / 1.2) * 100;
+
+  // HOOK: dari Hook Engine (sudah evidence-based).
+  const hookScore = Number(cand.story.hook.strength) || 0;
+
+  // RETENTION: hukum hening panjang di tengah + hadiah kecepatan bicara normal.
+  const innerPauses = vu.pauses.filter((p) => p.start > cand.start + 1 && p.end < cand.end - 1);
+  const deadAir = innerPauses.reduce((n, p) => n + Math.max(0, p.dur - 1.2), 0);
+  const retention = Math.round(
+    clamp01(1 - deadAir / (durSec * 0.25)) * 60 +
+    clamp01(1 - Math.abs(wps - 2.8) / 2.8) * 40
+  );
+
+  // EMOTION: sinyal emosi/surprise/konflik per 10 kata (null bila lexicon kosong).
+  const emoHits = signalHits(["emotion", "surprise", "problem", "controversy", "confession"]);
+  const emotion = Object.keys(sig).length ? Math.round(per10w(emoHits)) : null;
+
+  // COMPLETENESS: dari Story Director (payoff/key/ending/minDur).
+  const completeness = Number(cand.story.structure.completeness) || 0;
+
+  // PACING: varians panjang kalimat moderat + kepadatan kata stabil.
+  const lens = sents.map((s) => s.text.split(/\s+/).length);
+  const meanLen = lens.reduce((a, b) => a + b, 0) / Math.max(1, lens.length);
+  const varLen = lens.reduce((a, b) => a + (b - meanLen) ** 2, 0) / Math.max(1, lens.length);
+  const pacing = Math.round(
+    clamp01(1 - Math.min(1, varLen / 60)) * 55 +
+    clamp01(1 - Math.abs(wps - 2.8) / 2.8) * 45
+  );
+
+  // SHAREABILITY: payoff/reveal/value + pertanyaan retoris.
+  const shareHits = signalHits(["payoff", "reveal", "value"]) + (text.match(/\?/g) || []).length;
+  const shareability = Object.keys(sig).length ? Math.round(clamp01(shareHits / 6) * 100) : null;
+
+  // FOCUS RELEVANCE (#18): overlap token fokus terhadap teks clip.
+  const focus = String(options.focus || "").trim();
+  let focusRelevance = null;
+  if (focus) {
+    const fTok = tokenize(focus);
+    const cTok = new Set(tokenize(text));
+    let hit = 0;
+    for (const t of new Set(fTok)) if (cTok.has(t)) hit++;
+    focusRelevance = Math.round(clamp01(hit / Math.max(1, new Set(fTok).size)) * 100);
+  }
+
+  // OVERALL: rata-rata tertimbang dimensi yang TERSEDIA saja (null dilewati).
+  const dims = { hook: hookScore, retention, emotion, completeness, pacing, shareability };
+  const weights = { hook: 0.3, retention: 0.2, emotion: 0.12, completeness: 0.2, pacing: 0.08, shareability: 0.1 };
+  let sum = 0;
+  let wsum = 0;
+  for (const [k, w] of Object.entries(weights)) {
+    const v = dims[k];
+    if (v == null) continue;
+    sum += v * w;
+    wsum += w;
+  }
+  const overall = wsum ? Math.round(sum / wsum) : 0;
+
+  return {
+    hook: hookScore,
+    retention,
+    emotion,
+    completeness,
+    pacing,
+    shareability,
+    topicRelevance: focusRelevance,
+    overall,
+    _debug: { wps: round1(wps), deadAir: round1(deadAir), words: wordsInClip }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// STEP 6 - SELECTION SCORE + STRATEGI HOOK + DEDUP KONTEN + RANKING
+// score TIDAK pernah diubah oleh focus/strategi; hanya selectionScore.
+// ---------------------------------------------------------------------------
+const HOOK_STRATEGY_MAP = {
+  curiosity: ["CURIOSITY", "QUESTION", "MYSTERY"],
+  story: ["STORY", "CONFESSION", "PERSONAL"],
+  educational: ["EDUCATIONAL", "VALUE", "TUTORIAL", "HOWTO"],
+  direct: ["DIRECT VALUE", "VALUE", "LIST"],
+  controversy: ["CONTROVERSY", "DEBATE", "HOT TAKE"]
+};
+
+function strategyMatches(strategy, hookType) {
+  const pref = HOOK_STRATEGY_MAP[String(strategy || "").toLowerCase()];
+  if (!pref || !hookType) return null;
+  const ht = String(hookType).toUpperCase();
+  if (pref.some((p) => ht.includes(p))) return 1;
+  return 0;
+}
+
+function computeSelectionScore(scoring, options = {}) {
+  const strategy = String(options.hookStrategy || "").toLowerCase();
+  let base = scoring.overall;
+  // Strategi: delta terbatas +-8 poin pada basis seleksi (bukan pada score).
+  if (strategy && strategy !== "balanced" && scoring._hookType != null) {
+    const m = strategyMatches(strategy, scoring._hookType);
+    if (m === 1) base += 8;
+    else if (m === 0) base -= 8;
+  }
+  if (scoring.topicRelevance != null) {
+    base = base * 0.65 + scoring.topicRelevance * 0.35;
+  }
+  return Math.max(0, Math.min(100, Math.round(base)));
+}
+
+// WHY THIS CLIP: hanya dari flag/sinyal nyata kandidat (#13).
+function explainCandidate(cand) {
+  const s = cand.scoring;
+  const st = [];
+  const wk = [];
+  if (s.hook >= 70) st.push("Strong opening");
+  if (s.completeness >= 70) st.push("Complete thought");
+  if (cand.story.structure.payoffFound) st.push("Clear payoff");
+  if (cand.story.structure.endingAtPause) st.push("Natural pause ending");
+  if (s._debug && s._debug.deadAir <= 0.5) st.push("No dead air");
+  if (s.hook < 50) wk.push("Hook lemah");
+  if (!cand.story.structure.payoffFound) wk.push("Payoff tidak terdeteksi");
+  if (s._debug && s._debug.deadAir > 0.5) wk.push("Ada hening panjang di tengah");
+  if (!/[.!?\u2026]$/.test(String(cand.text).trim())) wk.push("Ending tidak pada batas kalimat");
+  const reason = [`Hook ${s.hook}/100`, `Completeness ${s.completeness}%`, `Durasi ${cand.duration}s`];
+  return { strengths: st, weaknesses: wk, reason };
+}
+
+function rankCandidates(vu, candidates, options = {}) {
+  const limit = Math.max(1, Number(options.limit) || 8);
+  const ranked = candidates.map((cand) => {
+    const scoring = scoreCandidate(vu, cand, options);
+    scoring._hookType = cand.story.hook.type || "";
+    scoring.selectionScore = computeSelectionScore(scoring, options);
+    return { ...cand, scoring };
+  });
+
+  // Dedup KONTEN: Jaccard teks >0.55 dianggap moment yang sama.
+  ranked.sort((a, b) => b.scoring.selectionScore - a.scoring.selectionScore);
+  const kept = [];
+  const keptTokens = [];
+  for (const c of ranked) {
+    const tok = tokenize(c.text);
+    if (keptTokens.some((t) => jaccard(t, tok) > 0.55)) continue;
+    c.explain = explainCandidate(c);
+    kept.push(c);
+    keptTokens.push(tok);
+    if (kept.length >= limit) break;
+  }
+  return kept;
+}
+
 module.exports = {
   initDirector,
   buildVideoUnderstanding,
   detectHooks,
   matchSignals,
   directStory,
-  directStories
+  directStories,
+  generateCandidates,
+  scoreCandidate,
+  jaccard,
+  computeSelectionScore,
+  strategyMatches,
+  rankCandidates
 };
