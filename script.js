@@ -5992,14 +5992,40 @@ function populatePubSources() {
 }
 
 async function copyToClipboard(text, label) {
+  const value = String(text == null ? "" : text);
+  let ok = false;
+  // Jalur 1: Clipboard API (butuh halaman focused — di Electron sering gagal).
   try {
-    await navigator.clipboard.writeText(text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(value);
+      ok = true;
+    }
+  } catch (err) {
+    console.error("[clipboard] api:", err.message);
+  }
+  // Jalur 2 (fallback): textarea sementara + execCommand — selalu tersedia.
+  if (!ok) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ok = document.execCommand("copy");
+      ta.remove();
+    } catch (err) {
+      console.error("[clipboard] fallback:", err.message);
+    }
+  }
+  if (ok) {
     $("#pubCopyStatus").textContent = `Copied ${label}.`;
     showToast(`Copied ${label}.`);
-  } catch (err) {
-    console.error("[publish-copy]", err);
+  } else {
     $("#pubCopyStatus").textContent = "Gagal menyalin.";
-    showToast("Clipboard diblokir browser — salin manual.");
+    showToast("Clipboard diblokir — blok teks lalu Ctrl+C manual.");
   }
 }
 
