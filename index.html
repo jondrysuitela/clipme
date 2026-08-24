@@ -340,6 +340,19 @@
             <span data-step="export">Export</span>
           </div>
           <div class="settings-grid">
+            <label>Hook strategy
+              <select id="hookStrategySelect" title="Preferensi jenis hook untuk ranking kandidat (AI = seimbang otomatis)">
+                <option value="balanced" selected>Balanced / AI</option>
+                <option value="curiosity">Curiosity</option>
+                <option value="story">Story</option>
+                <option value="educational">Educational</option>
+                <option value="direct">Direct Value</option>
+                <option value="controversy">Controversy</option>
+              </select>
+            </label>
+            <input class="inspector-input" id="focusInput" type="text" maxlength="120" placeholder="Focus topik (opsional) — mis: margin bisnis">
+          </div>
+          <div class="settings-grid">
             <label>Clip length mode
               <select id="durationModeSelect" title="Durasi clip ditentukan editor AI dari hook viral (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
                 <option value="AUTO" selected>AUTO — sesuai hook viral</option>

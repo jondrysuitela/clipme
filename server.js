@@ -138,6 +138,19 @@ function loadClipmeHookEngine() {
 
 const hookEngineModule = loadClipmeHookEngine();
 
+// Core Intelligence Director (Step 1-6) — engine existing di-inject.
+const clipmeDirector = (() => {
+  try { return require(path.join(ROOT, "clipme-director.js")); }
+  catch (e) { console.error("Gagal memuat clipme-director.js:", e.message); return null; }
+})();
+let directorInited = false;
+function ensureDirectorInit() {
+  if (clipmeDirector && !directorInited && hookEngineModule) {
+    clipmeDirector.initDirector({ hookEngineModule, clipmeWords: CLIPME_WORDS });
+    directorInited = true;
+  }
+}
+
 const CLIPME_DEEP_TITLE_ENGINE_MODULE = path.join(ROOT, "clipme-deep-title-engine.js");
 
 function loadClipmeDeepTitleEngine() {
@@ -2297,8 +2310,106 @@ function clipHook(caption, index) {
   return first ? `${first.slice(0, 58)}${first.length > 58 ? "..." : ""}` : `Highlight ${index + 1}`;
 }
 
+// ===== CORE INTELLIGENCE: Clip Director path (Step 7) ========================
+// Delegasikan pemilihan boundary/durasi ke Director; enrichment (hook/caption/
+// deep title/opening) tetap memakai engine existing lewat clipmeAssemble.
+// Kegagalan apa pun → fallback ke jalur lama (analyzeTranscriptToClips).
+function directorBuildClips(transcript, duration, targetLength, language, options) {
+  ensureDirectorInit();
+  if (!clipmeDirector || !directorInited) return null;
+  const maxDur = targetClipLength(targetLength);
+  const langTag = clipmeLangTag(language);
+  const langKey = langTag === "mix" ? "mix" : (langTag === "en" ? "en" : "id");
+
+  const vu = clipmeDirector.buildVideoUnderstanding(transcript, duration);
+  const hr = clipmeDirector.detectHooks(vu, langKey);
+  if (!hr.available || !hr.hooks.length) return null;
+
+  const stories = clipmeDirector.directStories(vu, hr, {
+    maxDuration: maxDur,
+    minDuration: 12,
+    limit: 8
+  }).stories;
+  if (!stories.length) return null;
+
+  let candidates = clipmeDirector.generateCandidates(vu, stories, { maxDuration: maxDur });
+  if (!candidates.length) return null;
+  const ranked = clipmeDirector.rankCandidates(vu, candidates, {
+    maxDuration: maxDur,
+    langKey,
+    focus: options.focus || "",
+    hookStrategy: options.hookStrategy || "balanced",
+    limit: 8
+  });
+  if (!ranked.length) return null;
+
+  const clips = ranked.map((cand, index) => {
+    // Segmen absolut dalam rentang kandidat → relatif untuk clipmeAssemble.
+    const segsAbs = transcript.filter((s) => Number(s.end) > cand.start - 0.05 && Number(s.start) < cand.end + 0.05);
+    const segments = segsAbs.map((s) => ({
+      start: Math.max(0, Number(s.start || 0) - cand.start),
+      end: Math.max(0, Number(s.end || 0) - cand.start),
+      text: cleanCaptionText(s.text || "")
+    }));
+    const sentences = splitSentences(cand.text);
+    const analysis = clipmeAssemble(sentences, segments, langTag, cand.duration, {
+      maxAllowed: maxDur,
+      mode: options.mode || "AUTO",
+      fixedDuration: options.fixedDuration
+    });
+
+    const hookText = clippedForField(analysis.recommendedHook, 90);
+    const caption = clipCaption(segments);
+
+    // Adapter ke schema clip lama — field legacy tetap terisi penuh agar
+    // Preview/Editor/Caption/Export tidak berubah sama sekali.
+    return {
+      id: index + 1,
+      title: analysis.deepTitle || `Clip ${index + 1}`,
+      deepTitle: analysis.deepTitle || "",
+      deepTitleReason: analysis.deepTitleReason || "",
+      deepTitleAlternatives: analysis.deepTitleAlternatives || [],
+      deepHook: analysis.deepHook || "",
+      start: cand.start,
+      end: cand.end,
+      score: analysis.score,
+      confidence: analysis.confidence,
+      hook: hookText,
+      caption: caption,
+      hookType: analysis.hookType || cand.story.hook.type || "",
+      originalHook: analysis.originalHook,
+      recommendedHook: hookText || analysis.recommendedHook,
+      hookScore: analysis.hookScore,
+      bestOpening: analysis.openingBest || hookText,
+      editorialScore: analysis.openingEditorialScore || 0,
+      optimalDuration: Number.isFinite(Number(analysis.openingRecommended)) ? Number(analysis.openingRecommended) : null,
+      optimalRange: analysis.openingMinViable != null && analysis.openingMaxUseful != null
+        ? `${analysis.openingMinViable}-${analysis.openingMaxUseful}` : null,
+      naturalCutReason: cand.story.structure.endingSentence ? "Natural ending: " + cand.story.structure.endingSentence.slice(0, 90) : "",
+      openingStrategy: "DIRECTOR",
+      dynamicEnd: false,
+
+      // Field baru Core Intelligence (additive — tidak dipakai jalur lama):
+      selectionScore: cand.scoring.selectionScore,
+      scoring: { ...cand.scoring, _debug: undefined },
+      explain: cand.explain || { strengths: [], weaknesses: [], reason: [] },
+      storyCompleteness: cand.story.structure.completeness,
+      analysis
+    };
+  });
+
+  // Urut kronologis seperti jalur lama (UI sort by score tersedia terpisah).
+  return clips.sort((a, b) => a.start - b.start);
+}
+
 function buildTranscriptClips(transcript, duration, targetLength = 90, language = "Indonesia", options) {
   if (!transcript.length) return buildClips(duration, targetLength);
+  try {
+    const directed = directorBuildClips(transcript, duration, targetLength, language, options || {});
+    if (Array.isArray(directed) && directed.length) return directed;
+  } catch (err) {
+    console.error("[director] fallback ke pipeline lama:", err.message);
+  }
   return analyzeTranscriptToClips(transcript, duration, targetLength, language, options);
 }
 
@@ -3339,7 +3450,7 @@ async function parseMultipartStreaming(rawPath, contentType, destDir) {
 
 // Worker job analisis hook viral untuk video lokal (toggle drop video).
 // Selalu resolve: sukses -> clips ter-analisis; gagal -> fallback clip polos + warning.
-async function analyzeLocalUpload(projectDir, sourcePath, probe, projectId, filename, targetLen, durMode, fixedDur, setProgress, children) {
+async function analyzeLocalUpload(projectDir, sourcePath, probe, projectId, filename, targetLen, durMode, fixedDur, setProgress, children, intelOptions = {}) {
   const audioPath = path.join(TMP_DIR, `upload-analyze-${projectId}.mp3`);
   try {
     setProgress(4, "Menyiapkan berkas");
@@ -3361,7 +3472,9 @@ async function analyzeLocalUpload(projectDir, sourcePath, probe, projectId, file
     setProgress(92, "Skor & judul Deep AI");
     let clips = buildTranscriptClips(transcript, probe.duration, targetLen, language, {
       mode: durMode,
-      fixedDuration: fixedDur > 0 ? fixedDur : 0
+      fixedDuration: fixedDur > 0 ? fixedDur : 0,
+      focus: intelOptions.focus || "",
+      hookStrategy: intelOptions.hookStrategy || "balanced"
     });
     // Jaring pengaman: engine tidak boleh melawan hasil kosong untuk video pendek.
     if (!clips.length) clips = buildClips(probe.duration, targetLen);
@@ -3675,7 +3788,9 @@ async function analyzeYouTubeUrl(videoUrl, payload) {
 
   const clips = buildTranscriptClips(transcript, probe.duration, payload.duration, payload.language, {
     mode: payload.durationMode || "AUTO",
-    fixedDuration: Number(payload.fixedDuration) > 0 ? Number(payload.fixedDuration) : 0
+    fixedDuration: Number(payload.fixedDuration) > 0 ? Number(payload.fixedDuration) : 0,
+    focus: sanitizeString(String(payload.focus || "").slice(0, 120)),
+    hookStrategy: String(payload.hookStrategy || "balanced").slice(0, 20)
   });
 
   writeProjectManifest(projectDir, {
@@ -5404,7 +5519,9 @@ function handleGenerateClips(req, res, params) {
     }
     const clips = buildTranscriptClips(transcript, manifest.probe?.duration || 0, target, manifest.transcriptLanguage || "Indonesia", {
       mode: data.durationMode || "AUTO",
-      fixedDuration: Number(data.fixedDuration) > 0 ? Number(data.fixedDuration) : 0
+      fixedDuration: Number(data.fixedDuration) > 0 ? Number(data.fixedDuration) : 0,
+      focus: sanitizeString(String(data.focus || "").slice(0, 120)),
+      hookStrategy: String(data.hookStrategy || "balanced").slice(0, 20)
     });
     manifest.clips = clips.map((clip) => ({ ...clip, previewReady: false }));
     fs.writeFileSync(path.join(projectDir, "project.json"), JSON.stringify(manifest, null, 2));
@@ -5429,12 +5546,14 @@ async function handleAnalyzeHook(req, res, params) {
     try { body = JSON.parse(buf.toString("utf8") || "{}"); } catch {}
     const durMode = String(body.durationMode || "AUTO");
     const fixedDur = Number(body.fixedDuration) > 0 ? Number(body.fixedDuration) : 0;
+    const focus = sanitizeString(String(body.focus || "").slice(0, 120));
+    const hookStrategy = String(body.hookStrategy || "balanced").slice(0, 20);
     const targetLen = durMode === "FIXED" && fixedDur > 0
       ? targetClipLength(fixedDur)
       : targetClipLength(undefined);
     console.log(`[Analyze] Hook viral dimulai: ${manifest.name || projectId}`);
     const job = createJob("upload-analyze", (setProgress, children) =>
-      analyzeLocalUpload(projectDir, sourcePath, probe, projectId, manifest.name || "project", targetLen, durMode, fixedDur, setProgress, children)
+      analyzeLocalUpload(projectDir, sourcePath, probe, projectId, manifest.name || "project", targetLen, durMode, fixedDur, setProgress, children, { focus, hookStrategy })
     );
     sendJson(res, 200, { jobId: job.id });
   }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));

@@ -156,7 +156,12 @@ function durationSettingsPayload() {
     const n = fEl ? Number(fEl.value) : 0;
     fixed = Number.isFinite(n) && n > 0 ? n : 30;
   }
-  return { durationMode: mode, fixedDuration: fixed };
+  return {
+    durationMode: mode,
+    fixedDuration: fixed,
+    hookStrategy: ($("#hookStrategySelect") && $("#hookStrategySelect").value) || "balanced",
+    focus: ($("#focusInput") && $("#focusInput").value.trim()) || ""
+  };
 }
 
 function formatBytes(bytes) {

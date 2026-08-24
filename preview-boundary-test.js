@@ -954,4 +954,48 @@ test("p10-12: Content DNA observed + prediction-vs-actual tanpa klaim kausal", (
   assert.match(fn, /tidak disimpulkan sebagai sebab-akibat/, "no causal claim");
 });
 
-if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);
+// ── Core Intelligence STEP 7-9: integrasi pipeline nyata ─────────────────────
+test("intel-int: buildTranscriptClips delegasi ke Director dengan fallback aman", () => {
+  const fn = server.slice(server.indexOf("// ===== CORE INTELLIGENCE: Clip Director path"), server.indexOf("async function transcribeAudioWithOpenAI"));
+  assert.ok(fn.length > 500, "slice captured");
+  assert.match(fn, /ensureDirectorInit\(\)/, "lazy init (CLIPME_WORDS tersedia)");
+  assert.match(fn, /clipmeDirector\.buildVideoUnderstanding/, "Step1 dipakai");
+  assert.match(fn, /clipmeDirector\.detectHooks/, "Step2 Hook Engine asli");
+  assert.match(fn, /directStories/, "Step3 Story Director");
+  assert.match(fn, /generateCandidates/, "Step4 kandidat");
+  assert.match(fn, /rankCandidates/, "Step6 ranking");
+  assert.match(fn, /fallback ke pipeline lama|console\.error\("\[director\]/, "fallback on failure");
+  const delegate = server.slice(server.indexOf("function buildTranscriptClips"), server.indexOf("async function transcribeAudioWithOpenAI"));
+  assert.ok(delegate.length > 100, "delegate slice captured");
+  assert.match(delegate, /analyzeTranscriptToClips\(transcript, duration, targetLength, language, options\)/, "legacy path preserved");
+});
+
+test("intel-int: adapter mempertahankan schema legacy + field baru additive", () => {
+  const fn = server.slice(server.indexOf("// ===== CORE INTELLIGENCE: Clip Director path"), server.indexOf("async function transcribeAudioWithOpenAI"));
+  assert.ok(fn.length > 500, "slice captured");
+  for (const legacy of ["hookType:", "recommendedHook:", "caption:", "score: analysis.score", "deepTitle:", "optimalDuration:"]) {
+    assert.ok(fn.includes(legacy), `legacy field ${legacy} tetap diisi`);
+  }
+  for (const added of ["selectionScore:", "explain:", "storyCompleteness:", "scoring:"]) {
+    assert.ok(fn.includes(added), `new field ${added} additive`);
+  }
+  assert.match(fn, /openingStrategy: "DIRECTOR"/, "director clips marked");
+});
+
+test("intel-int: focus & hookStrategy mengalir dari UI ke ketiga jalur analisis", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["focusInput", "hookStrategySelect"]) {
+    assert.ok(html.includes(`id="${id}"`), `UI ${id} must exist`);
+  }
+  const payload = script.slice(script.indexOf("function durationSettingsPayload"), script.indexOf("function formatBytes"));
+  assert.match(payload, /#hookStrategySelect/);
+  assert.match(payload, /#focusInput/);
+  const upload = server.slice(server.indexOf("async function analyzeLocalUpload"), server.indexOf("async function handleUpload"));
+  assert.match(upload, /intelOptions\.focus/, "upload path passes focus");
+  const yt = server.slice(server.indexOf("const clips = buildTranscriptClips(transcript, probe.duration, payload.duration"), server.indexOf('writeProjectManifest(projectDir, {\n    id,\n    videoId'));
+  assert.match(yt, /payload\.hookStrategy/, "youtube path passes strategy");
+  const gen = server.slice(server.indexOf("const clips = buildTranscriptClips(transcript, manifest.probe?.duration"), server.indexOf("manifest.clips = clips.map"));
+  assert.match(gen, /data\.hookStrategy/, "generate path passes strategy");
+});
+
+if (!process.exitCode) console.log('Preview boundary done: ' + results.filter(r=>r.ok).length + '/' + results.length + ' PASS');
