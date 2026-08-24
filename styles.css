@@ -2388,4 +2388,158 @@ textarea:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .job-progress.enter, .jp-spinner, .jp-fill, .jp-fill::after, .jp-pct.pop { animation: none !important; }
+  .app-view.page-view.active, .engine-chip[data-state="busy"] i { animation: none !important; }
+}
+
+/* ============================================================
+   PHASE 1 — DASHBOARD / COMMAND CENTER
+   Reuse variabel existing (--bg/--panel/--accent/--line/dst).
+   ============================================================ */
+
+/* Transisi halus antar view */
+.app-view.page-view.active { animation: dashViewIn .18s ease both; }
+@keyframes dashViewIn {
+  from { opacity: .35; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Hero / command center */
+.dash-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+}
+.dash-hero h1 {
+  margin: 2px 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.dash-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  max-width: 540px;
+}
+
+/* KPI cards */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.kpi-card:hover {
+  border-color: var(--line-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+.kpi-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.kpi-value {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value.is-empty { color: var(--muted-dim); font-weight: 600; }
+.kpi-hint {
+  color: var(--muted-dim);
+  font-size: 11px;
+  min-height: 14px;
+}
+
+/* Recent projects */
+.dash-projects, .dash-engine { margin-top: 14px; }
+#dashboardProjects .table-row { cursor: pointer; }
+#dashboardProjects .table-row:hover strong { color: var(--accent); }
+
+/* Engine chips */
+.engine-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 18px;
+}
+.engine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-soft);
+}
+.engine-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-dim);
+  flex: 0 0 auto;
+}
+.engine-chip b {
+  color: var(--text);
+  font-weight: 600;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engine-chip[data-state="ok"] i { background: var(--ok); box-shadow: 0 0 6px rgba(74, 222, 128, .5); }
+.engine-chip[data-state="busy"] i { background: var(--warning); animation: dashPulse 1.4s ease-in-out infinite; }
+.engine-chip[data-state="busy"] b { color: var(--warning); }
+.engine-chip[data-state="offline"] i { background: var(--danger); }
+.engine-chip[data-state="idle"] i { background: var(--queued); }
+@keyframes dashPulse { 50% { opacity: .3; } }
+
+/* Placeholder Intelligence */
+.coming-next {
+  text-align: center;
+  padding: 56px 32px;
+  color: var(--muted);
+}
+.coming-next h2 {
+  margin: 8px 0 10px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.coming-next p {
+  max-width: 420px;
+  margin: 0 auto;
+  font-size: 13.5px;
+}
+
+/* Responsif */
+@media (max-width: 1280px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-hero h1 { font-size: 23px; }
+}
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: 84px 1fr; }
+  .sidebar { padding: 16px 10px; align-items: center; }
+  .sidebar .brand > div,
+  .sidebar .nav-label,
+  .sidebar .local-engine,
+  .sidebar .usage,
+  .sidebar .sidebar-section-label { display: none; }
+  .sidebar-group { width: 100%; }
+  .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+  .kpi-value { font-size: 26px; }
 }

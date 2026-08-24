@@ -251,4 +251,74 @@ test("settings: speakerCut & faceTrack benar-benar masuk analisis lokal server",
   assert.match(ex, /enableFaceTracking: payload\.faceTrack/, "faceTrack feeds local AI analysis");
 });
 
+// ── Phase 1: Dashboard / command center ─────────────────────────────────────
+test("dashboard: nav lengkap (7 view) & dashboard jadi landing default", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const v of ["dashboard", "studio", "library", "exports", "results", "analytics", "dna"]) {
+    assert.ok(html.includes(`data-view="${v}"`), `nav item ${v} must exist`);
+    assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} must exist`);
+  }
+  const dash = html.indexOf('data-view-panel="dashboard"');
+  const studio = html.indexOf('data-view-panel="studio"');
+  assert.ok(dash > -1 && studio > dash, "dashboard panel must precede studio");
+  const active = html.slice(html.lastIndexOf("<div", dash), dash);
+  assert.match(active, /class="app-view page-view active"/, "dashboard must be the initial active view");
+  // Intelligence dikelompokkan sendiri di sidebar
+  assert.ok(html.includes("Intelligence</p>"), "sidebar Intelligence group label");
+});
+
+test("dashboard: 4 KPI card & nilainya dari data nyata (anti-mock)", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["kpiProjects", "kpiClips", "kpiScore", "kpiExports"]) {
+    assert.ok(html.includes(`id="${id}"`), `KPI ${id} must exist`);
+  }
+  const block = script.slice(script.indexOf("// ================= DASHBOARD"));
+  assert.match(block, /state\.projects\.length/, "projects KPI dari /api/projects");
+  assert.match(block, /state\.exports\.length/, "exports KPI dari /api/exports");
+  assert.match(block, /acc \+ \(Number\(p\.clips\) \|\| 0\)/, "clips KPI dijumlah dari project list");
+  // Avg score hanya dari clip.score numerik via detail API, bukan angka hardcode
+  assert.match(block, /typeof c\.score === "number"/);
+  assert.match(block, /\/api\/projects\/\$\{p\.id\}/);
+  assert.match(block, /hint\.textContent = "No data yet"/, "tanpa skor → 'No data yet', bukan angka palsu");
+  assert.doesNotMatch(block, /(textContent|innerText)\s*=\s*["']\d{2,}["']/, "no fabricated constants");
+});
+
+test("dashboard: recent projects pakai flow Open yang sama dengan Library", () => {
+  const block = script.slice(script.indexOf("// ================= DASHBOARD"));
+  assert.match(block, /function renderDashboardProjects/, "renderer ada");
+  assert.match(block, /data-open-project/, "pakai atribut open yang sama");
+  const init = block.slice(block.indexOf("function initDashboard"));
+  assert.match(init, /loadProject\(data\)/, "open memuat project via API detail");
+  assert.match(init, /showView\("studio"\)/, "open mendarat di Studio, bukan viewer baru");
+});
+
+test("dashboard: engine status real dari /api/system + localai + queue", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dashCpu", "dashGpu", "dashFfmpeg", "dashAi", "dashQueue"]) {
+    assert.ok(html.includes(`id="${id}"`), `chip ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("async function updateDashboardEngineStatus"), script.indexOf("function initDashboard"));
+  assert.match(fn, /\/api\/system/);
+  assert.match(fn, /\/api\/localai\/status/);
+  assert.match(fn, /\/api\/queue/);
+  assert.match(fn, /hw\.gpu \|\| \{\}/, "GPU state dari hardware nyata");
+  assert.doesNotMatch(fn, /"RTX|GTX/i, "tidak mengarang nama hardware");
+});
+
+test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  const coming = (html.match(/Coming next/g) || []).length;
+  assert.strictEqual(coming, 3, "Results/Analytics/DNA masing2 satu empty state");
+  assert.ok(!/<canvas/i.test(html), "no fake canvas charts");
+  assert.doesNotMatch(script, /Chart\(/, "no chart library stubs");
+});
+
+test("dashboard: CTA New Project membuka workflow upload Studio existing", () => {
+  const block = script.slice(script.indexOf("// ================= DASHBOARD"));
+  const open = block.slice(block.indexOf("function openCreateWorkspace"), block.indexOf("let dashBusy"));
+  assert.match(open, /showView\("studio"\)/);
+  assert.match(open, /getElementById\("videoInput"\)/, "reuse input upload Studio");
+  assert.match(script, /initDashboard\(\);/, "dashboard di-init saat boot");
+});
+
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

@@ -21,15 +21,33 @@
 
     <div class="sidebar-group sidebar-group-nav">
       <p class="sidebar-section-label">Workspace</p>
-      <nav class="nav-list">
-        <button class="nav-item active" data-view="studio" type="button">
-          <span class="nav-icon">S</span> Studio
+      <nav class="nav-list" aria-label="Workspace">
+        <button class="nav-item active" data-view="dashboard" type="button" aria-current="page">
+          <span class="nav-icon">D</span> <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="studio" type="button">
+          <span class="nav-icon">C</span> <span class="nav-label">Create</span>
         </button>
         <button class="nav-item" data-view="library" type="button">
-          <span class="nav-icon">L</span> Library
+          <span class="nav-icon">L</span> <span class="nav-label">Library</span>
         </button>
         <button class="nav-item" data-view="exports" type="button">
-          <span class="nav-icon">E</span> Exports
+          <span class="nav-icon">E</span> <span class="nav-label">Exports</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="sidebar-group sidebar-group-nav">
+      <p class="sidebar-section-label">Intelligence</p>
+      <nav class="nav-list" aria-label="Intelligence">
+        <button class="nav-item" data-view="results" type="button">
+          <span class="nav-icon">R</span> <span class="nav-label">Results</span>
+        </button>
+        <button class="nav-item" data-view="analytics" type="button">
+          <span class="nav-icon">A</span> <span class="nav-label">Analytics</span>
+        </button>
+        <button class="nav-item" data-view="dna" type="button">
+          <span class="nav-icon">DNA</span> <span class="nav-label">Content DNA</span>
         </button>
       </nav>
     </div>
@@ -90,8 +108,67 @@
       </div>
     </div>
 
+    <!-- DASHBOARD VIEW (Phase 1 — landing default) -->
+    <div class="app-view page-view active" data-view-panel="dashboard">
+      <section class="dash-hero panel" aria-labelledby="dashGreeting">
+        <div>
+          <p class="eyebrow">Command center</p>
+          <h1 id="dashGreeting">Good morning</h1>
+          <p class="dash-sub">Turn long-form video into high-potential short-form clips.</p>
+        </div>
+        <button class="primary-button" id="dashNewProjectBtn" type="button">+ New Project</button>
+      </section>
+
+      <section class="kpi-grid" aria-label="Statistik ringkas">
+        <div class="kpi-card panel">
+          <span class="kpi-label">Projects</span>
+          <strong class="kpi-value" id="kpiProjects">&mdash;</strong>
+          <span class="kpi-hint">&nbsp;</span>
+        </div>
+        <div class="kpi-card panel">
+          <span class="kpi-label">Clips</span>
+          <strong class="kpi-value" id="kpiClips">&mdash;</strong>
+          <span class="kpi-hint">&nbsp;</span>
+        </div>
+        <div class="kpi-card panel">
+          <span class="kpi-label">Avg viral score</span>
+          <strong class="kpi-value" id="kpiScore">&mdash;</strong>
+          <span class="kpi-hint" id="kpiScoreHint">No data yet</span>
+        </div>
+        <div class="kpi-card panel">
+          <span class="kpi-label">Exports</span>
+          <strong class="kpi-value" id="kpiExports">&mdash;</strong>
+          <span class="kpi-hint">&nbsp;</span>
+        </div>
+      </section>
+
+      <section class="panel dash-projects" aria-label="Recent projects">
+        <div class="panel-heading">
+          <h2>Recent projects</h2>
+          <span class="status-pill" id="dashProjectCount">0</span>
+        </div>
+        <div class="table-list" id="dashboardProjects">
+          <div class="empty-state">Waiting for first project.</div>
+        </div>
+      </section>
+
+      <section class="panel dash-engine" aria-label="Engine status">
+        <div class="panel-heading">
+          <h2>Engine status</h2>
+          <span class="status-pill" id="dashEngineStamp">live</span>
+        </div>
+        <div class="engine-chip-row" id="dashEngineChips">
+          <span class="engine-chip" id="dashCpu" data-state="unknown"><i aria-hidden="true"></i>CPU<b>&mdash;</b></span>
+          <span class="engine-chip" id="dashGpu" data-state="unknown"><i aria-hidden="true"></i>GPU<b>&mdash;</b></span>
+          <span class="engine-chip" id="dashFfmpeg" data-state="unknown"><i aria-hidden="true"></i>FFmpeg<b>&mdash;</b></span>
+          <span class="engine-chip" id="dashAi" data-state="unknown"><i aria-hidden="true"></i>AI<b>&mdash;</b></span>
+          <span class="engine-chip" id="dashQueue" data-state="unknown"><i aria-hidden="true"></i>Queue<b>&mdash;</b></span>
+        </div>
+      </section>
+    </div>
+
     <!-- STUDIO VIEW -->
-    <div class="app-view page-view active" data-view-panel="studio">
+    <div class="app-view page-view" data-view-panel="studio">
       <div class="studio-grid">
         <div class="studio-left">
           <!-- Upload Panel -->
@@ -446,6 +523,31 @@
         <div class="table-list" id="libraryList">
           <div class="empty-state">Belum ada project. Paste URL YouTube di Studio untuk mulai.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- INTELLIGENCE PLACEHOLDERS (data nyata menyusul di fase berikutnya) -->
+    <div class="app-view page-view" data-view-panel="results">
+      <div class="page-panel panel coming-next">
+        <p class="eyebrow">Coming next</p>
+        <h2>Results</h2>
+        <p>This intelligence workspace will be connected to your real clipping data in a future phase.</p>
+      </div>
+    </div>
+
+    <div class="app-view page-view" data-view-panel="analytics">
+      <div class="page-panel panel coming-next">
+        <p class="eyebrow">Coming next</p>
+        <h2>Analytics</h2>
+        <p>This intelligence workspace will be connected to your real clipping data in a future phase.</p>
+      </div>
+    </div>
+
+    <div class="app-view page-view" data-view-panel="dna">
+      <div class="page-panel panel coming-next">
+        <p class="eyebrow">Coming next</p>
+        <h2>Content DNA</h2>
+        <p>This intelligence workspace will be connected to your real clipping data in a future phase.</p>
       </div>
     </div>
 

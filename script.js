@@ -1221,7 +1221,10 @@ function showView(view) {
     panel.classList.toggle("active", panel.dataset.viewPanel === view);
   });
   $$(".nav-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.view === view);
+    const active = item.dataset.view === view;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
 }
 
@@ -3621,6 +3624,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
 $$(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     showView(button.dataset.view);
+    if (button.dataset.view === "dashboard") loadDashboardData();
     if (button.dataset.view === "library") loadProjects();
     if (button.dataset.view === "exports") loadExports();
   });
@@ -3727,6 +3731,221 @@ $("#clearExports").addEventListener("click", async () => {
   refreshStorage();
 });
 
+// ================= DASHBOARD (Phase 1 — command center) =================
+// Semua angka dari API nyata (/api/projects, /api/exports, /api/system,
+// /api/localai/status, /api/queue). Tidak ada metrik buatan: kalau data
+// belum ada, tampil "—".
+
+function openCreateWorkspace() {
+  showView("studio");
+  const input = document.getElementById("videoInput");
+  if (input) input.click();
+}
+
+let dashBusy = false;
+
+async function loadDashboardData() {
+  if (dashBusy) return;
+  dashBusy = true;
+  try {
+    await Promise.all([loadProjects(), loadExports()]);
+    updateDashboardStats();
+    renderDashboardProjects(state.projects);
+    await updateDashboardAvgScore();
+  } catch {}
+  dashBusy = false;
+  updateDashboardEngineStatus();
+}
+
+function updateDashboardStats() {
+  const set = (id, v) => {
+    const node = document.getElementById(id);
+    if (!node) return;
+    if (v == null) { node.textContent = "—"; node.classList.add("is-empty"); }
+    else { node.textContent = String(v); node.classList.remove("is-empty"); }
+  };
+  set("kpiProjects", state.projects.length || null);
+  const totalClips = state.projects.reduce((acc, p) => acc + (Number(p.clips) || 0), 0);
+  set("kpiClips", totalClips || null);
+  set("kpiExports", state.exports.length || null);
+  const count = document.getElementById("dashProjectCount");
+  if (count) count.textContent = String(state.projects.length);
+}
+
+async function updateDashboardAvgScore() {
+  const el = document.getElementById("kpiScore");
+  const hint = document.getElementById("kpiScoreHint");
+  if (!el) return;
+  const recent = state.projects.slice(0, 8);
+  const details = await Promise.all(recent.map((p) =>
+    fetch(`/api/projects/${p.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  ));
+  let sum = 0;
+  let n = 0;
+  for (const d of details) {
+    const cs = Array.isArray(d && d.clips) ? d.clips : [];
+    for (const c of cs) {
+      if (typeof c.score === "number" && Number.isFinite(c.score)) { sum += c.score; n += 1; }
+    }
+  }
+  if (!n) {
+    el.textContent = "—";
+    el.classList.add("is-empty");
+    if (hint) hint.textContent = "No data yet";
+    return;
+  }
+  el.classList.remove("is-empty");
+  el.textContent = String(Math.round(sum / n));
+  if (hint) hint.textContent = `from ${n} scored clips`;
+}
+
+function renderDashboardProjects(projects) {
+  const list = document.getElementById("dashboardProjects");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!projects.length) {
+    list.innerHTML = '<div class="empty-state">Waiting for first project.</div>';
+    return;
+  }
+  for (const project of projects.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "table-row";
+
+    const main = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = project.name;
+    const meta = document.createElement("span");
+    meta.textContent = `${formatTime(project.duration)} - ${project.clips} clips - ${project.transcriptStatus}`;
+    main.appendChild(name);
+    main.appendChild(meta);
+
+    const date = document.createElement("span");
+    date.textContent = project.createdAt;
+
+    const pill = document.createElement("span");
+    const hasTranscript = project.transcriptStatus && project.transcriptStatus !== "No transcript";
+    pill.className = `status-pill ${hasTranscript ? "status-pill-done" : "status-pill-queued"}`;
+    pill.textContent = hasTranscript ? "Ready" : "No transcript";
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary-button compact";
+    openBtn.setAttribute("data-open-project", project.id);
+    openBtn.setAttribute("aria-label", `Open project ${project.name}`);
+    openBtn.textContent = "Open";
+
+    row.appendChild(main);
+    row.appendChild(date);
+    row.appendChild(pill);
+    row.appendChild(openBtn);
+    list.appendChild(row);
+  }
+}
+
+function setDashChip(id, chipState, text, title = "") {
+  const chip = document.getElementById(id);
+  if (!chip) return;
+  chip.dataset.state = chipState;
+  const b = chip.querySelector("b");
+  if (b) b.textContent = text;
+  chip.title = title;
+}
+
+async function updateDashboardEngineStatus() {
+  const stamp = document.getElementById("dashEngineStamp");
+  try {
+    const [sysRes, aiRes, qRes] = await Promise.all([
+      fetch("/api/system").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/localai/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/queue").then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    ]);
+
+    if (sysRes) {
+      const hw = sysRes.hardware || {};
+      const cpu = hw.cpu || {};
+      const gpu = hw.gpu || {};
+      const cuda = hw.cuda || {};
+      const nvenc = hw.nvenc || {};
+      setDashChip("dashCpu", cpu.cores ? "ok" : "unknown",
+        cpu.model ? `${cpu.model} · ${cpu.cores} core`.slice(0, 34) : (cpu.cores ? `${cpu.cores} core` : "—"),
+        cpu.model || "");
+      if (gpu.present) {
+        setDashChip("dashGpu", cuda.available ? "ok" : "busy",
+          `${gpu.name}${gpu.vramGb ? ` · ${gpu.vramGb} GB` : ""}`.slice(0, 30),
+          cuda.available ? "CUDA ready" : "GPU detected, runtime tanpa CUDA — fallback CPU");
+      } else {
+        setDashChip("dashGpu", "idle", "Not detected", "Mode CPU");
+      }
+      // Endpoint system hidup = ffmpeg server berfungsi (dipakai probe/NVENC check).
+      setDashChip("dashFfmpeg", "ok", nvenc && nvenc.available ? "NVENC ready" : "CPU encode",
+        nvenc && nvenc.available ? "Hardware encode aktif" : "Encode lewat CPU");
+    } else {
+      setDashChip("dashCpu", "offline", "Offline");
+      setDashChip("dashGpu", "offline", "—");
+      setDashChip("dashFfmpeg", "offline", "Offline");
+    }
+
+    if (aiRes) {
+      const be = aiRes.aiBackend || {};
+      const spk = String(be.speaker || "skip");
+      const face = String(be.face || "skip");
+      const anyOn = spk !== "skip" || face !== "skip";
+      setDashChip("dashAi", anyOn ? "ok" : "idle",
+        anyOn ? `${spk}/${face}`.slice(0, 24) : "models off",
+        `Speaker: ${spk} · Face: ${face}`);
+    } else {
+      setDashChip("dashAi", sysRes ? "unknown" : "offline", sysRes ? "—" : "Offline");
+    }
+
+    const jobs = qRes && Array.isArray(qRes.jobs) ? qRes.jobs : null;
+    if (jobs) {
+      const running = jobs.filter((j) => j.status === "running").length;
+      const queued = jobs.filter((j) => j.status === "queued").length;
+      if (running > 0) setDashChip("dashQueue", "busy", `${running} running${queued ? ` +${queued}` : ""}`);
+      else if (queued > 0) setDashChip("dashQueue", "idle", `${queued} queued`);
+      else setDashChip("dashQueue", "ok", "Ready");
+    } else {
+      setDashChip("dashQueue", sysRes ? "unknown" : "offline", sysRes ? "—" : "Offline");
+    }
+
+    if (stamp) stamp.textContent = "live";
+  } catch {
+    ["dashCpu", "dashGpu", "dashFfmpeg", "dashAi", "dashQueue"].forEach((id) => setDashChip(id, "offline", "Offline"));
+    if (stamp) stamp.textContent = "offline";
+  }
+}
+
+function initDashboard() {
+  const greetEl = document.getElementById("dashGreeting");
+  if (greetEl) {
+    const h = new Date().getHours();
+    greetEl.textContent = h < 11 ? "Good morning" : h < 15 ? "Good afternoon" : "Good evening";
+  }
+  const cta = document.getElementById("dashNewProjectBtn");
+  if (cta) cta.addEventListener("click", openCreateWorkspace);
+  const list = document.getElementById("dashboardProjects");
+  if (list) list.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-open-project]");
+    if (!btn) return;
+    const projectId = btn.getAttribute("data-open-project");
+    try {
+      const response = await fetch(`/api/projects/${projectId}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Gagal memuat project.");
+      loadProject(data);
+      showView("studio");
+      showToast(`Project "${data.name}" dimuat.`);
+    } catch (err) {
+      showToast(err.message || "Gagal memuat project.");
+    }
+  });
+  loadDashboardData();
+  setInterval(() => {
+    const panel = document.querySelector('[data-view-panel="dashboard"]');
+    if (panel && panel.classList.contains("active")) updateDashboardEngineStatus();
+  }, 30000);
+}
+
 const SETTINGS_KEY = "clipperStudio.settings";
 
 function collectSettings() {
@@ -3829,8 +4048,7 @@ loadSettings();
 
 renderClips();
 selectClip(clips[0]);
-loadProjects();
-loadExports();
+initDashboard();
 setRatio(currentRatio());
 refreshStorage();
 pollQueue();
