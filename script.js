@@ -1543,7 +1543,14 @@ async function waitForJob(jobId, opts = {}) {
 
     const response = await fetch(`/api/jobs/${jobId}`);
     const job = await response.json();
-    if (!response.ok) throw new Error(job.error || "Job tidak ditemukan.");
+    if (!response.ok) {
+      // 404 = server restart / job dibersihkan: pesan pemulihan, bukan error generik.
+      const msg = response.status === 404
+        ? "Job hilang setelah aplikasi/server restart. Jalankan ulang analisis atau export."
+        : (job.error || "Job tidak ditemukan.");
+      settleJobProgress("error", msg);
+      throw new Error(msg);
+    }
 
     uploadStatus.textContent = `${job.status} ${job.progress}%`;
     const jpEl = jpRefs();
