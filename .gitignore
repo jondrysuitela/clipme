@@ -18,3 +18,9 @@ CACHEDIR.TAG
 server.out.log
 .ffmpeg-fallback
 bgmusic.mp3
+
+# credentials - JANGAN pernah commit
+integrations.json
+.env
+*.key
+*.pem
