@@ -167,10 +167,8 @@ button {
   border-radius: 6px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  font-family: var(--font-mono);
 }
+.nav-icon svg { display: block; }
 
 .nav-item.active .nav-icon {
   background: color-mix(in srgb, var(--accent) 18%, transparent);

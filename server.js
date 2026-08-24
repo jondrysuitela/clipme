@@ -6435,7 +6435,8 @@ function handleIntegrations(req, res) {
     platforms: [
       { id: "youtube", name: "YouTube", connected: has("YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET") },
       { id: "tiktok", name: "TikTok", connected: has("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET") },
-      { id: "instagram", name: "Instagram", connected: has("IG_APP_ID", "IG_APP_SECRET") }
+      { id: "instagram", name: "Instagram", connected: has("IG_APP_ID", "IG_APP_SECRET") },
+      { id: "facebook", name: "Facebook", connected: has("FB_APP_ID", "FB_APP_SECRET") || has("FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET") }
     ]
   });
 }
