@@ -754,52 +754,110 @@ async function refreshStorage() {
 }
 
 async function pollQueue() {
-  const el = $("#queueList");
-  if (!el) return;
   try {
     const response = await fetch("/api/queue");
     const data = await response.json();
     const jobs = Array.isArray(data.jobs) ? data.jobs : [];
     updateEngineStatus(jobs);
-    if (!jobs.length) {
-      el.innerHTML = '<div class="empty-state">Tidak ada job aktif.</div>';
-      return;
-    }
-    el.innerHTML = "";
-    for (const job of jobs) {
-      const row = document.createElement("div");
-      row.className = "table-row";
-      row.dataset.status = job.status;
-
-      const main = document.createElement("div");
-      const name = document.createElement("strong");
-      name.textContent = job.type;
-      const meta = document.createElement("span");
-      meta.textContent = `${job.progress || 0}%`;
-      main.appendChild(name);
-      main.appendChild(meta);
-      row.appendChild(main);
-
-      const pill = document.createElement("span");
-      pill.className = `status-pill ${statusPillClass(job.status)}`;
-      pill.textContent = job.status;
-      row.appendChild(pill);
-
-      if (job.status === "queued" || job.status === "running") {
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "secondary-button compact";
-        cancel.textContent = "Cancel";
-        cancel.addEventListener("click", () => {
-          fetch(`/api/jobs/${encodeURIComponent(job.id)}`, { method: "DELETE" })
-            .then(() => pollQueue())
-            .catch(() => {});
-        });
-        row.appendChild(cancel);
-      }
-      el.appendChild(row);
+    renderActiveJobs(jobs);
+    for (const el of [$("#queueList"), $("#procQueueList")].filter(Boolean)) {
+      renderQueueInto(el, jobs);
     }
   } catch {}
+}
+
+function renderQueueInto(el, jobs) {
+  if (!jobs.length) {
+    el.innerHTML = '<div class="empty-state">Tidak ada job aktif.</div>';
+    return;
+  }
+  el.innerHTML = "";
+  for (const job of jobs) {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    row.dataset.status = job.status;
+
+    const main = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = JOB_LABELS[job.type] || job.type;
+    name.title = `Job ${job.id.slice(0, 8)}…`;
+    const meta = document.createElement("span");
+    meta.textContent = `${job.progress || 0}%${job.stage ? ` - ${job.stage}` : ""}`;
+    main.appendChild(name);
+    main.appendChild(meta);
+    row.appendChild(main);
+
+    const pill = document.createElement("span");
+    pill.className = `status-pill ${statusPillClass(job.status)}`;
+    pill.textContent = job.status;
+    row.appendChild(pill);
+
+    if (job.status === "queued" || job.status === "running") {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "secondary-button compact";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        fetch(`/api/jobs/${encodeURIComponent(job.id)}`, { method: "DELETE" })
+          .then(() => pollQueue())
+          .catch(() => {});
+      });
+      row.appendChild(cancel);
+    }
+    el.appendChild(row);
+  }
+}
+
+// Dashboard — kartu ACTIVE PROCESSING dari data /api/queue nyata.
+function renderActiveJobs(jobs) {
+  const wrap = document.getElementById("dashActiveJobs");
+  const count = document.getElementById("dashActiveCount");
+  if (!wrap) return;
+  const live = (jobs || []).filter((j) => j.status === "running" || j.status === "queued");
+  if (count) count.textContent = String(live.length);
+  if (!live.length) {
+    wrap.innerHTML = '<div class="empty-state">NO ACTIVE JOBS &mdash; start a new project to begin clipping.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const job of live) {
+    const isOwn = processingState.jobId === job.id && processingState.label;
+    const label = isOwn ? processingState.label : (JOB_LABELS[job.type] || job.type);
+
+    const row = document.createElement("div");
+    row.className = "dj-row";
+
+    const main = document.createElement("div");
+    main.className = "dj-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = label;
+    const sub = document.createElement("span");
+    sub.textContent = job.stage || `${job.status}…`;
+    main.appendChild(nameEl);
+    main.appendChild(sub);
+    row.appendChild(main);
+
+    const bar = document.createElement("div");
+    bar.className = "dj-bar";
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.min(100, Number(job.progress) || 0)}%`;
+    bar.appendChild(fill);
+    row.appendChild(bar);
+
+    const pct = document.createElement("span");
+    pct.className = "dj-pct";
+    pct.textContent = `${job.progress || 0}%`;
+    row.appendChild(pct);
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "secondary-button compact";
+    viewBtn.textContent = "VIEW JOB";
+    viewBtn.addEventListener("click", () => openProcessingForJob(job.id, label));
+    row.appendChild(viewBtn);
+
+    wrap.appendChild(row);
+  }
 }
 
 function statusPillClass(status) {
@@ -1282,6 +1340,8 @@ async function uploadToBackend(file) {
 
   $("#fileTitle").textContent = data.name;
   $("#fileMeta").textContent = `${formatTime(data.probe.duration)} - ${data.probe.width}x${data.probe.height} - ${data.probe.codec}`;
+  fillSourceInfo(data.name, data.probe);
+  await applyProjectNamePatch(data.id);
   uploadStatus.textContent = `${clips.length} clips ready`;
   showToast(`${clips.length} clip dibuat. Klik "Analyze Hook Viral" untuk analisis lengkap.`);
 
@@ -1433,7 +1493,7 @@ function settleJobProgress(mode, message) {
   }, mode === "success" ? 2300 : 3600);
 }
 
-async function waitForJob(jobId) {
+async function waitForJob(jobId, opts = {}) {
   const startedAt = Date.now();
   const timeoutMs = 20 * 60 * 1000;
   let intervalMs = 1200;
@@ -1453,6 +1513,9 @@ async function waitForJob(jobId) {
     const jpEl = jpRefs();
     if (jpEl && jpEl.hidden) showJobProgress(JOB_LABELS[job.type] || "Memproses");
     setJobProgress(job.progress, job.stage || "");
+    if (typeof opts.onUpdate === "function") {
+      try { opts.onUpdate(job); } catch {}
+    }
 
     if (job.status === "done") {
       settleJobProgress("success", JOB_DONE[job.type] || "Selesai");
@@ -1509,6 +1572,8 @@ async function processYouTubeUrl() {
       if (!response.ok) throw new Error(data.error || "Download YouTube gagal.");
       setProcessStep("clips", ["metadata"]);
       loadProject(data);
+      fillSourceInfo(data.name || state.sourceName, data.probe);
+      await applyProjectNamePatch(data.id);
       setProcessStep("", ["metadata", "clips"]);
       settleJobProgress("success", `${clips.length} clip dibuat`);
       showToast(data.fastMode ? `${clips.length} clip dibuat instan. Preview akan mengambil section asli.` : `${clips.length} clip dibuat. ${data.transcriptStatus || "Transcript tidak ditemukan."}`);
@@ -1972,7 +2037,7 @@ $("#playClip").addEventListener("click", playSelectedClip);
 
 // Tombol "Analyze Hook Viral": analisis video AKTIF (lokal) via job — progres
 // persen + tahap tampil di banner dashboard lewat waitForJob.
-$("#analyzeHookBtn").addEventListener("click", async () => {
+async function startHookAnalysis() {
   if (!state.projectId) {
     // Video sudah di-drop tapi request upload masih berjalan? Tunggu dulu —
     // jangan langsung menolak dengan "upload video dulu".
@@ -1995,6 +2060,7 @@ $("#analyzeHookBtn").addEventListener("click", async () => {
   const oldLabel = btn.textContent;
   btn.textContent = "Analyzing...";
   uploadStatus.textContent = "Analisis hook viral dimulai...";
+  const label = state.sourceName || "Analysis";
   showJobProgress(JOB_LABELS["upload-analyze"], { indeterminate: true });
   try {
     const response = await fetch(`/api/projects/${state.projectId}/analyze-hook`, {
@@ -2004,7 +2070,9 @@ $("#analyzeHookBtn").addEventListener("click", async () => {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Gagal memulai analisis.");
-    const result = await waitForJob(data.jobId);
+    enterProcessingView(data.jobId, label, startHookAnalysis, { projectId: state.projectId });
+    const result = await waitForJob(data.jobId, { onUpdate: renderProcessingTick });
+    completeProcessingView(result);
     const analyzed = result && Array.isArray(result.clips) ? result.clips : [];
     if (!analyzed.length) throw new Error((result && result.warning) || "Analisis tidak menghasilkan clip.");
     clips = analyzed;
@@ -2015,13 +2083,16 @@ $("#analyzeHookBtn").addEventListener("click", async () => {
     showToast(`Analisis hook viral selesai: ${(result && result.transcriptStatus) || ""} - ${clips.length} clip.`);
   } catch (err) {
     settleJobProgress("error", err.message);
+    await failProcessingView(err);
     showToast(err.message);
     uploadStatus.textContent = "Failed";
   } finally {
     btn.disabled = false;
     btn.textContent = oldLabel;
   }
-});
+}
+
+$("#analyzeHookBtn").addEventListener("click", () => startHookAnalysis());
 
 
 previewVideo.addEventListener("timeupdate", updateLiveCaption);
@@ -3625,6 +3696,8 @@ $$(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     showView(button.dataset.view);
     if (button.dataset.view === "dashboard") loadDashboardData();
+    if (button.dataset.view === "studio") checkEngineReadiness(false);
+    if (button.dataset.view === "results" && resultsState.projectId) renderResultsAll();
     if (button.dataset.view === "library") loadProjects();
     if (button.dataset.view === "exports") loadExports();
   });
@@ -3788,6 +3861,7 @@ async function updateDashboardAvgScore() {
       if (typeof c.score === "number" && Number.isFinite(c.score)) { sum += c.score; n += 1; }
     }
   }
+  renderRecentResults(details);
   if (!n) {
     el.textContent = "—";
     el.classList.add("is-empty");
@@ -3797,6 +3871,60 @@ async function updateDashboardAvgScore() {
   el.classList.remove("is-empty");
   el.textContent = String(Math.round(sum / n));
   if (hint) hint.textContent = `from ${n} scored clips`;
+}
+
+// Dashboard — kartu RECENT RESULTS dari detail project yang SAMA dengan
+// perhitungan avg score (tanpa API call tambahan).
+function renderRecentResults(details) {
+  const wrap = document.getElementById("dashRecentResults");
+  const pill = document.getElementById("dashRecentPill");
+  if (!wrap) return;
+  const withClips = (details || []).filter((d) => d && Array.isArray(d.clips) && d.clips.length);
+  if (!withClips.length) {
+    wrap.innerHTML = '<div class="empty-state">NO RECENT RESULTS &mdash; complete an analysis to see outcomes here.</div>';
+    if (pill) pill.hidden = true;
+    return;
+  }
+  const latest = withClips[0];
+  const analyzedCount = latest.clips.filter((c) => c.score != null || !!c.analysis).length;
+  const topScore = latest.clips.reduce((max, c) => {
+    const s = Number(c.score);
+    return Number.isFinite(s) && s > max ? s : max;
+  }, -1);
+
+  wrap.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "rr-row";
+
+  const main = document.createElement("div");
+  main.className = "rr-main";
+  const nameEl = document.createElement("strong");
+  nameEl.textContent = latest.name || "—";
+  const metaEl = document.createElement("span");
+  metaEl.textContent = `${latest.clips.length} clips · ${analyzedCount} analyzed`;
+  main.appendChild(nameEl);
+  main.appendChild(metaEl);
+  row.appendChild(main);
+
+  const top = document.createElement("div");
+  top.className = "rr-top";
+  const em = document.createElement("em");
+  em.textContent = "TOP CLIP SCORE";
+  const b = document.createElement("b");
+  b.textContent = topScore > -1 ? String(Math.round(topScore)) : "—";
+  top.appendChild(em);
+  top.appendChild(b);
+  row.appendChild(top);
+
+  const viewBtn = document.createElement("button");
+  viewBtn.type = "button";
+  viewBtn.className = "secondary-button compact";
+  viewBtn.textContent = "VIEW RESULTS";
+  viewBtn.addEventListener("click", () => openResultsForProject(latest.id));
+  row.appendChild(viewBtn);
+
+  wrap.appendChild(row);
+  if (pill) { pill.hidden = false; pill.textContent = "latest"; }
 }
 
 function renderDashboardProjects(projects) {
@@ -3946,6 +4074,711 @@ function initDashboard() {
   }, 30000);
 }
 
+// ================= PROCESSING WORKSPACE (Phase 2) =================
+// Semua state dari job nyata server (/api/jobs/:id, /api/queue).
+// Tidak ada progres buatan, tidak ada job ID karangan.
+
+const PIPELINE_STAGES = {
+  // Label tahap HARUS sama dengan yang dikirim worker analyzeLocalUpload.
+  "upload-analyze": [
+    "Menyiapkan berkas",
+    "Ekstraksi audio",
+    "Transkripsi suara (STT)",
+    "Analisis hook viral",
+    "Skor & judul Deep AI"
+  ]
+};
+
+const processingState = {
+  jobId: null,
+  projectId: null,
+  label: "",
+  status: "idle",
+  progress: 0,
+  stage: "",
+  startedAt: 0,
+  error: null,
+  retryFn: null,
+  lastType: "",
+  timer: 0
+};
+
+function formatMMss(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function fillSourceInfo(name, probe) {
+  const card = document.getElementById("sourceInfoCard");
+  if (!card || !probe) return;
+  const p = probe || {};
+  $("#siName").textContent = name || "—";
+  $("#siDuration").textContent = p.duration ? formatTime(p.duration) : "—";
+  $("#siRes").textContent = p.width && p.height ? `${p.width} × ${p.height}` : "—";
+  $("#siFps").textContent = p.fps ? `${p.fps} FPS` : "—";
+  $("#siAudio").textContent = p.hasAudio === true ? "Audio detected" : p.hasAudio === false ? "No audio" : "—";
+  card.hidden = false;
+}
+
+async function applyProjectNamePatch(projectId) {
+  const input = document.getElementById("projectNameInput");
+  const custom = input ? input.value.trim() : "";
+  if (!projectId || !custom) return;
+  try {
+    await fetch(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: custom })
+    });
+    const entry = state.projects.find((p) => p.id === projectId);
+    if (entry) entry.name = custom;
+    $("#fileTitle").textContent = custom;
+  } catch {}
+}
+
+// ---- Engine Readiness: semua dari API nyata, tidak ada status karangan ----
+const readinessCache = { stt: undefined, sttAt: 0 };
+
+function setEr(id, state, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.dataset.state = state;
+  el.textContent = text;
+}
+
+async function checkEngineReadiness(force = false) {
+  const wantStt = force || readinessCache.stt === undefined || Date.now() - readinessCache.sttAt > 120000;
+  const [sys, ai, stt] = await Promise.all([
+    fetch("/api/system").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetch("/api/localai/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    wantStt
+      ? fetch("/api/stt/models").then((r) => (r.ok ? r.json() : { models: [] })).then((d) => {
+          readinessCache.stt = d; readinessCache.sttAt = Date.now(); return d;
+        }).catch(() => null)
+      : Promise.resolve(readinessCache.stt)
+  ]);
+
+  const hw = sys && sys.hardware ? sys.hardware : {};
+  const cpu = hw.cpu || {};
+  const gpu = hw.gpu || {};
+  const cuda = hw.cuda || {};
+  const nvenc = hw.nvenc || {};
+
+  // CPU/GPU/FFmpeg: endpoint /api/system hidup = backend & ffmpeg berfungsi.
+  setEr("erCpu", cpu.cores ? "ready" : (sys ? "unknown" : "offline"),
+    cpu.cores ? `READY · ${cpu.cores} CORE` : (sys ? "UNKNOWN" : "OFFLINE"));
+  setEr("erGpu",
+    gpu.present ? (cuda.available ? "ready" : "busy") : (sys ? "idle" : "offline"),
+    gpu.present
+      ? (cuda.available ? "READY · CUDA" : "BUSY · DETECTED, CPU FALLBACK")
+      : (sys ? "NOT DETECTED" : "OFFLINE"));
+  setEr("erFfmpeg", sys ? "ready" : "offline", sys ? (nvenc.available ? "READY · NVENC" : "READY") : "OFFLINE");
+
+  // STT: /api/stt/models menjalankan runtime Python list-models.
+  if (stt && Array.isArray(stt.models)) {
+    setEr("erStt", "ready", `READY · ${stt.models.length} MODEL`);
+  } else {
+    setEr("erStt", sys ? "error" : "offline", sys ? "! ERROR" : "OFFLINE");
+  }
+
+  // Local AI: backend speaker/face nyata dari /api/localai/status.
+  const be = ai && ai.aiBackend ? ai.aiBackend : {};
+  const spk = String(be.speaker || "");
+  const face = String(be.face || "");
+  const aiOn = (spk && spk !== "skip") || (face && face !== "skip");
+  setEr("erAi", ai ? (aiOn ? "ready" : "idle") : (sys ? "unknown" : "offline"),
+    ai ? (aiOn ? `READY · ${`${spk}/${face}`.slice(0, 20).toUpperCase()}` : "MODELS OFF") : (sys ? "UNKNOWN" : "OFFLINE"));
+
+  // Hook/Caption engine: module lokal yang di-require server saat boot —
+  // server hidup berarti engine termuat; tidak ada klaim lebih jauh.
+  setEr("erHook", sys ? "ready" : "offline", sys ? "READY" : "OFFLINE");
+  setEr("erCaption", sys ? "ready" : "offline", sys ? "READY" : "OFFLINE");
+
+  const summary = document.getElementById("erSummary");
+  if (summary) {
+    const coreReady = Boolean(sys) && Boolean(stt);
+    summary.textContent = coreReady ? "SYSTEM READY" : (sys ? "PARTIAL — CHECK ITEMS ABOVE" : "SERVER OFFLINE");
+    summary.dataset.state = coreReady ? "ready" : "partial";
+  }
+}
+
+// ---- Processing view controller ----
+function setProcPill(state, text) {
+  const pill = document.getElementById("procStatePill");
+  if (!pill) return;
+  pill.dataset.state = state;
+  pill.className = `status-pill ${statusPillClass(state === "analyzing" || state === "processing" ? "running" : state === "completed" ? "done" : state === "failed" ? "failed" : state === "cancelled" ? "cancelled" : "queued")}`;
+  pill.textContent = text;
+}
+
+function enterProcessingView(jobId, label, retryFn, opts = {}) {
+  processingState.jobId = jobId || null;
+  processingState.projectId = opts.projectId || null;
+  processingState.label = label || "Processing";
+  processingState.retryFn = retryFn || null;
+  processingState.status = jobId ? "preparing" : "preparing";
+  processingState.progress = 0;
+  processingState.stage = "";
+  processingState.startedAt = Date.now();
+  processingState.error = null;
+
+  $("#procTitle").textContent = processingState.label;
+  $("#procJobId").textContent = jobId ? String(jobId).slice(0, 8).toUpperCase() : "Preparing…";
+  $("#procErrorBox").hidden = true;
+  $("#procRetryBtn").hidden = true;
+  $("#procResultsBtn").hidden = true;
+  $("#procCancelBtn").hidden = !jobId;
+  $("#procCancelBtn").disabled = false;
+  $("#procFill").style.width = "0%";
+  $("#procPct").textContent = "0%";
+  $("#procTask").textContent = "Waiting to start…";
+  $("#procEta").textContent = "—";
+  $("#procElapsed").textContent = "00:00";
+  setProcPill("preparing", "PREPARING");
+
+  window.clearInterval(processingState.timer);
+  processingState.timer = window.setInterval(() => {
+    if (processingState.status !== "running" && processingState.status !== "preparing" && processingState.status !== "analyzing") return;
+    $("#procElapsed").textContent = formatMMss((Date.now() - processingState.startedAt) / 1000);
+  }, 1000);
+
+  showView("processing");
+
+  if (opts.passive && jobId) {
+    waitForJob(jobId, { onUpdate: renderProcessingTick })
+      .then((result) => completeProcessingView(result))
+      .catch((err) => failProcessingView(err));
+  }
+}
+
+function renderProcessingTick(job) {
+  if (!job || job.id !== processingState.jobId) return;
+  processingState.lastType = job.type;
+  processingState.stage = job.stage || "";
+  processingState.progress = Number(job.progress) || 0;
+  if (["done", "failed", "cancelled"].includes(job.status)) return;
+  processingState.status = "analyzing";
+  setProcPill("analyzing", "ANALYZING");
+
+  $("#procFill").style.width = `${processingState.progress}%`;
+  $("#procPct").textContent = `${Math.round(processingState.progress)}%`;
+  $("#procTask").textContent = job.stage || JOB_LABELS[job.type] || "Working…";
+
+  const pctNum = processingState.progress;
+  if (pctNum >= 10) {
+    const elapsedSec = (Date.now() - processingState.startedAt) / 1000;
+    const etaSec = (elapsedSec / pctNum) * (100 - pctNum);
+    $("#procEta").textContent = formatMMss(etaSec);
+  }
+
+  const stages = PIPELINE_STAGES[job.type];
+  const list = $("#procPipeline");
+  const labelEl = $("#procPipelineLabel");
+  if (!stages) {
+    if (list) list.innerHTML = "";
+    if (labelEl) labelEl.style.display = "none";
+    return;
+  }
+  if (labelEl) labelEl.style.display = "";
+  const curIdx = stages.indexOf(job.stage);
+  list.innerHTML = "";
+  stages.forEach((name, i) => {
+    const li = document.createElement("li");
+    if (curIdx > -1) {
+      li.className = i < curIdx ? "done" : i === curIdx ? "current" : "";
+    } else if (job.progress >= 99) {
+      li.className = "current";
+    }
+    li.textContent = name;
+    list.appendChild(li);
+  });
+}
+
+function completeProcessingView(result) {
+  processingState.status = "completed";
+  window.clearInterval(processingState.timer);
+  $("#procElapsed").textContent = formatMMss((Date.now() - processingState.startedAt) / 1000);
+  $("#procFill").style.width = "100%";
+  $("#procPct").textContent = "100%";
+  $("#procEta").textContent = "00:00";
+  setProcPill("completed", "COMPLETED");
+  $("#procCancelBtn").hidden = true;
+  $("#procResultsBtn").hidden = false;
+
+  const clipCount = result && Array.isArray(result.clips) ? result.clips.length : null;
+  $("#procTask").textContent = clipCount != null
+    ? `ANALYSIS COMPLETE — ${clipCount} potential clips found.`
+    : (JOB_DONE[processingState.lastType] || "COMPLETED");
+
+  const list = $("#procPipeline");
+  if (list && list.children.length) {
+    [...list.children].forEach((li) => { li.className = "done"; });
+  }
+}
+
+async function failProcessingView(err) {
+  window.clearInterval(processingState.timer);
+  let terminalStatus = "failed";
+  if (processingState.jobId) {
+    try {
+      const r = await fetch(`/api/jobs/${processingState.jobId}`);
+      if (r.ok) terminalStatus = (await r.json()).status || "failed";
+    } catch {}
+  }
+  console.error("[processing]", err);
+
+  if (terminalStatus === "cancelled") {
+    processingState.status = "cancelled";
+    setProcPill("cancelled", "CANCELLED");
+    $("#procTask").textContent = "JOB CANCELLED — Processing stopped safely.";
+    $("#procFill").style.width = "0%";
+  } else {
+    processingState.status = "failed";
+    processingState.error = err.message || "Unknown error";
+    setProcPill("failed", "FAILED");
+    $("#procErrorReason").textContent = processingState.error;
+    $("#procErrorBox").hidden = false;
+    $("#procTask").textContent = "PROCESSING FAILED";
+  }
+  $("#procCancelBtn").hidden = true;
+  $("#procRetryBtn").hidden = !processingState.retryFn;
+}
+
+function openProcessingForJob(jobId, label) {
+  enterProcessingView(jobId, label || "Job", null, { passive: true });
+}
+
+$("#procCancelBtn").addEventListener("click", async () => {
+  if (!processingState.jobId) return;
+  const btn = $("#procCancelBtn");
+  btn.disabled = true;
+  try {
+    await fetch(`/api/jobs/${encodeURIComponent(processingState.jobId)}`, { method: "DELETE" });
+  } catch (err) {
+    showToast(err.message || "Gagal membatalkan job.");
+  }
+});
+
+$("#procRetryBtn").addEventListener("click", () => {
+  const fn = processingState.retryFn;
+  if (typeof fn === "function") fn();
+});
+
+$("#procResultsBtn").addEventListener("click", () => {
+  if (processingState.projectId) openResultsForProject(processingState.projectId);
+  else showView("studio");
+});
+
+$("#procBackBtn").addEventListener("click", () => {
+  showView("dashboard");
+  loadDashboardData();
+});
+
+// ================= RESULTS WORKSPACE (Phase 3) =================
+// Semua nilai dari GET /api/projects/:id (manifest nyata) + POST /api/analyze-clip
+// (engine ClipMe). Field yang tidak ada ditampilkan "—" — tidak ada skor judulan.
+
+const resultsState = {
+  projectId: null,
+  name: "",
+  sourceLabel: "",
+  duration: 0,
+  clips: [],
+  visible: [],
+  selectedClipId: null,
+  status: "idle",
+  analyzing: false,
+  analyzingClipId: null,
+  transcripts: {}
+};
+
+function resIsAnalyzed(clip) {
+  return clip.score != null || !!clip.analysis;
+}
+
+async function openResultsForProject(projectId) {
+  if (!projectId) return;
+  showView("results");
+  setResPill("loading", "LOADING");
+  try {
+    const response = await fetch(`/api/projects/${projectId}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memuat project.");
+    resultsState.projectId = data.id;
+    resultsState.name = data.name || "";
+    resultsState.sourceLabel = data.url || String(data.type || "local").toUpperCase();
+    resultsState.duration = Number(data.probe && data.probe.duration) || 0;
+    resultsState.clips = Array.isArray(data.clips) ? data.clips : [];
+    resultsState.selectedClipId = null;
+    resultsState.transcripts = {};
+    resultsState.status = resultsState.clips.length ? "ready" : "empty";
+    $("#resErrorBox").hidden = true;
+    renderResultsAll();
+  } catch (err) {
+    console.error("[results]", err);
+    showToast(err.message || "Gagal memuat hasil.");
+  }
+}
+
+function setResPill(stateKey, text) {
+  const pill = document.getElementById("resStatePill");
+  if (!pill) return;
+  pill.className = `status-pill ${statusPillClass(
+    stateKey === "ready" ? "done" : stateKey === "failed" ? "failed" : stateKey === "partial" ? "running" : "queued"
+  )}`;
+  pill.textContent = text;
+}
+
+function renderResultsAll() {
+  renderResHeader();
+  applyResView();
+  const sel = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
+  if (sel) fillResultIntel(sel);
+}
+
+function renderResHeader() {
+  $("#resProjectName").textContent = resultsState.name || "—";
+  $("#resSource").textContent = resultsState.sourceLabel || "—";
+  $("#resDuration").textContent = resultsState.duration ? formatTime(resultsState.duration) : "—";
+  $("#resClipsCount").textContent = String(resultsState.clips.length);
+  $("#resAnalyzed").textContent = `${resAnalyzedCount()} / ${resultsState.clips.length}`;
+  $("#analyzeAllBtn").disabled = !resultsState.clips.length || resultsState.analyzing;
+  if (resultsState.analyzing) setResPill("analyzing", "ANALYZING");
+  else if (!resultsState.clips.length) setResPill("idle", "NO RESULTS");
+  else setResPill("ready", `${resultsState.clips.length} CLIPS FOUND`);
+}
+
+function applyResView() {
+  const list = document.getElementById("resultsClipList");
+  if (!list) return;
+  const q = ($("#resSearch").value || "").trim().toLowerCase();
+  const mode = $("#resFilter").value;
+  const sort = $("#resSort").value;
+
+  let arr = resultsState.clips.slice();
+  if (mode === "top") arr = arr.filter((c) => Number.isFinite(Number(c.score)));
+  if (mode === "analyzed") arr = arr.filter(resIsAnalyzed);
+  if (mode === "unanalyzed") arr = arr.filter((c) => !resIsAnalyzed(c));
+  if (q) {
+    arr = arr.filter((c) => {
+      const hay = [c.title, c.deepTitle, c.hook, c.caption, c.recommendedHook, c.analysis && c.analysis.keyMessage]
+        .map((v) => String(v || "").toLowerCase()).join(" ");
+      return hay.includes(q);
+    });
+  }
+  if (sort === "scoreDesc") arr.sort((a, b) => (Number(b.score) || -1) - (Number(a.score) || -1));
+  if (sort === "scoreAsc") arr.sort((a, b) => (Number(a.score) || 1e9) - (Number(b.score) || 1e9));
+  if (sort === "duration") arr.sort((a, b) => ((b.end - b.start) || 0) - ((a.end - a.start) || 0));
+  resultsState.visible = arr;
+
+  list.innerHTML = "";
+  if (!arr.length) {
+    list.innerHTML = `<div class="empty-state">${resultsState.clips.length ? "Tidak ada clip yang cocok dengan filter." : "NO CLIPS YET &mdash; run analysis to discover potential clips."}</div>`;
+    return;
+  }
+
+  for (const clip of arr) {
+    const dur = Math.max(0, Math.round((clip.end || 0) - (clip.start || 0)));
+    const analyzed = resIsAnalyzed(clip);
+
+    const card = document.createElement("article");
+    card.className = `rc-card${clip.id === resultsState.selectedClipId ? " selected" : ""}`;
+    card.dataset.clipId = clip.id;
+
+    const head = document.createElement("div");
+    head.className = "rc-head";
+    const idEl = document.createElement("span");
+    idEl.className = "rc-id";
+    idEl.textContent = `CLIP ${String(clip.id).padStart(2, "0")}${analyzed ? "" : " · NEW"}`;
+    const scoreEl = document.createElement("span");
+    scoreEl.className = "rc-score";
+    scoreEl.textContent = clip.score != null ? String(Math.round(Number(clip.score))) : "—";
+    head.appendChild(idEl);
+    head.appendChild(scoreEl);
+    card.appendChild(head);
+
+    const time = document.createElement("p");
+    time.className = "rc-time";
+    time.textContent = `${formatTime(clip.start)} → ${formatTime(clip.end)} · ${dur}s`;
+    card.appendChild(time);
+
+    const quoteText = clip.recommendedHook || clip.hook || clip.caption || "";
+    const quote = document.createElement("p");
+    quote.className = "rc-quote";
+    quote.textContent = quoteText ? `"${quoteText}"` : "—";
+    card.appendChild(quote);
+
+    if (clip.deepTitle && clip.deepTitle !== quoteText) {
+      const sub = document.createElement("p");
+      sub.className = "rc-title-sub";
+      sub.textContent = clip.deepTitle;
+      card.appendChild(sub);
+    }
+
+    if (analyzed || clip.hookType || clip.hookScore != null) {
+      const scores = document.createElement("div");
+      scores.className = "rc-scores";
+      const viral = document.createElement("span");
+      viral.innerHTML = `VIRAL<b>${clip.score != null ? Math.round(Number(clip.score)) : "—"}</b>`;
+      const hookS = document.createElement("span");
+      hookS.innerHTML = `HOOK<b>${clip.hookScore != null ? Math.round(Number(clip.hookScore)) : "—"}</b>`;
+      scores.appendChild(viral);
+      scores.appendChild(hookS);
+      card.appendChild(scores);
+    }
+
+    if (clip.hookType) {
+      const badges = document.createElement("div");
+      badges.className = "rc-badges";
+      const b = document.createElement("span");
+      b.className = "intel-badge";
+      b.textContent = `Hook: ${clip.hookType}`;
+      badges.appendChild(b);
+      card.appendChild(badges);
+    }
+
+    if (clip.id === resultsState.analyzingClipId) {
+      const st = document.createElement("p");
+      st.className = "rc-analyzing rc-title-sub";
+      st.textContent = "ANALYZING…";
+      card.appendChild(st);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "rc-actions";
+    const prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.className = "primary-button compact";
+    prevBtn.textContent = "PREVIEW";
+    prevBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(true); });
+    const studioBtn = document.createElement("button");
+    studioBtn.type = "button";
+    studioBtn.className = "secondary-button compact";
+    studioBtn.textContent = "STUDIO";
+    studioBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(false); });
+    actions.appendChild(prevBtn);
+    actions.appendChild(studioBtn);
+    card.appendChild(actions);
+
+    card.addEventListener("click", () => {
+      resultsState.selectedClipId = clip.id;
+      $$(".rc-card").forEach((el) => el.classList.toggle("selected", el.dataset.clipId === String(clip.id)));
+      fillResultIntel(clip);
+    });
+
+    list.appendChild(card);
+  }
+}
+
+function fillResultIntel(clip) {
+  $("#resIntelEmpty").hidden = true;
+  $("#resIntelBody").hidden = false;
+  const provider = document.getElementById("resIntelProvider");
+
+  const dur = Math.max(0, Math.round((clip.end || 0) - (clip.start || 0)));
+  $("#riTiming").textContent = `${formatTime(clip.start)} → ${formatTime(clip.end)}`;
+  $("#riDuration").textContent = `${dur} sec`;
+  $("#riScore").textContent = clip.score != null ? `${Math.round(Number(clip.score))}/100` : "—";
+  $("#riHookScore").textContent = clip.hookScore != null ? `${Math.round(Number(clip.hookScore))}/100` : "—";
+  $("#riHookType").textContent = clip.hookType || "—";
+  $("#riOptimal").textContent = clip.optimalRange
+    ? `${clip.optimalRange}s`
+    : (clip.optimalDuration ? `${Math.round(clip.optimalDuration)}s` : "—");
+  $("#riHook").textContent = clip.recommendedHook || clip.hook || "—";
+  $("#riTitle").textContent = clip.deepTitle || "No title generated yet.";
+  $("#riAltTitles").textContent = Array.isArray(clip.deepTitleAlternatives) && clip.deepTitleAlternatives.length
+    ? clip.deepTitleAlternatives.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    : "—";
+  $("#riKeyMessage").textContent = (clip.analysis && clip.analysis.keyMessage) || "—";
+
+  if (provider) {
+    const prov = clip.analysis ? (clip.analysis.provider || "clipme") : "";
+    provider.hidden = !prov;
+    if (prov) provider.textContent = prov;
+  }
+
+  const totalDur = resultsState.duration;
+  if (totalDur > 0) {
+    const left = Math.min(100, (Number(clip.start) / totalDur) * 100);
+    const width = Math.max(0.5, Math.min(100 - left, ((clip.end - clip.start) / totalDur) * 100));
+    const region = $("#rtRegion");
+    region.style.left = `${left}%`;
+    region.style.width = `${width}%`;
+  } else {
+    $("#rtRegion").style.left = "0%";
+    $("#rtRegion").style.width = "0%";
+  }
+  $("#rtStart").textContent = formatTime(clip.start);
+  $("#rtEnd").textContent = formatTime(Math.min(resultsState.duration || clip.end, clip.end));
+
+  renderResTranscript(clip);
+  $("#riStatus").textContent = "";
+}
+
+function renderResTranscript(clip) {
+  const wrap = document.getElementById("riTranscript");
+  const lines = resultsState.transcripts[clip.id];
+  wrap.innerHTML = "";
+  if (!lines || !lines.length) {
+    wrap.innerHTML = '<div class="empty-state">Jalankan ANALYZE pada clip ini untuk mendapat baris transkrip bertimestamp.</div>';
+    return;
+  }
+  for (const seg of lines) {
+    const row = document.createElement("div");
+    row.className = "rt-line";
+    const t = document.createElement("time");
+    t.textContent = formatTime(seg.start);
+    t.title = "Klik untuk seek preview";
+    t.addEventListener("click", () => seekPreviewToSegment(clip, seg));
+    const p = document.createElement("p");
+    p.textContent = seg.text || "";
+    row.appendChild(t);
+    row.appendChild(p);
+    wrap.appendChild(row);
+  }
+}
+
+// Preview full-source memakai waktu absolut; section ter-bound mulai dari 0.
+function seekPreviewToSegment(clip, seg) {
+  if (!state.projectId) return;
+  if (state.projectId !== resultsState.projectId) return;
+  const abs = state.noDownload ? Number(seg.start) || 0 : (Number(clip.start) || 0) + (Number(seg.start) || 0);
+  if (!previewVideo.src) { playSelectedClip(); return; }
+  previewVideo.currentTime = Math.max(0, abs);
+  previewVideo.play().catch(() => {});
+}
+
+async function analyzeResultClip(clip) {
+  if (!resultsState.projectId || !clip || resultsState.analyzing) return false;
+  resultsState.analyzing = true;
+  resultsState.analyzingClipId = clip.id;
+  $("#riStatus").textContent = "Menganalisis dengan ClipMe engine...";
+  renderResHeader();
+  applyResView();
+  const sel = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
+  if (sel && sel.id === clip.id) fillResultIntel(sel);
+
+  try {
+    const response = await fetch("/api/analyze-clip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: resultsState.projectId,
+        clipId: clip.id,
+        start: clip.start,
+        end: clip.end,
+        language: CAPTION_LANG,
+        keepOriginal: false,
+        disableRewrite: false,
+        ...durationSettingsPayload()
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Analyze gagal.");
+    clip.analysis = data.analysis;
+    if (data.timedSegments) resultsState.transcripts[clip.id] = data.timedSegments;
+    $("#riStatus").textContent = data.provider === "clipme-llm" ? "AI (LLM)" : "Heuristic";
+    return true;
+  } catch (err) {
+    console.error("[results-analyze]", err);
+    $("#riStatus").textContent = "Gagal";
+    showToast(err.message || "Analyze clip gagal.");
+    return false;
+  } finally {
+    resultsState.analyzing = false;
+    resultsState.analyzingClipId = null;
+    renderResHeader();
+    applyResView();
+    const sel2 = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
+    if (sel2) fillResultIntel(sel2);
+  }
+}
+
+let resAnalyzingAll = false;
+
+async function analyzeAllClips() {
+  if (resAnalyzingAll) return;
+  const targets = resultsState.clips.filter((c) => !resIsAnalyzed(c));
+  if (!targets.length) { showToast("Semua clip sudah dianalisis."); return; }
+  resAnalyzingAll = true;
+  resultsState.analyzing = true;
+  $("#analyzeAllBtn").disabled = true;
+  const progressPill = document.getElementById("resProgressPill");
+  if (progressPill) progressPill.hidden = false;
+  let done = 0;
+  let failures = 0;
+  let firstError = "";
+
+  for (const clip of targets) {
+    if (progressPill) progressPill.textContent = `${done}/${targets.length}`;
+    const okResult = await analyzeResultClip(clip);
+    done += 1;
+    if (!okResult) {
+      failures += 1;
+      if (!firstError) firstError = $("#riStatus").textContent === "Gagal" ? "Analyze clip gagal." : "";
+    }
+  }
+
+  resAnalyzingAll = false;
+  resultsState.analyzing = false;
+  if (progressPill) { progressPill.hidden = true; progressPill.textContent = "0%"; }
+  $("#analyzeAllBtn").disabled = false;
+
+  if (failures) {
+    resultsState.status = "partial";
+    setResPill("partial", "PARTIAL RESULTS");
+    $("#resErrorReason").textContent = firstError || `${failures} clip gagal dianalisis.`;
+    $("#resErrorBox").hidden = false;
+  } else {
+    resultsState.status = "ready";
+    $("#resErrorBox").hidden = true;
+    setResPill("ready", `${resultsState.clips.length} CLIPS FOUND`);
+  }
+}
+
+async function ensureResultsProjectInStudio() {
+  const cid = resultsState.selectedClipId;
+  let liveClip = state.projectId === resultsState.projectId
+    ? clips.find((c) => c.id === cid) || null
+    : null;
+  if (!liveClip) {
+    const response = await fetch(`/api/projects/${resultsState.projectId}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memuat project.");
+    loadProject(data);
+    liveClip = clips.find((c) => c.id === cid) || clips[0] || null;
+  }
+  return liveClip;
+}
+
+async function handoffToStudio(autoplay) {
+  try {
+    const liveClip = await ensureResultsProjectInStudio();
+    if (!liveClip) throw new Error("Clip tidak ditemukan di project.");
+    selectClip(liveClip);
+    showView("studio");
+    if (autoplay) playSelectedClip();
+  } catch (err) {
+    showToast(err.message || "Gagal membuka Studio.");
+  }
+}
+
+$("#analyzeAllBtn").addEventListener("click", analyzeAllClips);
+$("#resRetryBtn").addEventListener("click", () => {
+  $("#resErrorBox").hidden = true;
+  analyzeAllClips();
+});
+$("#riAnalyzeBtn").addEventListener("click", async () => {
+  const clip = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
+  if (!clip) { showToast("Pilih clip dulu."); return; }
+  await analyzeResultClip(clip);
+});
+$("#riPreviewBtn").addEventListener("click", () => handoffToStudio(true));
+$("#riStudioBtn").addEventListener("click", () => handoffToStudio(false));
+$("#resSearch").addEventListener("input", applyResView);
+$("#resFilter").addEventListener("change", applyResView);
+$("#resSort").addEventListener("change", applyResView);
+
 const SETTINGS_KEY = "clipperStudio.settings";
 
 function collectSettings() {
@@ -4049,6 +4882,7 @@ loadSettings();
 renderClips();
 selectClip(clips[0]);
 initDashboard();
+checkEngineReadiness(true);
 setRatio(currentRatio());
 refreshStorage();
 pollQueue();

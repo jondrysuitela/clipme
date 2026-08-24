@@ -96,9 +96,9 @@ test("server: endpoint analyze-hook menjalankan job analisis (progres via pollin
 });
 
 test("klien: tombol memanggil endpoint & mem-poll jobId (progres % di UI)", () => {
-  const btn = script.slice(script.indexOf('$("#analyzeHookBtn").addEventListener'), script.indexOf('$("#analyzeHookBtn").addEventListener') + 2200);
+  const btn = script.slice(script.indexOf("async function startHookAnalysis"), script.indexOf("async function startHookAnalysis") + 2400);
   assert.match(btn, /\/api\/projects\/\$\{state\.projectId\}\/analyze-hook/, "must call the analyze-hook endpoint");
-  assert.match(btn, /waitForJob\(data\.jobId\)/, "client must poll the analysis job (progress % in UI)");
+  assert.match(btn, /waitForJob\(data\.jobId/, "client must poll the analysis job (progress % in UI)");
   assert.match(btn, /clips = analyzed;/, "analyzed clips replace placeholders after job done");
 });
 
@@ -164,7 +164,7 @@ test("klien: attachFile menandai dropzone & mencatat promise upload berjalan", (
 });
 
 test("klien: tombol analyze menunggu upload berjalan, bukan langsung menolak", () => {
-  const btn = script.slice(script.indexOf('$("#analyzeHookBtn").addEventListener'), script.indexOf('$("#analyzeHookBtn").addEventListener') + 2600);
+  const btn = script.slice(script.indexOf("async function startHookAnalysis"), script.indexOf("async function startHookAnalysis") + 2600);
   const guardPos = btn.indexOf("if (!state.projectId)");
   const waitPos = btn.indexOf("await state.localUploadPromise;");
   assert.ok(guardPos > -1 && waitPos > guardPos, "analyze must await in-flight upload when projectId not set yet");
@@ -307,10 +307,74 @@ test("dashboard: engine status real dari /api/system + localai + queue", () => {
 
 test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
   const html = fs.readFileSync("index.html", "utf8");
+  // Phase 3: Results kini workspace nyata — placeholder tersisa Analytics & DNA saja
   const coming = (html.match(/Coming next/g) || []).length;
-  assert.strictEqual(coming, 3, "Results/Analytics/DNA masing2 satu empty state");
+  assert.strictEqual(coming, 2, "Analytics & DNA masing2 satu empty state");
+  assert.ok(html.includes('data-view-panel="results"'), "results panel exists");
+  assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
   assert.ok(!/<canvas/i.test(html), "no fake canvas charts");
   assert.doesNotMatch(script, /Chart\(/, "no chart library stubs");
+});
+
+// ── Phase 3: Results workspace + clip intelligence (REAL data only) ─────────
+test("phase3: results UI lengkap — header real metadata, filter, sort, search", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["resProjectName", "resSource", "resDuration", "resClipsCount", "resAnalyzed", "analyzeAllBtn", "resStatePill", "resultsClipList", "resSearch", "resFilter", "resSort", "riTiming", "riScore", "riHookScore", "riHookType", "riTitle", "riTranscript", "rtRegion"]) {
+    assert.ok(html.includes(`id="${id}"`), `results part ${id} must exist`);
+  }
+  for (const opt of ["top", "analyzed", "unanalyzed"]) {
+    assert.ok(html.includes(`value="${opt}"`), `filter ${opt} exists`);
+  }
+  for (const sortV of ["original", "scoreDesc", "scoreAsc", "duration"]) {
+    assert.ok(html.includes(`value="${sortV}"`), `sort ${sortV} exists`);
+  }
+});
+
+test("phase3: tanpa mock — skor dari backend, missing = '—', tanpa Math.random/setTimeout fake", () => {
+  const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
+  assert.doesNotMatch(block, /Math\.random/, "no random scores");
+  assert.doesNotMatch(block, /setTimeout\(/, "no fake timing");
+  assert.match(block, /clip\.score != null \|\| !!clip\.analysis/, "analyzed flag dari data nyata");
+  assert.match(block, /clip\.score != null \?/, "viral score hanya bila ada");
+  assert.match(block, /No title generated yet\./, "title kosong jujur");
+  assert.match(block, /\|\| "&mdash;"|\|\| "—"/, "missing values render dash");
+  assert.match(block, /\/api\/analyze-clip/, "analyze via endpoint existing");
+});
+
+test("phase3: ANALYZE ALL berjalan SEQUENTIAL (tanpa flood concurrency)", () => {
+  const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(block, /for \(const clip of targets\)/, "sequential loop over unanalyzed clips");
+  assert.match(block, /await analyzeResultClip\(clip\)/, "each clip awaited before next");
+  assert.doesNotMatch(block, /Promise\.all\([\s\S]{0,60}analyzeResultClip/, "must not fire all at once");
+  assert.match(block, /PARTIAL RESULTS/, "partial state on failures");
+});
+
+test("phase3: PREVIEW/STUDIO reuse infrastruktur existing — TANPA player kedua", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  const videoTags = (html.match(/<video/g) || []).length;
+  assert.strictEqual(videoTags, 1, "single preview player in whole app (reuse, not duplicate)");
+  const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(block, /selectClip\(liveClip\)/, "handoff selects the exact clip in Studio");
+  assert.match(block, /showView\("studio"\)/, "handoff opens existing Studio view");
+  assert.match(block, /playSelectedClip\(\)/, "PREVIEW uses existing playback entry");
+  assert.match(block, /loadProject\(data\)/, "project loaded via existing loader (no second storage)");
+});
+
+test("phase3: transcript bertimestamp nyata dari timedSegments analyze-clip + seek", () => {
+  const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(block, /resultsState\.transcripts\[clip\.id\] = data\.timedSegments/, "transcript lines from real response");
+  assert.match(block, /function seekPreviewToSegment/, "click-to-seek exists");
+  assert.match(block, /state\.noDownload \? Number\(seg\.start\) \|\| 0 : \(Number\(clip\.start\) \|\| 0\) \+ \(Number\(seg\.start\) \|\| 0\)/, "seek math distinguishes bounded section vs full source");
+});
+
+test("phase3: handoff Processing→Results & Dashboard RECENT RESULTS dari data sama", () => {
+  const proc = script.slice(script.indexOf('$("#procResultsBtn").addEventListener'), script.indexOf('$("#procBackBtn").addEventListener'));
+  assert.match(proc, /openResultsForProject\(processingState\.projectId\)/, "completed job hands off to Results when project known");
+  const avg = script.slice(script.indexOf("async function updateDashboardAvgScore"), script.indexOf("// ================= RESULTS WORKSPACE"));
+  assert.match(avg, /renderRecentResults\(details\)/, "recent results reuses avg-score detail fetches (no extra API)");
+  const rr = script.slice(script.indexOf("function renderRecentResults"), script.indexOf("// ================= RESULTS WORKSPACE"));
+  assert.match(rr, /NO RECENT RESULTS/, "honest empty state");
+  assert.match(rr, /openResultsForProject\(latest\.id\)/, "VIEW RESULTS opens real project results");
 });
 
 test("dashboard: CTA New Project membuka workflow upload Studio existing", () => {
@@ -319,6 +383,85 @@ test("dashboard: CTA New Project membuka workflow upload Studio existing", () =>
   assert.match(open, /showView\("studio"\)/);
   assert.match(open, /getElementById\("videoInput"\)/, "reuse input upload Studio");
   assert.match(script, /initDashboard\(\);/, "dashboard di-init saat boot");
+});
+
+// ── Phase 2: Engine readiness + processing workspace (REAL, no mock) ────────
+test("phase2: probeVideo mengembalikan fps & hasAudio nyata untuk kartu SOURCE", () => {
+  const fn = server.slice(server.indexOf("async function probeVideo"), server.indexOf("function targetClipLength"));
+  assert.match(fn, /avg_frame_rate/, "fps dari ffprobe avg_frame_rate");
+  assert.match(fn, /codec_type === "audio"/, "hasAudio dari stream audio nyata");
+  assert.match(fn, /hasAudio/);
+});
+
+test("phase2: checkEngineReadiness pakai API nyata; tak terdeteksi = UNKNOWN bukan READY", () => {
+  const fn = script.slice(script.indexOf("async function checkEngineReadiness"), script.indexOf("// ---- Processing view controller"));
+  for (const api of ["/api/system", "/api/localai/status", "/api/stt/models"]) {
+    assert.ok(fn.includes(api), `readiness must query ${api}`);
+  }
+  assert.match(fn, /"unknown"/, "undetectable components must be UNKNOWN");
+  assert.match(fn, /SYSTEM READY/, "summary ready state exists");
+  assert.doesNotMatch(fn, /setEr\("er\w+", "ready"[^)]*READY"(?![\s\S]{0,80}sys\b)/, "no unconditional READY");
+});
+
+test("phase2: tanpa progres/id palsu di kode processing", () => {
+  const block = script.slice(script.indexOf("// ================= PROCESSING WORKSPACE"));
+  assert.doesNotMatch(block, /progress \+= \d/, "no fabricated progress increments");
+  assert.doesNotMatch(block, /progress\s*=\s*\d{2}\s*;/, "no hardcoded progress values");
+  // polling job HANYA lewat waitForJob (satu mekanisme); blok ini tidak punya
+  // loop poll sendiri — hanya clock UI elapsed + satu kali lookup status terminal.
+  assert.doesNotMatch(block, /while \(true\)/, "no second polling loop");
+  assert.doesNotMatch(block, /setInterval\([\s\S]{0,80}api\/jobs/, "no interval-based job fetching");
+});
+
+test("phase2: processing view lengkap & cancel pakai endpoint DELETE existing", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["procTitle", "procStatePill", "procJobId", "procFill", "procTask", "procPipeline", "procElapsed", "procEta", "procCancelBtn", "procRetryBtn", "procResultsBtn", "procErrorReason", "procQueueList"]) {
+    assert.ok(html.includes(`id="${id}"`), `processing UI part ${id} must exist`);
+  }
+  const cancel = script.slice(script.indexOf('$("#procCancelBtn").addEventListener'), script.indexOf('$("#procRetryBtn").addEventListener'));
+  assert.match(cancel, /DELETE/, "cancel must call existing DELETE /api/jobs/:id");
+  assert.match(cancel, /processingState\.jobId/);
+  const failFn = script.slice(script.indexOf("async function failProcessingView"), script.indexOf("function openProcessingForJob"));
+  assert.match(failFn, /terminalStatus === "cancelled"/, "cancelled state handled distinctly");
+  assert.match(failFn, /console\.error/, "detail error preserved in console, not dumped raw in UI");
+});
+
+test("phase2: pipeline stage di client SAMA dengan label worker server (honest mapping)", () => {
+  const stagesBlock = script.slice(script.indexOf("const PIPELINE_STAGES"), script.indexOf("const processingState"));
+  for (const stage of ["Menyiapkan berkas", "Ekstraksi audio", "Transkripsi suara (STT)", "Analisis hook viral", "Skor & judul Deep AI"]) {
+    assert.ok(stagesBlock.includes(stage), `client pipeline missing "${stage}"`);
+  }
+  const w = server.slice(server.indexOf("async function analyzeLocalUpload"), server.indexOf("async function handleUpload"));
+  for (const stage of ["Menyiapkan berkas", "Ekstraksi audio", "Transkripsi suara (STT)", "Analisis hook viral", "Skor & judul Deep AI"]) {
+    assert.ok(w.includes(stage), `server worker missing "${stage}"`);
+  }
+  // tipe job lain tanpa peta tahap → pipeline disembunyikan, bukan dikarang
+  const tick = script.slice(script.indexOf("function renderProcessingTick"), script.indexOf("function completeProcessingView"));
+  assert.match(tick, /PIPELINE_STAGES\[job\.type\]/);
+  assert.match(tick, /display = "none"/, "unmapped job types hide the pipeline instead of faking it");
+});
+
+test("phase2: dashboard ACTIVE PROCESSING dari /api/queue + tombol VIEW JOB", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="dashActiveJobs"'), "active jobs container");
+  assert.match(html, /NO ACTIVE JOBS/, "empty state per spec");
+  const pq = script.slice(script.indexOf("async function pollQueue"), script.indexOf("function statusPillClass"));
+  assert.match(pq, /renderActiveJobs\(jobs\)/, "existing queue poll feeds active-jobs card (no duplicate poller)");
+  const rj = script.slice(script.indexOf("function renderActiveJobs"), script.indexOf("// ================= PROCESSING WORKSPACE"));
+  assert.match(rj, /openProcessingForJob\(job\.id/, "VIEW JOB opens processing workspace");
+  assert.match(rj, /JOB_LABELS\[job\.type\] \|\| job\.type/, "label falls back to real job type");
+});
+
+test("phase2: source info + nama project + profile selector ter-wiring", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["sourceInfoCard", "siName", "siDuration", "siRes", "siFps", "siAudio", "projectNameInput", "processingProfileSelect"]) {
+    assert.ok(html.includes(`id="${id}"`), `${id} must exist`);
+  }
+  assert.match(html, /value="fast" disabled/, "FAST marked coming-soon, not fake-enabled");
+  assert.match(html, /value="quality" disabled/, "QUALITY marked coming-soon");
+  assert.match(html, /value="auto" selected/, "AUTO maps to existing default pipeline");
+  assert.match(script, /applyProjectNamePatch/, "project name patch helper exists");
+  assert.match(script, /fillSourceInfo\(data\.name/, "upload fills source info from probe");
 });
 
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

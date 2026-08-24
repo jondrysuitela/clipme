@@ -1063,11 +1063,19 @@ async function probeVideo(filePath) {
   const videoStream = data.streams.find((stream) => stream.codec_type === "video") || {};
   const duration = Number(data.format.duration || videoStream.duration || 0);
 
+  // FPS nyata dari avg_frame_rate ("30000/1001" -> 29.97); audio dideteksi
+  // dari keberadaan stream codec_type=audio — dipakai kartu SOURCE info.
+  const [frNum, frDen] = String(videoStream.avg_frame_rate || "").split("/").map(Number);
+  const fps = frDen ? frNum / frDen : (frNum || 0);
+  const hasAudio = data.streams.some((stream) => stream.codec_type === "audio");
+
   return {
     duration,
     width: Number(videoStream.width || 0),
     height: Number(videoStream.height || 0),
-    codec: videoStream.codec_name || "unknown"
+    codec: videoStream.codec_name || "unknown",
+    fps: Math.round(fps * 100) / 100,
+    hasAudio
   };
 }
 

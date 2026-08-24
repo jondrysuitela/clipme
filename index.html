@@ -142,6 +142,26 @@
         </div>
       </section>
 
+      <section class="panel dash-active" aria-label="Active processing">
+        <div class="panel-heading">
+          <h2>Active processing</h2>
+          <span class="status-pill" id="dashActiveCount">0</span>
+        </div>
+        <div id="dashActiveJobs">
+          <div class="empty-state">NO ACTIVE JOBS &mdash; start a new project to begin clipping.</div>
+        </div>
+      </section>
+
+      <section class="panel dash-recent-results" aria-label="Recent results">
+        <div class="panel-heading">
+          <h2>Recent results</h2>
+          <span class="status-pill" id="dashRecentPill" hidden></span>
+        </div>
+        <div id="dashRecentResults">
+          <div class="empty-state">NO RECENT RESULTS &mdash; complete an analysis to see outcomes here.</div>
+        </div>
+      </section>
+
       <section class="panel dash-projects" aria-label="Recent projects">
         <div class="panel-heading">
           <h2>Recent projects</h2>
@@ -189,8 +209,40 @@
             </div>
           </div>
           <button class="secondary-button" id="analyzeHookBtn" type="button" style="width:100%; margin-top:8px" title="Analisis hook viral untuk video ini: STT transkrip penuh lalu skor hook + judul Deep AI (proses lebih lama, progres tampil di status)">
-            Analyze Hook Viral
+            Start Analysis
           </button>
+          <div class="field-label" style="margin-top:10px">Project name (opsional)</div>
+          <input class="inspector-input" id="projectNameInput" type="text" maxlength="80" placeholder="Nama project — kosongkan untuk otomatis">
+          <div class="settings-grid">
+            <label>Processing profile
+              <select id="processingProfileSelect" title="AUTO memakai pipeline default yang ada. FAST/QUALITY menyusul di fase berikutnya.">
+                <option value="auto" selected>AUTO — pipeline default</option>
+                <option value="fast" disabled>FAST — coming soon</option>
+                <option value="quality" disabled>QUALITY — coming soon</option>
+              </select>
+            </label>
+          </div>
+          <div class="source-info" id="sourceInfoCard" hidden aria-label="Source information">
+            <p class="field-label">SOURCE</p>
+            <div class="si-grid">
+              <span class="si-key">File</span><strong class="si-val" id="siName">&mdash;</strong>
+              <span class="si-key">Duration</span><strong class="si-val" id="siDuration">&mdash;</strong>
+              <span class="si-key">Resolution</span><strong class="si-val" id="siRes">&mdash;</strong>
+              <span class="si-key">FPS</span><strong class="si-val" id="siFps">&mdash;</strong>
+              <span class="si-key">Audio</span><strong class="si-val" id="siAudio">&mdash;</strong>
+            </div>
+          </div>
+          <div class="engine-readiness" id="engineReadiness">
+            <p class="field-label">ENGINE READINESS</p>
+            <div class="er-row"><span class="er-name">CPU</span><span class="er-state" id="erCpu" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">GPU</span><span class="er-state" id="erGpu" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">FFMPEG</span><span class="er-state" id="erFfmpeg" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">SPEECH-TO-TEXT</span><span class="er-state" id="erStt" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">LOCAL AI</span><span class="er-state" id="erAi" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">HOOK ENGINE</span><span class="er-state" id="erHook" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <div class="er-row"><span class="er-name">CAPTION ENGINE</span><span class="er-state" id="erCaption" data-state="unknown">&mdash; UNKNOWN</span></div>
+            <p class="er-summary" id="erSummary">CHECKING&hellip;</p>
+          </div>
           <div class="url-row">
             <textarea id="videoUrl" rows="2" placeholder="Paste 1 atau lebih URL YouTube&#10;satu URL per baris (max 10)"></textarea>
             <button class="primary-button" id="attachUrl" type="button">Analyze</button>
@@ -526,12 +578,143 @@
       </div>
     </div>
 
+    <!-- PROCESSING VIEW (Phase 2 — real job monitoring) -->
+    <div class="app-view page-view" data-view-panel="processing">
+      <section class="panel proc-hero">
+        <div>
+          <p class="eyebrow">Processing</p>
+          <h2 id="procTitle">&mdash;</h2>
+        </div>
+        <span class="status-pill status-pill-queued" id="procStatePill">IDLE</span>
+      </section>
+
+      <section class="panel proc-body">
+        <div class="proc-meta">
+          <div class="proc-meta-item"><span>JOB</span><strong id="procJobId" class="proc-mono">Preparing&hellip;</strong></div>
+          <div class="proc-meta-item"><span>Elapsed</span><strong id="procElapsed">00:00</strong></div>
+          <div class="proc-meta-item"><span>Estimated</span><strong id="procEta">&mdash;</strong></div>
+        </div>
+        <div class="proc-progress">
+          <div class="proc-track"><span id="procFill" style="width:0%"></span></div>
+          <em id="procPct">0%</em>
+        </div>
+        <p class="field-label">Current task</p>
+        <div class="proc-task" id="procTask">Waiting to start&hellip;</div>
+        <p class="field-label" id="procPipelineLabel">Pipeline</p>
+        <ol class="proc-pipeline" id="procPipeline"></ol>
+        <div class="proc-error" id="procErrorBox" hidden>
+          <strong>PROCESSING FAILED</strong>
+          <p>We couldn&rsquo;t complete this job.</p>
+          <p class="proc-error-reason">Reason: <span id="procErrorReason"></span></p>
+        </div>
+        <div class="proc-actions">
+          <button class="secondary-button" id="procCancelBtn" type="button">CANCEL JOB</button>
+          <button class="secondary-button" id="procRetryBtn" type="button" hidden>RETRY</button>
+          <button class="primary-button" id="procResultsBtn" type="button" hidden>VIEW PROJECT</button>
+          <button class="ghost-button compact" id="procBackBtn" type="button">Back to Dashboard</button>
+        </div>
+      </section>
+
+      <section class="panel proc-queue">
+        <div class="panel-heading">
+          <h2>Queue</h2>
+          <span class="status-pill" id="procQueueCount">0</span>
+        </div>
+        <div class="queue-list" id="procQueueList"><div class="empty-state">Tidak ada job aktif.</div></div>
+      </section>
+    </div>
+
     <!-- INTELLIGENCE PLACEHOLDERS (data nyata menyusul di fase berikutnya) -->
+    <!-- RESULTS WORKSPACE (Phase 3 — real clips + intelligence dari backend) -->
     <div class="app-view page-view" data-view-panel="results">
-      <div class="page-panel panel coming-next">
-        <p class="eyebrow">Coming next</p>
-        <h2>Results</h2>
-        <p>This intelligence workspace will be connected to your real clipping data in a future phase.</p>
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Results</p>
+          <h2 id="resProjectName">&mdash;</h2>
+          <div class="res-meta">
+            <span>SOURCE <strong id="resSource">&mdash;</strong></span>
+            <span>DURATION <strong id="resDuration">&mdash;</strong></span>
+            <span>CLIPS <strong id="resClipsCount">0</strong></span>
+            <span>ANALYZED <strong id="resAnalyzed">0 / 0</strong></span>
+          </div>
+        </div>
+        <div class="res-hero-actions">
+          <span class="status-pill status-pill-queued" id="resStatePill">NO RESULTS</span>
+          <button class="primary-button" id="analyzeAllBtn" type="button" disabled>ANALYZE ALL</button>
+        </div>
+      </section>
+
+      <section class="proc-error" id="resErrorBox" hidden style="margin-top:14px">
+        <strong>ANALYSIS FAILED</strong>
+        <p>We couldn&rsquo;t analyze this clip.</p>
+        <p class="proc-error-reason">Reason: <span id="resErrorReason"></span></p>
+        <button class="secondary-button compact" id="resRetryBtn" type="button" style="margin-top:8px">RETRY</button>
+      </section>
+
+      <div class="res-toolbar panel">
+        <input class="inspector-input" id="resSearch" type="search" placeholder="Cari judul / hook / teks clip..." aria-label="Search clips">
+        <select class="inspector-input" id="resFilter" aria-label="Filter clips">
+          <option value="all" selected>ALL</option>
+          <option value="top">TOP SCORES</option>
+          <option value="analyzed">ANALYZED</option>
+          <option value="unanalyzed">UNANALYZED</option>
+        </select>
+        <select class="inspector-input" id="resSort" aria-label="Sort clips">
+          <option value="original" selected>Original order</option>
+          <option value="scoreDesc">Highest score</option>
+          <option value="scoreAsc">Lowest score</option>
+          <option value="duration">Duration</option>
+        </select>
+      </div>
+
+      <div class="res-grid">
+        <section class="panel res-list-panel" aria-label="Clip results">
+          <div class="panel-heading">
+            <h2>CLIPS</h2>
+            <span class="status-pill" id="resProgressPill" hidden>0%</span>
+          </div>
+          <div class="res-clip-list" id="resultsClipList">
+            <div class="empty-state">NO CLIPS YET &mdash; open a project or run analysis.</div>
+          </div>
+        </section>
+
+        <aside class="panel res-intel-panel" aria-label="Clip intelligence">
+          <div class="panel-heading">
+            <h2>CLIP INTELLIGENCE</h2>
+            <span class="status-pill" id="resIntelProvider" hidden></span>
+          </div>
+          <div id="resIntelEmpty" class="empty-state">Select a clip to see its intelligence.</div>
+          <div id="resIntelBody" hidden>
+            <div class="res-timeline" aria-label="Source timeline position of this clip">
+              <div class="rt-track"><span class="rt-region" id="rtRegion"></span></div>
+              <div class="rt-labels"><span id="rtStart">00:00</span><span id="rtEnd">00:00</span></div>
+            </div>
+            <dl class="ri-grid">
+              <dt>Timing</dt><dd id="riTiming">&mdash;</dd>
+              <dt>Duration</dt><dd id="riDuration">&mdash;</dd>
+              <dt>Viral score</dt><dd id="riScore">&mdash;</dd>
+              <dt>Hook score</dt><dd id="riHookScore">&mdash;</dd>
+              <dt>Hook type</dt><dd id="riHookType">&mdash;</dd>
+              <dt>Optimal duration</dt><dd id="riOptimal">&mdash;</dd>
+            </dl>
+            <p class="field-label">HOOK</p>
+            <div class="intel-block" id="riHook">&mdash;</div>
+            <p class="field-label">SUGGESTED TITLE</p>
+            <div class="intel-block" id="riTitle">No title generated yet.</div>
+            <p class="field-label">ALTERNATIVES</p>
+            <div class="intel-block" id="riAltTitles">&mdash;</div>
+            <p class="field-label">KEY MESSAGE</p>
+            <div class="intel-block" id="riKeyMessage">&mdash;</div>
+            <p class="field-label">TRANSCRIPT</p>
+            <div class="res-transcript" id="riTranscript"><div class="empty-state">Jalankan ANALYZE pada clip ini untuk mendapat baris transkrip bertimestamp.</div></div>
+            <div class="res-intel-actions">
+              <button class="primary-button compact" id="riPreviewBtn" type="button">PREVIEW</button>
+              <button class="secondary-button compact" id="riStudioBtn" type="button">OPEN IN STUDIO</button>
+              <button class="ghost-button compact" id="riAnalyzeBtn" type="button">ANALYZE CLIP</button>
+              <span class="caption-status" id="riStatus"></span>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
 

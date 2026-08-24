@@ -20,9 +20,11 @@ const serverSrc = fs.readFileSync("server.js", "utf8");
 const htmlSrc = fs.readFileSync("index.html", "utf8");
 
 function extractWaitForJob() {
-  const start = scriptSrc.indexOf("async function waitForJob(jobId) {");
+  const start = scriptSrc.indexOf("async function waitForJob(jobId, opts = {}) {");
   if (start === -1) throw new Error("waitForJob not found");
-  const bodyStart = scriptSrc.indexOf("{", start) + 1;
+  // Mulai scan dari brace body (setelah ") {"), bukan brace pertama —
+  // aman untuk param list yang mengandung "{}" (default value).
+  const bodyStart = scriptSrc.indexOf(") {", start) + 3;
   let depth = 1, i = bodyStart;
   while (i < scriptSrc.length && depth > 0) {
     if (scriptSrc[i] === "{") depth++;
@@ -49,7 +51,7 @@ async function runWaitForJobScenario({ statuses }) {
   };
   const fn = new Function("fetch", "window", "uploadStatus", "Date",
     "JOB_LABELS", "JOB_DONE", "jpRefs", "showJobProgress", "setJobProgress", "settleJobProgress",
-    `return (async function(jobId){ ${body} })`);
+    `return (async function(jobId, opts = {}){ ${body} })`);
   const run = fn(sandbox.fetch, sandbox.window, sandbox.uploadStatus, sandbox.Date,
     sandbox.JOB_LABELS, sandbox.JOB_DONE, sandbox.jpRefs, sandbox.showJobProgress, sandbox.setJobProgress, sandbox.settleJobProgress);
   return run("test-job");
