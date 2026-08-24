@@ -3032,6 +3032,7 @@ textarea:focus-visible {
 .integ-main strong { display: block; font-size: 14px; }
 .integ-main span { color: var(--muted); font-size: 12px; }
 .integ-state { letter-spacing: .08em; }
+.integ-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .dash-quick { display: flex; gap: 8px; flex-basis: 100%; }
 
 /* Phase 7 — intelligence chips */

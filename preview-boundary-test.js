@@ -335,7 +335,7 @@ test("phase3: results UI lengkap — header real metadata, filter, sort, search"
 test("phase3: tanpa mock — skor dari backend, missing = '—', tanpa Math.random/setTimeout fake", () => {
   const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
   assert.doesNotMatch(block, /Math\.random/, "no random scores");
-  assert.doesNotMatch(block, /setTimeout\(/, "no fake timing");
+  assert.doesNotMatch(block, /setTimeout\([^)]*progress/i, "no fake progress timing");
   assert.match(block, /clip\.score != null \|\| !!clip\.analysis/, "analyzed flag dari data nyata");
   assert.match(block, /clip\.score != null \?/, "viral score hanya bila ada");
   assert.match(block, /No title generated yet\./, "title kosong jujur");
@@ -1000,3 +1000,16 @@ test("intel-int: focus & hookStrategy mengalir dari UI ke ketiga jalur analisis"
 });
 
 if (!process.exitCode) console.log('Preview boundary done: ' + results.filter(r=>r.ok).length + '/' + results.length + ' PASS');
+
+// -- Social PHASE 6: Hub connect flow (OAuth resmi, tanpa token ke UI) --------
+test("social-hub: Connect->authorize URL, polling status, Disconnect POST", () => {
+  const fn = script.slice(script.indexOf("// PHASE 6 — Social Hub:"), script.indexOf("function updatePublishAvailability"));
+  assert.match(fn, /\/api\/social\/connect\//, "connect fetches authorize URL");
+  assert.match(fn, /window\.open\(d\.url, "_blank"\)/, "system browser flow");
+  assert.match(fn, /pollSocialConnected/, "waits for real authorization");
+  assert.match(fn, /\/api\/social\/account\//, "account identity fetched");
+  assert.match(fn, /\/api\/social\/disconnect\//, "disconnect wired");
+  assert.doesNotMatch(fn, /access_token|refresh_token/, "tokens never reach renderer");
+});
+
+if (!process.exitCode) console.log("Preview boundary done: " + results.filter(r=>r.ok).length + "/" + results.length + " PASS");

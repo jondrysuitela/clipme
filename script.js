@@ -6288,17 +6288,45 @@ $("#calNextBtn").addEventListener("click", () => { calView.month++; if (calView.
 $("#calTodayBtn").addEventListener("click", () => { calView.year = new Date().getFullYear(); calView.month = new Date().getMonth(); renderCalendar(); });
 
 // ---- Integrations: deteksi nyata, tanpa OAuth palsu ----
+// PHASE 6 — Social Hub: OAuth accounts (utama) + fallback deteksi kredensial.
+const socialUi = { polling: {} };
+function waitMs(ms) { return new Promise((r) => window.setTimeout(r, ms)); }
+
+async function fetchSocialAccounts() {
+  try {
+    const r = await fetch("/api/social/accounts");
+    const d = await r.json();
+    return Array.isArray(d.accounts) ? d.accounts : [];
+  } catch { return []; }
+}
+
+async function pollSocialConnected(providerId, timeoutMs = 120000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await waitMs(2000);
+    const acc = await fetch(`/api/social/account/${providerId}`);
+    if (acc.ok) return await acc.json();
+    if (Date.now() - startedAt >= timeoutMs) break;
+  }
+  return null;
+}
+
 async function loadIntegrations() {
   const wrap = document.getElementById("integList");
   if (!wrap) return;
   let platforms = [];
+  let socialAccounts = [];
   try {
-    const r = await fetch("/api/integrations");
-    const data = await r.json();
+    const [pr, sa] = await Promise.all([fetch("/api/integrations"), fetchSocialAccounts()]);
+    const data = await pr.json();
     platforms = Array.isArray(data.platforms) ? data.platforms : [];
+    socialAccounts = sa;
   } catch (err) {
     console.error("[integrations]", err);
   }
+  const socialById = {};
+  for (const s of socialAccounts) socialById[s.id] = s;
+
   wrap.innerHTML = "";
   if (!platforms.length) {
     wrap.innerHTML = '<div class="empty-state">Status tidak tersedia (server offline?).</div>';
@@ -6307,7 +6335,10 @@ async function loadIntegrations() {
   }
   let anyConnected = false;
   for (const p of platforms) {
-    anyConnected = anyConnected || p.connected;
+    // Sumber utama: akun OAuth nyata; kredensial file hanya pelengkap status.
+    const soc = socialById[p.id] || null;
+    const connected = Boolean(soc && soc.connected) || Boolean(p.connected);
+
     const card = document.createElement("div");
     card.className = "integ-card";
     const main = document.createElement("div");
@@ -6315,18 +6346,80 @@ async function loadIntegrations() {
     const nameEl = document.createElement("strong");
     nameEl.textContent = p.name;
     const sub = document.createElement("span");
-    sub.textContent = p.connected
-      ? "Kredensial terdeteksi — siap dipakai publishing."
-      : "Tidak ada kredensial OAuth di server.";
+    sub.dataset.socialSub = p.id;
+    sub.textContent = connected
+      ? (soc && soc.connected ? "Terhubung via akun." : "Kredensial terdeteksi di server.")
+      : "Belum terhubung — klik Connect untuk otorisasi resmi.";
     main.appendChild(nameEl);
     main.appendChild(sub);
 
     const pill = document.createElement("span");
-    pill.className = `status-pill ${p.connected ? "status-pill-done" : "status-pill-queued"} integ-state`;
-    pill.textContent = p.connected ? "✓ CONNECTED" : "— NOT CONNECTED";
+    pill.className = `status-pill ${connected ? "status-pill-done" : "status-pill-queued"} integ-state`;
+    pill.textContent = connected ? "🟢 CONNECTED" : "⚪ NOT CONNECTED";
+
+    const actions = document.createElement("div");
+    actions.className = "integ-actions";
+    if (!connected && soc) {
+      const connectBtn = document.createElement("button");
+      connectBtn.type = "button";
+      connectBtn.className = "primary-button compact";
+      connectBtn.textContent = `Connect ${p.name}`;
+      connectBtn.addEventListener("click", async () => {
+        connectBtn.disabled = true;
+        try {
+          const r = await fetch(`/api/social/connect/${p.id}`);
+          const d = await r.json();
+          if (!r.ok || !d.url) throw new Error(d.error || "Gagal membuat URL otorisasi.");
+          window.open(d.url, "_blank");
+          connectBtn.textContent = "Menunggu otorisasi…";
+          const result = await pollSocialConnected(p.id);
+          if (result && result.account) {
+            sub.textContent = `${result.account.accountName}${result.account.username ? " (" + result.account.username + ")" : ""}`;
+            pill.className = "status-pill status-pill-done integ-state";
+            pill.textContent = "🟢 CONNECTED";
+            showToast(`${p.name} terhubung.`);
+            updatePublishAvailability(true);
+          } else {
+            connectBtn.textContent = `Connect ${p.name}`;
+            showToast("Otorisasi belum selesai / dibatalkan.");
+          }
+        } catch (err) {
+          showToast(err.message || "Connect gagal.");
+        } finally {
+          connectBtn.disabled = false;
+        }
+      });
+      actions.appendChild(connectBtn);
+    } else if (connected && soc) {
+      anyConnected = true;
+      const infoBtn = document.createElement("button");
+      infoBtn.type = "button";
+      infoBtn.className = "ghost-button compact";
+      infoBtn.textContent = "Account Info";
+      infoBtn.addEventListener("click", async () => {
+        try {
+          const r = await fetch(`/api/social/account/${p.id}`);
+          const d = await r.json();
+          sub.textContent = r.ok ? `${d.account.accountName}${d.account.username ? " (" + d.account.username + ")" : ""}` : (d.error || "Sesi berakhir.");
+        } catch {}
+      });
+      const discBtn = document.createElement("button");
+      discBtn.type = "button";
+      discBtn.className = "ghost-button compact danger-btn";
+      discBtn.textContent = "Disconnect";
+      discBtn.addEventListener("click", async () => {
+        if (!confirm(`Putuskan koneksi ${p.name}? (hanya autentikasi — konten lokal aman)`)) return;
+        try { await fetch(`/api/social/disconnect/${p.id}`, { method: "POST" }); } catch {}
+        loadIntegrations();
+        showToast(`${p.name} diputus.`);
+      });
+      actions.appendChild(infoBtn);
+      actions.appendChild(discBtn);
+    }
 
     card.appendChild(main);
     card.appendChild(pill);
+    card.appendChild(actions);
     wrap.appendChild(card);
   }
   updatePublishAvailability(anyConnected);
