@@ -791,7 +791,8 @@ test("phase6: PUBLISH NOW terkunci sampai integrasi nyata terhubung", () => {
   const btnPos = html.indexOf('id="pubPublishNowBtn"');
   assert.ok(html.slice(btnPos - 40, btnPos + 80).includes("disabled"), "PUBLISH NOW starts disabled");
   const fn = script.slice(script.indexOf("function updatePublishAvailability"), script.indexOf('$("#integRefreshBtn")'));
-  assert.match(fn, /btn\.disabled = !anyConnected/, "enabled only when endpoint reports a real connection");
+  assert.match(fn, /btn\.disabled = true/, "PUBLISH NOW locked — no upload engine exists yet");
+  assert.match(fn, /anyConnected/, "connection state still evaluated for messaging");
 });
 
 test("phase6: production insights dari data export asli — tanpa klaim AI/prediksi", () => {

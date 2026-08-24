@@ -6329,11 +6329,13 @@ function updatePublishAvailability(anyConnected) {
   const btn = document.getElementById("pubPublishNowBtn");
   const hint = document.getElementById("pubPublishHint");
   if (!btn) return;
-  btn.disabled = !anyConnected;
-  btn.title = anyConnected ? "" : "Butuh platform terhubung — buka tab Integrations.";
+  // Deteksi kredensial ≠ kapabilitas upload: modul OAuth/upload belum ada,
+  // jadi tombol TETAP non-fungsional dan jujur menyatakannya.
+  btn.disabled = true;
+  btn.title = "Modul upload belum tersedia pada build ini.";
   if (hint) {
     hint.textContent = anyConnected
-      ? "Integrasi terdeteksi."
+      ? "Kredensial terdeteksi, namun mesin upload/OAuth belum dibangun — gunakan download manual."
       : "PUBLISH NOW butuh integrasi platform terhubung (tab Integrations). Tidak ada simulasi upload.";
   }
 }
