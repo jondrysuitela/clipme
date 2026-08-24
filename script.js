@@ -292,12 +292,14 @@ function applyTrim(opts = {}) {
   if (!opts.noHistory) pushHistory();
   clip.start = start;
   clip.end = end;
+  markStudioDirty();
   syncTrimInputs();
   clipTime.textContent = clipRange(clip);
   $("#clipRange").textContent = clipRange(clip);
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   state.previewClipKey = "";
   resetPreviewFaceTransform();
+  updateFinalPreviewStrip();
   if (state.sourceUrl && Number.isFinite(clip.start)) previewVideo.currentTime = clip.start;
   showToast(`Clip dipangkas: ${formatTime(start)} - ${formatTime(end)}`);
 }
@@ -313,6 +315,7 @@ function setRatio(token) {
     item.classList.toggle("active", item.dataset.ratio === ratio);
   });
   updatePreviewFaceTransform();
+  updateFinalPreviewStrip();
 }
 
 function currentRatio() {
@@ -708,6 +711,7 @@ function selectClip(clip) {
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
   syncTrimHandles();
   updatePreviewFaceTransform();
+  updateFinalPreviewStrip();
 }
 
 function showToast(message) {
@@ -1284,6 +1288,10 @@ function showView(view) {
     if (active) item.setAttribute("aria-current", "page");
     else item.removeAttribute("aria-current");
   });
+  const backBtn = document.getElementById("backToResultsBtn");
+  if (backBtn) backBtn.hidden = !(view === "studio" && resultsState.projectId);
+  const saveBtn = document.getElementById("saveProjectBtn");
+  if (saveBtn) saveBtn.hidden = !(view === "studio" && state.projectId);
 }
 
 function setLocalPreview(file) {
@@ -2203,6 +2211,8 @@ document.addEventListener("keydown", (event) => {
       if (timelineVisible) {
         saveCaptionTimeline();
         showToast("Timeline caption disimpan.");
+      } else if (studioDirty) {
+        saveStudioToServer();
       }
     }
     if (event.code === "KeyZ" && !event.shiftKey) {
@@ -3173,11 +3183,13 @@ captionInput.addEventListener("input", () => {
   captionBox.textContent = `"${captionInput.value}"`;
   renderStaticCaption();
   state.activeClip.caption = captionInput.value;
+  markStudioDirty();
 });
 
 hookInput.addEventListener("input", () => {
   if (!state.activeClip) return;
   state.activeClip.hook = hookInput.value;
+  markStudioDirty();
   renderClips(state.sorted ? [...clips].sort((a, b) => (b.score || -1) - (a.score || -1)) : clips);
 });
 
@@ -3198,6 +3210,7 @@ captionPosition.addEventListener("input", () => {
 $("#captionStyleSelect").addEventListener("change", () => {
   const style = effectiveCaptionStyle();
   renderStaticCaption();
+  updateFinalPreviewStrip();
   if (!state.projectId || !state.activeClip || !state.liveSegments.length) return;
   state.liveActive = style !== "off";
   if (state.liveActive) {
@@ -4779,6 +4792,118 @@ $("#resSearch").addEventListener("input", applyResView);
 $("#resFilter").addEventListener("change", applyResView);
 $("#resSort").addEventListener("change", applyResView);
 
+// ================= STUDIO PERSISTENCE (Phase 4) =================
+// SAVE memakai PATCH /api/projects/:id existing (menulis manifest.clips).
+// Tidak ada penyimpanan kedua; toast "Saved" hanya setelah server konfirmasi.
+
+let studioDirty = false;
+let savingStudio = false;
+
+function markStudioDirty() {
+  studioDirty = true;
+  const pill = document.getElementById("studioDirtyPill");
+  if (pill) pill.hidden = false;
+  const btn = document.getElementById("saveProjectBtn");
+  if (btn) { btn.hidden = false; btn.classList.add("primary-button"); btn.classList.remove("ghost-button"); }
+}
+
+function clearStudioDirty() {
+  studioDirty = false;
+  const pill = document.getElementById("studioDirtyPill");
+  if (pill) pill.hidden = true;
+  const btn = document.getElementById("saveProjectBtn");
+  if (btn) { btn.classList.remove("primary-button"); btn.classList.add("ghost-button"); }
+  updateFinalPreviewStrip();
+}
+
+async function saveStudioToServer() {
+  if (!state.projectId) { showToast("Tidak ada project untuk disimpan."); return false; }
+  if (savingStudio) return false;
+  if (!clips.length) { showToast("Tidak ada clip untuk disimpan."); return false; }
+  savingStudio = true;
+  const btn = document.getElementById("saveProjectBtn");
+  const oldLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
+  try {
+    const payload = clips.map((c) => ({
+      id: c.id,
+      title: c.title || "",
+      deepTitle: c.deepTitle || "",
+      start: Number(c.start) || 0,
+      end: Number(c.end) || 0,
+      score: c.score != null ? c.score : null,
+      hook: c.hook || "",
+      caption: c.caption || "",
+      recommendedHook: c.recommendedHook || "",
+      hookType: c.hookType || "",
+      hookScore: c.hookScore != null ? c.hookScore : null
+    }));
+    const response = await fetch(`/api/projects/${state.projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clips: payload })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal menyimpan perubahan.");
+    clearStudioDirty();
+    showToast("Perubahan tersimpan ke server.");
+    return true;
+  } catch (err) {
+    console.error("[studio-save]", err);
+    showToast(err.message || "Gagal menyimpan perubahan.");
+    return false;
+  } finally {
+    savingStudio = false;
+    if (btn) { btn.disabled = false; btn.textContent = oldLabel || "SAVE"; }
+  }
+}
+
+$("#saveProjectBtn").addEventListener("click", () => saveStudioToServer());
+
+$("#backToResultsBtn").addEventListener("click", () => {
+  if (resultsState.projectId) openResultsForProject(resultsState.projectId);
+  else showView("results");
+});
+
+// Strip konfigurasi render final — semua nilai dari state nyata yang sama
+// dengan yang dikirim ke pipeline export.
+const RATIO_LABELS = { portrait: "9:16", wide: "16:9", four5: "4:5" };
+
+function updateFinalPreviewStrip() {
+  const fmtEl = document.getElementById("fpFormat");
+  if (!fmtEl) return;
+  fmtEl.textContent = RATIO_LABELS[currentRatio()] || currentRatio();
+  const capEl = document.getElementById("fpCaptions");
+  if (capEl) {
+    capEl.textContent = autoCaptionEnabled()
+      ? `ON · ${(($("#captionStyleSelect") && $("#captionStyleSelect").value) || "").toUpperCase()}`
+      : "OFF";
+  }
+  const durEl = document.getElementById("fpDuration");
+  if (durEl && state.activeClip) {
+    durEl.textContent = formatTime(Math.max(0, (state.activeClip.end || 0) - (state.activeClip.start || 0)));
+  }
+}
+
+// Preset posisi caption: menyalurkan nilai ke slider existing sehingga preview
+// DAN export menerima konfigurasi yang sama (satu jalur, tanpa style duplikat).
+$$("[data-cpos]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    captionPosition.value = btn.dataset.cpos;
+    captionPosition.dispatchEvent(new Event("input"));
+    saveSettingsDebounced();
+    showToast(`Posisi caption: ${btn.textContent}`);
+  });
+});
+
+// Sumber video gagal dimuat — pesan bersih, detail di console.
+previewVideo.addEventListener("error", () => {
+  if (!previewVideo.getAttribute("src")) return;
+  console.error("[preview] source failed to load:", previewVideo.src);
+  uploadStatus.textContent = "VIDEO UNAVAILABLE";
+  showToast("Video sumber tidak bisa dimuat. Coba BACK TO RESULTS lalu buka ulang clip.");
+});
+
 const SETTINGS_KEY = "clipperStudio.settings";
 
 function collectSettings() {
@@ -4837,6 +4962,7 @@ function syncAutoCaptionToggle() {
     btn.disabled = !autoCaptionEnabled();
     btn.title = autoCaptionEnabled() ? "" : "Auto caption dimatikan — nyalakan toggle untuk generate caption";
   }
+  updateFinalPreviewStrip();
 }
 
 function syncDurationModeUi() {

@@ -108,7 +108,7 @@ test("banner: komponen jobProgress ada di dashboard utama (bukan bar timeline vi
   const topbar = html.indexOf('class="topbar"');
   const banner = html.indexOf('id="jobProgress"');
   assert.ok(banner > -1, "jobProgress banner must exist");
-  assert.ok(topbar > -1 && banner > topbar && banner - topbar < 700, "banner must sit right under the topbar");
+  assert.ok(topbar > -1 && banner > topbar && banner - topbar < 1400, "banner must sit right under the topbar");
   for (const id of ["jpFill", "jpPct", "jpLabel", "jpStage", "jpSpinner"]) {
     assert.ok(html.includes(`id="${id}"`), `banner part ${id} must exist`);
   }
@@ -462,6 +462,69 @@ test("phase2: source info + nama project + profile selector ter-wiring", () => {
   assert.match(html, /value="auto" selected/, "AUTO maps to existing default pipeline");
   assert.match(script, /applyProjectNamePatch/, "project name patch helper exists");
   assert.match(script, /fillSourceInfo\(data\.name/, "upload fills source info from probe");
+});
+
+// ── Phase 4: Studio persistence + final render config (REAL pipeline reuse) ─
+test("phase4: SAVE persist clips via PATCH existing — Saved hanya setelah server OK", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="saveProjectBtn"'), "SAVE button exists");
+  const fn = script.slice(script.indexOf("async function saveStudioToServer"), script.indexOf('$("#saveProjectBtn").addEventListener'));
+  assert.match(fn, /method: "PATCH"/, "uses existing PATCH /api/projects/:id");
+  assert.match(fn, /JSON\.stringify\(\{ clips: payload \}\)/, "persists the actual clips array");
+  for (const field of ["start:", "end:", "hook:", "caption:"]) {
+    assert.ok(fn.includes(field), `payload must carry ${field}`);
+  }
+  assert.match(fn, /clearStudioDirty\(\)/, "dirty cleared only after server confirms");
+  assert.match(fn, /Perubahan tersimpan/, "Saved feedback after success");
+  assert.doesNotMatch(fn, /localStorage\.setItem/, "no second storage");
+});
+
+test("phase4: dirty tracking pada trim/hook/caption + pill UNSAVED CHANGES", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="studioDirtyPill"'), "dirty pill exists");
+  const trim = script.slice(script.indexOf("function applyTrim"), script.indexOf("const RATIO_PRESETS"));
+  assert.match(trim, /markStudioDirty\(\)/, "trim marks dirty");
+  const hookL = script.slice(script.indexOf("hookInput.addEventListener"), script.indexOf("captionSize.addEventListener"));
+  assert.match(hookL, /markStudioDirty\(\)/, "hook edit marks dirty");
+  const capL = script.slice(script.indexOf("captionInput.addEventListener"), script.indexOf("hookInput.addEventListener"));
+  assert.match(capL, /markStudioDirty\(\)/, "caption edit marks dirty");
+});
+
+test("phase4: BACK TO RESULTS tampil hanya dari Studio dengan project Results", () => {
+  const sv = script.slice(script.indexOf("function showView(view)"), script.indexOf("function setLocalPreview"));
+  assert.match(sv, /backBtn\.hidden = !\(view === "studio" && resultsState\.projectId\)/, "visibility rule");
+  const btn = script.slice(script.indexOf('$("#backToResultsBtn").addEventListener'), script.indexOf("// ================= STUDIO PERSISTENCE") > -1 ? script.indexOf('$("#backToResultsBtn").addEventListener') + 400 : undefined);
+  assert.match(btn, /openResultsForProject\(resultsState\.projectId\)/, "returns to real Results workspace");
+});
+
+test("phase4: final preview strip membaca konfigurasi nyata yang dikirim ke renderer", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["finalPreviewStrip", "fpFormat", "fpCaptions", "fpDuration"]) {
+    assert.ok(html.includes(`id="${id}"`), `strip part ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("function updateFinalPreviewStrip"), script.indexOf("// Preset posisi caption"));
+  assert.match(fn, /RATIO_LABELS\[currentRatio\(\)\]/, "format from live ratio state");
+  assert.match(fn, /autoCaptionEnabled\(\)/, "captions ON/OFF from real toggle");
+  assert.match(fn, /state\.activeClip\.end \|\| 0\) - \(state\.activeClip\.start/, "duration from active clip boundaries");
+});
+
+test("phase4: preset posisi menyalurkan ke slider existing (satu jalur ke export)", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const v of ["35", "65", "88"]) {
+    assert.ok(html.includes(`data-cpos="${v}"`), `preset ${v} exists`);
+  }
+  const block = script.slice(script.indexOf("$$('[data-cpos]')".replace(/'/g, '"')), script.indexOf("// Sumber video gagal dimuat"));
+  assert.match(block, /captionPosition\.value = btn\.dataset\.cpos/, "sets the SAME slider");
+  assert.match(block, /dispatchEvent\(new Event\("input"\)\)/, "reuses existing input path (preview + export)");
+});
+
+test("phase4: video error ditangani bersih + Ctrl+S menyimpan studio saat dirty", () => {
+  const errBlock = script.slice(script.indexOf('previewVideo.addEventListener("error"'), script.indexOf("const SETTINGS_KEY"));
+  assert.match(errBlock, /getAttribute\("src"/, "ignores empty source");
+  assert.match(errBlock, /console\.error/, "technical detail in console only");
+  assert.match(errBlock, /VIDEO UNAVAILABLE/, "clean user message");
+  const ks = script.slice(script.indexOf('if (event.code === "KeyS")'), script.indexOf('if (event.code === "KeyZ"'));
+  assert.match(ks, /studioDirty[\s\S]{0,80}saveStudioToServer\(\)/, "Ctrl+S persists studio edits when dirty");
 });
 
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

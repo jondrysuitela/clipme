@@ -2817,3 +2817,29 @@ textarea:focus-visible {
   .res-intel-panel { position: static; }
   .res-toolbar { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   PHASE 4 — STUDIO SAVE/DIRTY + FINAL PREVIEW STRIP + PRESETS
+   ============================================================ */
+.final-preview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 10px 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--muted-dim);
+}
+.final-preview-strip strong {
+  margin-left: 6px;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pos-presets { display: flex; gap: 6px; margin-top: 4px; }
+#studioDirtyPill { letter-spacing: .08em; }

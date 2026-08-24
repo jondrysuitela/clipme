@@ -91,6 +91,9 @@
         <h1 id="fileTitle">Clipper Studio</h1>
       </div>
       <div class="topbar-actions">
+        <span class="status-pill status-pill-cancelled" id="studioDirtyPill" hidden title="Ada perubahan clip yang belum disimpan ke server">UNSAVED CHANGES</span>
+        <button class="secondary-button" id="backToResultsBtn" type="button" hidden>BACK TO RESULTS</button>
+        <button class="ghost-button" id="saveProjectBtn" type="button" hidden>SAVE</button>
         <button class="primary-button" id="newProjectBtn" type="button">+ New Project</button>
       </div>
     </div>
@@ -317,6 +320,11 @@
               </div>
               <span id="progressText" class="tl-label tl-status">Ready</span>
             </div>
+          <div class="final-preview-strip" id="finalPreviewStrip" aria-label="Final render configuration">
+            <span>FORMAT <strong id="fpFormat">9:16</strong></span>
+            <span>CAPTIONS <strong id="fpCaptions">&mdash;</strong></span>
+            <span>DURATION <strong id="fpDuration">00:00</strong></span>
+          </div>
           <div class="transport-row">
             <span id="clipRange">00:00 - 00:90</span>
             <div class="transport-controls">
@@ -480,6 +488,11 @@
             <input type="range" id="captionSize" min="14" max="40" value="23" style="width:100%">
             <div class="field-label">Caption position</div>
             <input type="range" id="captionPosition" min="30" max="95" value="76" style="width:100%">
+            <div class="pos-presets">
+              <button class="ghost-button compact" type="button" data-cpos="35">TOP</button>
+              <button class="ghost-button compact" type="button" data-cpos="65">CENTER</button>
+              <button class="ghost-button compact" type="button" data-cpos="88">BOTTOM</button>
+            </div>
             <div class="field-label">Caption style</div>
             <select id="captionStyleSelect" class="inspector-input">
               <option value="karaoke">Karaoke (CapCut)</option>
