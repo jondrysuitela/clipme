@@ -6615,6 +6615,79 @@ async function handleClipThumb(req, res, params) {
   fs.createReadStream(thumbPath).pipe(res);
 }
 
+// ===== Social Account Hub (PHASE 3) =========================================
+const socialManager = require(path.join(ROOT, "social", "manager.js"));
+const socialTokens = require(path.join(ROOT, "social", "token-manager.js"));
+const oauthStates = new Map(); // state -> {provider, exp}
+
+function publicAccount(providerId) {
+  const p = socialManager.get(providerId);
+  return {
+    id: providerId,
+    name: p ? p.name : providerId,
+    capabilities: p ? p.capabilities : {},
+    connected: socialTokens.hasValidToken(providerId)
+  };
+}
+
+function handleSocialAccounts(req, res) {
+  sendJson(res, 200, { accounts: socialManager.ids().map(publicAccount) });
+}
+
+function handleSocialConnect(req, res, params) {
+  const provider = socialManager.get(params.provider || "");
+  if (!provider) { sendJson(res, 404, { error: "Provider tidak dikenal." }); return; }
+  const state = crypto.randomBytes(16).toString("hex");
+  oauthStates.set(state, { provider: params.provider, exp: Date.now() + 600000 });
+  const redirectUri = `http://${req.headers.host}/api/oauth/callback/${params.provider}`;
+  sendJson(res, 200, { url: provider.authorizeUrl(state, redirectUri) });
+}
+
+async function handleOauthCallback(req, res, params) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const entry = oauthStates.get(state);
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  if (!entry || entry.exp < Date.now()) {
+    res.end("<h3>State tidak valid/kadaluarsa. Coba Connect lagi dari aplikasi.</h3>");
+    return;
+  }
+  oauthStates.delete(state);
+  try {
+    const provider = socialManager.get(entry.provider);
+    const account = await provider.exchangeCode(code, `http://${req.headers.host}/api/oauth/callback/${entry.provider}`);
+    console.log(`[social] ${entry.provider} connected: ${account.accountName}`);
+    res.end(`<h3>✅ ${entry.provider} terhubung sebagai ${account.accountName}</h3><p>Kembali ke Clipper Studio.</p>`);
+  } catch (err) {
+    console.error("[social] callback error:", err.message);
+    res.end(`<h3>❌ Gagal menghubungkan ${entry.provider}.</h3><p>${String(err.message).replace(/</g, "&lt;")}</p>`);
+  }
+}
+
+function handleSocialDisconnect(req, res, params) {
+  const id = params.provider || "";
+  if (!socialManager.get(id)) { sendJson(res, 404, { error: "Provider tidak dikenal." }); return; }
+  socialTokens.remove(id);
+  sendJson(res, 200, { ok: true });
+}
+
+async function handleSocialAccountInfo(req, res, params) {
+  const id = params.provider || "";
+  const provider = socialManager.get(id);
+  if (!provider) { sendJson(res, 404, { error: "Provider tidak dikenal." }); return; }
+  try {
+    let t = socialTokens.get(id);
+    if (!t || !t.access_token) throw new Error("Belum terhubung.");
+    if (t.expires_at && t.expires_at < Date.now()) await provider.refresh();
+    t = socialTokens.get(id);
+    const account = await provider.getAccount(t.access_token);
+    sendJson(res, 200, { account });
+  } catch (err) {
+    sendJson(res, 401, { error: err.message });
+  }
+}
+
 function handleIntegrations(req, res) {
   let fileCfg = {};
   try {
@@ -6684,6 +6757,11 @@ router
   .add("POST", "/api/localai/download-model", handleLocalAIDownloadModel)
     .add("GET", "/api/stt/models", handleSttModels)
   .add("GET", "/api/integrations", handleIntegrations)
+  .add("GET", "/api/social/accounts", handleSocialAccounts)
+  .add("GET", "/api/social/connect/:provider", handleSocialConnect)
+  .add("POST", "/api/social/disconnect/:provider", handleSocialDisconnect)
+  .add("GET", "/api/social/account/:provider", handleSocialAccountInfo)
+  .add("GET", "/api/oauth/callback/:provider", handleOauthCallback)
   .add("GET", "/api/intelligence/:projectId", handleProjectIntelligence)
   .add("GET", "/api/thumb/:projectId/:clipId", handleClipThumb)
   .add("GET", "/api/projects", handleListProjects)
