@@ -254,7 +254,7 @@ test("settings: speakerCut & faceTrack benar-benar masuk analisis lokal server",
 // ── Phase 1: Dashboard / command center ─────────────────────────────────────
 test("dashboard: nav lengkap (7 view) & dashboard jadi landing default", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const v of ["dashboard", "studio", "library", "exports", "results", "analytics", "dna"]) {
+  for (const v of ["dashboard", "studio", "library", "exports", "publish", "results", "analytics", "dna"]) {
     assert.ok(html.includes(`data-view="${v}"`), `nav item ${v} must exist`);
     assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} must exist`);
   }
@@ -307,11 +307,13 @@ test("dashboard: engine status real dari /api/system + localai + queue", () => {
 
 test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  // Phase 3: Results kini workspace nyata — placeholder tersisa Analytics & DNA saja
+  // Phase 3: Results nyata; Phase 6: Analytics = honest unavailable + insights.
+  // Placeholder "Coming next" tersisa Content DNA saja.
   const coming = (html.match(/Coming next/g) || []).length;
-  assert.strictEqual(coming, 2, "Analytics & DNA masing2 satu empty state");
+  assert.strictEqual(coming, 1, "only Content DNA remains a future placeholder");
   assert.ok(html.includes('data-view-panel="results"'), "results panel exists");
   assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
+  assert.match(html, /Analytics unavailable/, "analytics honestly reports missing integrations");
   assert.ok(!/<canvas/i.test(html), "no fake canvas charts");
   assert.doesNotMatch(script, /Chart\(/, "no chart library stubs");
 });
@@ -541,6 +543,223 @@ test("phase4: video error ditangani bersih + Ctrl+S menyimpan studio saat dirty"
   assert.match(errBlock, /VIDEO UNAVAILABLE/, "clean user message");
   const ks = script.slice(script.indexOf('if (event.code === "KeyS")'), script.indexOf('if (event.code === "KeyZ"'));
   assert.match(ks, /studioDirty[\s\S]{0,80}saveStudioToServer\(\)/, "Ctrl+S persists studio edits when dirty");
+});
+
+// ── Phase 5: Batch production + export manager + publishing ─────────────────
+test("phase5: multi-select Results stabil terhadap filter/sort/search", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["resSelectAllBtn", "resClearSelBtn", "resSelCount", "batchProduceBtn"]) {
+    assert.ok(html.includes(`id="${id}"`), `selection UI ${id} must exist`);
+  }
+  const block = script.slice(script.indexOf("// ================= BATCH PRODUCTION"));
+  assert.match(block, /resultsState\.selectedIds = new Set\(\)/, "selection state (Set of ids)");
+  // checkbox menulis ke Set (di card builder), TIDAK ke list visible → survive filter/sort
+  assert.match(script, /resultsState\.selectedIds\.add\(clip\.id\)/, "checkbox adds to id Set");
+  assert.match(block, /resultsState\.visible\.forEach\(\(c\) => resultsState\.selectedIds\.add\(c\.id\)\)/, "SELECT ALL targets visible list only");
+});
+
+test("phase5: batch modal hanya opsi nyata & START lewat /api/export-batch existing", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["batchModal", "bpCount", "bpValidation", "bpCaptions", "bpStartBtn"]) {
+    assert.ok(html.includes(`id="${id}"`), `batch modal part ${id} must exist`);
+  }
+  for (const r of ["portrait", "wide", "four5"]) {
+    assert.ok(html.includes(`data-bpratio="${r}"`), `renderer ratio ${r} exposed`);
+  }
+  assert.ok(!html.includes('data-bpratio="square"'), "no unsupported formats faked");
+  const fn = script.slice(script.indexOf("async function startBatch"), script.indexOf("function retryFailedBatch"));
+  assert.match(fn, /\/api\/export-batch/, "uses existing batch endpoint — no second pipeline");
+  assert.match(fn, /captionStyle: \$\("#bpCaptions"\)\.checked \? effectiveCaptionStyle\(\) : "off"/, "caption override maps to real payload field");
+  assert.match(fn, /ratio: batchRatio/);
+  assert.match(fn, /enterProcessingView\(data\.jobId/, "monitored via existing processing workspace");
+});
+
+test("phase5: validasi batch eksplisit + retry HANYA clip gagal", () => {
+  const val = script.slice(script.indexOf("function bpValidateSelected"), script.indexOf("function openBatchModal"));
+  assert.match(val, /rentang waktu tidak valid/, "invalid ranges flagged, not skipped silently");
+  assert.match(val, /di luar durasi sumber/, "bounds checked against real duration");
+  const retry = script.slice(script.indexOf("function retryFailedBatch"), script.indexOf("function openBatchModalFromSelection"));
+  assert.match(retry, /lastFailedClipIds/, "retry limited to actually failed clips");
+  const start = script.slice(script.indexOf("async function startBatch"), script.indexOf("function retryFailedBatch"));
+  assert.match(start, /failedItems/, "per-clip failures inspected from real result.results");
+});
+
+test("phase5: export manager — search/sort/count + detail expandable dari data nyata", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["exportsSearch", "exportsSort", "exportsCount"]) {
+    assert.ok(html.includes(`id="${id}"`), `manager control ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("function renderExports()"), script.indexOf('$("#exportsSearch").addEventListener'));
+  assert.match(fn, /\$\("#exportsSearch"\)\.value/, "search filters loaded exports");
+  assert.match(fn, /item\.project/, "detail shows real project info");
+  assert.match(fn, /exp-detail/, "expandable detail row exists");
+  assert.match(fn, /READY/, "file listed by server = READY (existence confirmed)");
+  const load = script.slice(script.indexOf("async function loadExports"), script.indexOf("function renderLibrary"));
+  assert.match(load, /_ts: Number\(e\.createdAt\)/, "real timestamps kept for sorting");
+});
+
+test("phase5: publishing jujur — metadata + copy, TANPA status publish palsu", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('data-view-panel="publish"'), "publish view exists");
+  assert.match(html, /Tidak ada auto-upload/, "explicit manual-upload notice");
+  assert.ok(!/Published successfully/i.test(html), "no fake publish success text");
+  const block = script.slice(script.indexOf("// ---- Publishing workspace"), script.indexOf("// Dashboard RECENT EXPORTS"));
+  assert.doesNotMatch(block, /status\s*=\s*["']published["']/i, "no fabricated published state");
+  assert.match(block, /navigator\.clipboard\.writeText/, "clipboard API used");
+  assert.match(block, /Copied/, "confirmation after success");
+  assert.match(block, /catch/, "failure path handled");
+  assert.match(block, /deepTitleAlternatives/, "title variants from Deep Title engine");
+  assert.match(block, /analysis\.hashtags|clip\.analysis && clip\.analysis\.hashtags/, "hashtags from real intel when present");
+  const check = script.slice(script.indexOf("function pubChecklistUpdate"), script.indexOf("$$\\(\".pub-platform button\")".replace(/\\\(/g, "(").replace(/\\\)/g, ")")));
+  assert.match(check, /\$\("#pubTitle"\)\.value\.trim\(\)/, "checklist reads actual fields");
+});
+
+test("phase5: dashboard recent exports dari file nyata + tombol VIEW EXPORTS pasca-batch", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dashRecentExports", "dashExportsCount", "procExportsBtn"]) {
+    assert.ok(html.includes(`id="${id}"`), `${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("function renderRecentExportsDashboard"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(fn, /state\.exports\.slice\(0, 3\)/, "top-3 real exports");
+  assert.match(fn, /status-pill-done[\s\S]{0,40}READY|"READY"/, "READY because files exist server-side");
+});
+
+// ── Phase 7: Content Intelligence (orchestration, no fake AI) ────────────────
+test("phase7: endpoint intelligence — ekstraktif dari transkrip + cache invalidasi", () => {
+  const fn = server.slice(server.indexOf("async function handleProjectIntelligence"), server.indexOf("function handleIntegrations"));
+  assert.match(server, /\.add\("GET", "\/api\/intelligence\/:projectId"/, "route registered");
+  assert.match(fn, /manifest\.transcriptPath/, "reads real transcript via manifest");
+  assert.match(fn, /mtimeMs/, "cache sig includes transcript mtime (invalidation)");
+  assert.match(fn, /c\.score != null/, "analyzed count from real scores");
+  // Summary TIDAK memanggil LLM — callClipmeLLM terikat schema analisis clip
+  assert.doesNotMatch(fn, /callClipmeLLM/, "no misuse of clip-analysis LLM for summary");
+  const kw = server.slice(server.indexOf("function intelExtractKeywords"), server.indexOf("function intelExtractiveSummary"));
+  assert.match(kw, /INTEL_STOPWORDS\.has/, "stopword-filtered keyword extraction");
+  const sum = server.slice(server.indexOf("function intelExtractiveSummary"), server.indexOf("async function handleProjectIntelligence"));
+  assert.match(sum, /sentences/, "extractive sentence selection");
+});
+
+test("phase7: UI intel jujur — field kosong tetap 'not available', why hanya dari engine", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["intelProjectSelect", "intelLoadBtn", "intelSummary", "intelKeywords", "intelTopClips", "intelRecommendations", "intelSearchInput"]) {
+    assert.ok(html.includes(`id="${id}"`), `intel part ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("// ================= CONTENT INTELLIGENCE"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(fn, /Summary not available\./, "honest missing summary");
+  assert.match(fn, /No transcript yet/, "honest missing transcript");
+  assert.match(fn, /extractive · transcript/, "summary source labeled truthfully");
+  assert.doesNotMatch(fn, /Math\.random/, "no fabricated intelligence");
+});
+
+test("phase7: rekomendasi deterministik dari hitungan nyata + handoff reuse existing", () => {
+  const recs = script.slice(script.indexOf("function renderIntelRecommendations"), script.indexOf("async function openIntelClip"));
+  assert.match(recs, /belum dianalisis/, "unanalyzed count drives recommendation");
+  assert.match(recs, /openResultsForProject|showView\("calendar"\)/, "actions reuse existing navigation");
+  assert.doesNotMatch(recs, /AI recommends|predicted/i, "no fake AI authority");
+  const openClip = script.slice(script.indexOf("async function openIntelClip"), script.indexOf('$("#intelLoadBtn")'));
+  assert.match(openClip, /openResultsForProject/, "routes through Results workspace");
+  assert.match(openClip, /handoffToStudio\(/, "reuses existing Studio/preview handoff");
+});
+
+test("phase7: transcript search pakai /api/stt/search existing — bukan implementasi kedua", () => {
+  const block = script.slice(script.indexOf("// ================= CONTENT INTELLIGENCE"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(block, /\/api\/stt\/search/, "existing search endpoint reused");
+  assert.match(block, /transcriptPath: intelState\.data\.transcriptAbs/, "absolute transcript path from intelligence payload");
+  assert.doesNotMatch(block, /child_process|spawn\(/, "no direct python invocation from frontend path");
+});
+test("phase6: /api/integrations deteksi nyata — connected hanya bila kredensial ada", () => {
+  const fn = server.slice(server.indexOf("function handleIntegrations"), server.indexOf("async function handleSttModels"));
+  assert.match(fn, /process\.env\[k\]/, "reads real env credentials");
+  assert.match(fn, /integrations\.json/, "or explicit config file");
+  assert.match(server, /\.add\("GET", "\/api\/integrations"/, "route registered");
+  for (const pair of [["YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET"], ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"], ["IG_APP_ID", "IG_APP_SECRET"]]) {
+    for (const k of pair) assert.ok(fn.includes(`"${k}"`), `platform credential key ${k} declared`);
+  }
+});
+
+test("phase0: engine boot verifies local services before revealing the workspace", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["engineBoot", "bootMessage", "bootSummary"]) {
+    assert.ok(html.includes(`id="${id}"`), `boot UI includes ${id}`);
+  }
+  const boot = script.slice(script.indexOf("async function bootstrapApplication"), script.indexOf("const analyzeSpeakerBtn"));
+  for (const endpoint of ["/api/system", "/api/stt/models", "/api/queue"]) {
+    assert.ok(boot.includes(endpoint), `boot checks ${endpoint}`);
+  }
+  assert.match(boot, /Promise\.all\(\[loadProjects\(\), loadExports\(\), refreshStorage\(\)\]\)/, "workspace loads real local data");
+  assert.match(boot, /boot\.hidden = true/, "workspace is revealed only when checks finish");
+  assert.doesNotMatch(boot, /Math\.random|setTimeout\(/, "boot has no fabricated progress or timed reveal");
+});
+
+test("dashboard: operational activity and insights use only persisted local evidence", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dashActivityChart", "dashActivityNote", "dashInsightList"]) {
+    assert.ok(html.includes(`id="${id}"`), `dashboard includes ${id}`);
+  }
+  const activity = script.slice(script.indexOf("function renderDashboardActivity"), script.indexOf("function renderDashboardInsights"));
+  assert.match(activity, /state\.projects/, "activity uses local projects");
+  assert.match(activity, /state\.exports/, "activity uses local exports");
+  assert.doesNotMatch(activity, /views|likes|engagement|Math\.random/i, "activity does not invent social metrics");
+  const insights = script.slice(script.indexOf("function renderDashboardInsights"), script.indexOf("function updateBootSummary"));
+  assert.match(insights, /typeof clip\.score === "number"/, "only numeric engine scores are analyzed");
+  assert.doesNotMatch(insights, /prediction|predict|Math\.random/i, "insights do not claim unverified performance predictions");
+});
+
+test("phase6: UI integrasi jujur — NOT CONNECTED, tanpa OAuth simulasi", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["integList", "integRefreshBtn"]) {
+    assert.ok(html.includes(`id="${id}"`), `${id} must exist`);
+  }
+  assert.match(html, /tidak ada simulasi koneksi/i, "explicit no-simulation notice");
+  const fn = script.slice(script.indexOf("async function loadIntegrations"), script.indexOf("function updatePublishAvailability"));
+  assert.match(fn, /NOT CONNECTED/, "real state rendered from endpoint");
+  assert.doesNotMatch(fn, /status\s*=\s*["']CONNECTED["']/, "never fakes a connection");
+});
+
+test("phase6: kalender = local plan berlabel; tolak waktu lampau; tanpa auto-post", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('data-view-panel="calendar"'), "calendar view exists");
+  assert.match(html, /PLAN LOKAL/i, "clear local-plan label");
+  const block = script.slice(script.indexOf("// ================= CALENDAR + INTEGRATIONS"), script.indexOf("const SETTINGS_KEY"));
+  assert.match(block, /localStorage\.setItem\(CAL_KEY/, "local persistence (planning layer)");
+  assert.match(block, /waktu yang sudah lewat/, "past-time rejected");
+  assert.match(block, /clipperStudio\.calendar/, "namespaced key");
+  assert.doesNotMatch(block, /publish.*platform|auto.?post/i.test("") ? /$^/ : /fetch\(.*(youtube|tiktok|instagram)/i, "no platform API calls");
+});
+
+test("phase6: calendar entries treat persisted labels as text, not HTML", () => {
+  const block = script.slice(script.indexOf("function renderCalendar"), script.indexOf("function renderUpcoming"));
+  assert.doesNotMatch(block, /chip\.innerHTML\s*=/, "calendar labels must not be injected as HTML");
+  assert.match(block, /chip\.append\(` \$\{String\(e\.platform \|\| ""\)\}`\)/, "platform is appended as text");
+});
+
+test("phase6: PUBLISH NOW terkunci sampai integrasi nyata terhubung", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  const btnPos = html.indexOf('id="pubPublishNowBtn"');
+  assert.ok(html.slice(btnPos - 40, btnPos + 80).includes("disabled"), "PUBLISH NOW starts disabled");
+  const fn = script.slice(script.indexOf("function updatePublishAvailability"), script.indexOf('$("#integRefreshBtn")'));
+  assert.match(fn, /btn\.disabled = !anyConnected/, "enabled only when endpoint reports a real connection");
+});
+
+test("phase6: production insights dari data export asli — tanpa klaim AI/prediksi", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="prodInsights"'), "insights container exists");
+  const fn = script.slice(script.indexOf("function computeProductionInsights"), script.indexOf("$$('[data-qview]')".replace(/'/g, '"')));
+  assert.match(fn, /state\.exports/, "computed from real exports");
+  assert.match(fn, /ratioCount|topRatio/, "format distribution observed");
+  assert.match(fn, /tanpa prediksi performa/, "no performance prediction claims");
+  assert.match(fn, /Belum cukup data/, "insufficient-data honesty");
+  assert.doesNotMatch(fn, /Math\.random|AI predicts|viral score predict/i, "no fabricated AI signals");
+});
+
+test("phase6: quick actions dashboard + nav lengkap (10 view)", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const v of ["dashboard", "studio", "library", "exports", "publish", "calendar", "results", "intel", "analytics", "dna", "integrations"]) {
+    assert.ok(html.includes(`data-view="${v}"`), `nav ${v}`);
+    if (v !== "dashboard") assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v}`);
+  }
+  assert.ok(html.includes("data-qview=\"exports\"".replace(/\\"/g, '"')), "quick action exports");
+  assert.ok(html.includes("data-qview=\"calendar\"".replace(/\\"/g, '"')), "quick action calendar");
 });
 
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

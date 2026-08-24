@@ -9,6 +9,23 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<section class="engine-boot" id="engineBoot" aria-label="Engine initialization" aria-live="polite">
+  <div class="boot-grid" aria-hidden="true"></div>
+  <div class="boot-card">
+    <div class="boot-brand"><span class="boot-mark">CS</span><span>CLIPPER STUDIO</span></div>
+    <p class="eyebrow">Local video intelligence</p>
+    <h1>Starting the engine</h1>
+    <p class="boot-copy" id="bootMessage">Connecting to the local workspace…</p>
+    <ol class="boot-checks" id="bootChecks">
+      <li data-boot-step="system"><span>01</span><b>Core engine</b><em>Waiting</em></li>
+      <li data-boot-step="ffmpeg"><span>02</span><b>FFmpeg &amp; hardware</b><em>Waiting</em></li>
+      <li data-boot-step="stt"><span>03</span><b>Speech-to-text models</b><em>Waiting</em></li>
+      <li data-boot-step="queue"><span>04</span><b>Job queue</b><em>Waiting</em></li>
+      <li data-boot-step="workspace"><span>05</span><b>Workspace data</b><em>Waiting</em></li>
+    </ol>
+    <div class="boot-footer"><span id="bootSummary">0 / 5 checks complete</span><span>OFFLINE-FIRST</span></div>
+  </div>
+</section>
 <div class="app-shell">
   <aside class="sidebar">
     <div class="brand">
@@ -34,6 +51,12 @@
         <button class="nav-item" data-view="exports" type="button">
           <span class="nav-icon">E</span> <span class="nav-label">Exports</span>
         </button>
+        <button class="nav-item" data-view="publish" type="button">
+          <span class="nav-icon">P</span> <span class="nav-label">Publish</span>
+        </button>
+        <button class="nav-item" data-view="calendar" type="button">
+          <span class="nav-icon">C</span> <span class="nav-label">Calendar</span>
+        </button>
       </nav>
     </div>
 
@@ -43,11 +66,17 @@
         <button class="nav-item" data-view="results" type="button">
           <span class="nav-icon">R</span> <span class="nav-label">Results</span>
         </button>
+        <button class="nav-item" data-view="intel" type="button">
+          <span class="nav-icon">AI</span> <span class="nav-label">Intel</span>
+        </button>
         <button class="nav-item" data-view="analytics" type="button">
           <span class="nav-icon">A</span> <span class="nav-label">Analytics</span>
         </button>
         <button class="nav-item" data-view="dna" type="button">
           <span class="nav-icon">DNA</span> <span class="nav-label">Content DNA</span>
+        </button>
+        <button class="nav-item" data-view="integrations" type="button">
+          <span class="nav-icon">IN</span> <span class="nav-label">Integrations</span>
         </button>
       </nav>
     </div>
@@ -120,6 +149,11 @@
           <p class="dash-sub">Turn long-form video into high-potential short-form clips.</p>
         </div>
         <button class="primary-button" id="dashNewProjectBtn" type="button">+ New Project</button>
+        <div class="dash-quick">
+          <button class="ghost-button compact" data-qview="exports" type="button">Exports</button>
+          <button class="ghost-button compact" data-qview="calendar" type="button">Calendar</button>
+          <button class="ghost-button compact" data-qview="integrations" type="button">Integrations</button>
+        </div>
       </section>
 
       <section class="kpi-grid" aria-label="Statistik ringkas">
@@ -145,6 +179,25 @@
         </div>
       </section>
 
+      <div class="dash-observability-grid">
+        <section class="panel dash-activity" aria-labelledby="dashActivityTitle">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Observed locally</p><h2 id="dashActivityTitle">Production activity</h2></div>
+            <span class="status-pill" id="dashActivityRange">7 days</span>
+          </div>
+          <div class="dash-chart-legend" aria-hidden="true"><span class="project-dot"></span> Projects <span class="export-dot"></span> Exports</div>
+          <div class="dash-activity-chart" id="dashActivityChart" role="img" aria-label="Local project and export activity over the last seven days"></div>
+          <p class="caption-hint" id="dashActivityNote">Waiting for local activity data.</p>
+        </section>
+        <section class="panel dash-insights" aria-labelledby="dashInsightsTitle">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Engine evidence</p><h2 id="dashInsightsTitle">AI insights</h2></div>
+            <span class="status-pill" id="dashInsightsStamp">LOCAL ONLY</span>
+          </div>
+          <ul class="dash-insight-list" id="dashInsightList"><li class="empty-state">Run clip analysis to generate evidence-based insights.</li></ul>
+        </section>
+      </div>
+
       <section class="panel dash-active" aria-label="Active processing">
         <div class="panel-heading">
           <h2>Active processing</h2>
@@ -162,6 +215,16 @@
         </div>
         <div id="dashRecentResults">
           <div class="empty-state">NO RECENT RESULTS &mdash; complete an analysis to see outcomes here.</div>
+        </div>
+      </section>
+
+      <section class="panel dash-recent-exports" aria-label="Recent exports">
+        <div class="panel-heading">
+          <h2>Recent exports</h2>
+          <span class="status-pill" id="dashExportsCount">0</span>
+        </div>
+        <div id="dashRecentExports">
+          <div class="empty-state">Belum ada export.</div>
         </div>
       </section>
 
@@ -623,6 +686,7 @@
         <div class="proc-actions">
           <button class="secondary-button" id="procCancelBtn" type="button">CANCEL JOB</button>
           <button class="secondary-button" id="procRetryBtn" type="button" hidden>RETRY</button>
+          <button class="primary-button" id="procExportsBtn" type="button" hidden>VIEW EXPORTS</button>
           <button class="primary-button" id="procResultsBtn" type="button" hidden>VIEW PROJECT</button>
           <button class="ghost-button compact" id="procBackBtn" type="button">Back to Dashboard</button>
         </div>
@@ -637,6 +701,63 @@
       </section>
     </div>
 
+    <!-- PUBLISHING WORKSPACE (Phase 5 — metadata prep, TANPA auto-upload) -->
+    <div class="app-view page-view" data-view-panel="publish">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Publishing</p>
+          <h2>Prepare &amp; copy metadata</h2>
+          <div class="pub-notice">EXPORT READY &mdash; download videonya lalu upload manual ke platform. Tidak ada auto-upload / status publish online.</div>
+        </div>
+        <div class="res-hero-actions">
+          <span class="status-pill status-pill-done" id="pubStatePill">READY FOR UPLOAD</span>
+        </div>
+      </section>
+
+      <div class="res-grid">
+        <section class="panel" aria-label="Publish source">
+          <div class="panel-heading"><h2>SOURCE EXPORT</h2></div>
+          <div style="padding: 14px 18px;">
+            <p class="field-label">Pilih file export</p>
+            <select class="inspector-input" id="pubSourceSelect" aria-label="Choose exported file"></select>
+            <p class="field-label" style="margin-top:12px">TARGET PLATFORM</p>
+            <div class="segmented pub-platform">
+              <button data-platform="YouTube Shorts" type="button" class="active">Shorts</button>
+              <button data-platform="TikTok" type="button">TikTok</button>
+              <button data-platform="Instagram Reels" type="button">Reels</button>
+            </div>
+            <ul class="bp-validation" id="pubChecklist"></ul>
+          </div>
+        </section>
+
+        <aside class="panel" aria-label="Metadata">
+          <div class="panel-heading"><h2>METADATA</h2><span class="status-pill" id="pubMetaSource" hidden>from clip intel</span></div>
+          <div style="padding: 14px 18px; display:flex; flex-direction:column; gap:8px;">
+            <p class="field-label">TITLE</p>
+            <input class="inspector-input" id="pubTitle" type="text" maxlength="140" placeholder="Judul video...">
+            <div id="pubTitleOptions" class="pub-title-options" hidden></div>
+            <p class="field-label">DESCRIPTION <span class="caption-hint">(manual — bukan output AI)</span></p>
+            <textarea class="inspector-input" id="pubDesc" rows="4" placeholder="Tulis deskripsi..."></textarea>
+            <p class="field-label">HASHTAGS</p>
+            <input class="inspector-input" id="pubHashtags" type="text" placeholder="#shorts #podcast">
+            <div class="proc-actions">
+              <button class="ghost-button compact" id="copyTitleBtn" type="button">COPY TITLE</button>
+              <button class="ghost-button compact" id="copyDescBtn" type="button">COPY DESCRIPTION</button>
+              <button class="ghost-button compact" id="copyTagsBtn" type="button">COPY HASHTAGS</button>
+              <button class="primary-button compact" id="copyAllBtn" type="button">COPY ALL</button>
+            </div>
+            <span class="caption-status" id="pubCopyStatus"></span>
+            <p class="field-label" style="margin-top:10px">PUBLISH / SCHEDULE</p>
+            <div class="proc-actions">
+              <button class="secondary-button compact" id="pubScheduleBtn" type="button" title="Simpan rencana tayang lokal ke Calendar">SCHEDULE (LOCAL PLAN)</button>
+              <button class="primary-button compact" id="pubPublishNowBtn" type="button" disabled>PUBLISH NOW</button>
+            </div>
+            <div class="caption-hint" id="pubPublishHint">PUBLISH NOW butuh integrasi platform terhubung (lihat tab Integrations). Tidak ada simulasi upload.</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
     <!-- INTELLIGENCE PLACEHOLDERS (data nyata menyusul di fase berikutnya) -->
     <!-- RESULTS WORKSPACE (Phase 3 — real clips + intelligence dari backend) -->
     <div class="app-view page-view" data-view-panel="results">
@@ -649,10 +770,15 @@
             <span>DURATION <strong id="resDuration">&mdash;</strong></span>
             <span>CLIPS <strong id="resClipsCount">0</strong></span>
             <span>ANALYZED <strong id="resAnalyzed">0 / 0</strong></span>
+            <span>EXPORTS <strong id="resExports">&mdash;</strong></span>
           </div>
         </div>
         <div class="res-hero-actions">
           <span class="status-pill status-pill-queued" id="resStatePill">NO RESULTS</span>
+          <button class="ghost-button compact" id="resSelectAllBtn" type="button" hidden>SELECT ALL</button>
+          <button class="ghost-button compact" id="resClearSelBtn" type="button" hidden>CLEAR</button>
+          <span class="status-pill status-pill-running" id="resSelCount" hidden>0 SELECTED</span>
+          <button class="primary-button" id="batchProduceBtn" type="button" hidden>BATCH PRODUCE</button>
           <button class="primary-button" id="analyzeAllBtn" type="button" disabled>ANALYZE ALL</button>
         </div>
       </section>
@@ -731,12 +857,129 @@
       </div>
     </div>
 
+    <!-- CONTENT INTELLIGENCE (Phase 7 — orkestrasi engine existing) -->
+    <div class="app-view page-view" data-view-panel="intel">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Content intelligence</p>
+          <h2>Understand your source</h2>
+        </div>
+        <div class="res-hero-actions">
+          <select class="inspector-input" id="intelProjectSelect" aria-label="Choose project"></select>
+          <button class="primary-button" id="intelLoadBtn" type="button">ANALYZE SOURCE</button>
+          <span class="status-pill" id="intelStatePill">IDLE</span>
+        </div>
+      </section>
+
+      <section class="proc-error" id="intelErrorBox" hidden style="margin-top:14px">
+        <strong>AI ANALYSIS FAILED</strong>
+        <p class="proc-error-reason">Reason: <span id="intelErrorReason"></span></p>
+        <button class="secondary-button compact" id="intelRetryBtn" type="button" style="margin-top:8px">RETRY</button>
+      </section>
+
+      <div class="res-grid">
+        <section class="panel" aria-label="Content overview">
+          <div class="panel-heading"><h2>CONTENT OVERVIEW</h2><span class="status-pill" id="intelSourcePill" hidden></span></div>
+          <div style="padding:14px 18px; display:flex; flex-direction:column; gap:8px;">
+            <p class="field-label">SUMMARY</p>
+            <div class="intel-block" id="intelSummary">Summary not available.</div>
+            <p class="field-label">KEYWORDS (dari transkrip)</p>
+            <div class="rc-badges" id="intelKeywords"><span class="caption-hint">&mdash;</span></div>
+            <p class="field-label">STATS</p>
+            <dl class="ri-grid">
+              <dt>Clips</dt><dd id="intelStatClips">&mdash;</dd>
+              <dt>Analyzed</dt><dd id="intelStatAnalyzed">&mdash;</dd>
+              <dt>Avg score</dt><dd id="intelStatAvg">&mdash;</dd>
+            </dl>
+            <p class="field-label">TRANSCRIPT SEARCH</p>
+            <div class="exports-toolbar" style="padding:0 0 6px">
+              <input class="inspector-input" id="intelSearchInput" type="search" placeholder="Cari frasa di transkrip..." aria-label="Search transcript">
+              <button class="secondary-button compact" id="intelSearchBtn" type="button">SEARCH</button>
+            </div>
+            <div class="res-transcript" id="intelSearchResults"><div class="empty-state">Hasil pencarian transkrip muncul di sini.</div></div>
+          </div>
+        </section>
+
+        <aside class="panel res-intel-panel" aria-label="Top clips and recommendations">
+          <div class="panel-heading"><h2>SMART CLIP DISCOVERY</h2><span class="caption-hint">ranking dari backend score</span></div>
+          <div id="intelTopClips" style="max-height:340px; overflow-y:auto;"><div class="empty-state">Belum ada clip ter-analisis.</div></div>
+          <div class="panel-heading" style="margin-top:10px"><h2>RECOMMENDED NEXT STEPS</h2></div>
+          <ul class="bp-validation" id="intelRecommendations" style="padding:0 18px 16px"></ul>
+        </aside>
+      </div>
+    </div>
+
+    <!-- CONTENT CALENDAR (Phase 6 — local planning plan, bukan jadwal platform) -->
+    <div class="app-view page-view" data-view-panel="calendar">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Content calendar</p>
+          <h2>Local publishing plan</h2>
+          <div class="pub-notice">PLAN LOKAL &mdash; belum ada integrasi platform, jadi ini rencana/reminder editorial. Tidak ada auto-post ke YouTube/TikTok/Instagram.</div>
+        </div>
+      </section>
+
+      <div class="res-grid">
+        <section class="panel" aria-label="Calendar month view">
+          <div class="panel-heading"><h2 id="calMonthLabel">&mdash;</h2>
+            <div>
+              <button class="ghost-button compact" id="calPrevBtn" type="button" aria-label="Previous month">&larr;</button>
+              <button class="ghost-button compact" id="calTodayBtn" type="button">Today</button>
+              <button class="ghost-button compact" id="calNextBtn" type="button" aria-label="Next month">&rarr;</button>
+            </div>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+        </section>
+
+        <aside class="panel" aria-label="Add schedule and upcoming list">
+          <div class="panel-heading"><h2>NEW PLAN</h2><span class="status-pill" id="calCount">0</span></div>
+          <div style="padding:14px 18px; display:flex; flex-direction:column; gap:8px;">
+            <p class="field-label">Export</p>
+            <select class="inspector-input" id="calSourceSelect" aria-label="Choose exported file"></select>
+            <p class="field-label">Platform (target)</p>
+            <select class="inspector-input" id="calPlatform">
+              <option>YouTube Shorts</option>
+              <option>TikTok</option>
+              <option>Instagram Reels</option>
+            </select>
+            <p class="field-label">Tanggal &amp; jam</p>
+            <input class="inspector-input" id="calWhen" type="datetime-local">
+            <div class="proc-actions">
+              <button class="primary-button compact" id="calAddBtn" type="button">ADD TO PLAN</button>
+            </div>
+            <span class="caption-status" id="calStatus"></span>
+          </div>
+          <div class="panel-heading" style="margin-top:8px"><h2>UPCOMING</h2></div>
+          <div class="table-list" id="calUpcoming"><div class="empty-state">Belum ada rencana.</div></div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- INTEGRATIONS (Phase 6 — status deteksi nyata, tanpa OAuth palsu) -->
+    <div class="app-view page-view" data-view-panel="integrations">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Integrations</p>
+          <h2>Platform connections</h2>
+          <div class="pub-notice">Status di bawah hasil DETEKSI nyata kredensial OAuth (env / integrations.json). Tanpa kredensial = NOT CONNECTED &mdash; tidak ada simulasi koneksi.</div>
+        </div>
+        <button class="ghost-button compact" id="integRefreshBtn" type="button">REFRESH</button>
+      </section>
+      <section class="panel" id="integList" aria-label="Platforms">
+        <div class="empty-state">Memuat status integrasi&hellip;</div>
+      </section>
+    </div>
+
     <div class="app-view page-view" data-view-panel="analytics">
       <div class="page-panel panel coming-next">
-        <p class="eyebrow">Coming next</p>
-        <h2>Analytics</h2>
-        <p>This intelligence workspace will be connected to your real clipping data in a future phase.</p>
+        <p class="eyebrow">Analytics</p>
+        <h2>Analytics unavailable</h2>
+        <p>Metrics platform (views/likes/engagement) butuh integrasi yang terhubung. Saat ini tidak ada platform terhubung &mdash; angka tidak dikarang.</p>
       </div>
+      <section class="panel" style="margin-top:14px" aria-label="Production insights">
+        <div class="panel-heading"><h2>Production insights</h2><span class="status-pill">observed</span></div>
+        <ul class="bp-validation" id="prodInsights" style="padding: 10px 18px 16px"></ul>
+      </section>
     </div>
 
     <div class="app-view page-view" data-view-panel="dna">
@@ -752,7 +995,16 @@
       <div class="page-panel panel">
         <div class="panel-heading">
           <h2>Exports</h2>
+          <span class="status-pill" id="exportsCount">0</span>
           <button class="ghost-button compact" id="clearExports" type="button">Clear</button>
+        </div>
+        <div class="exports-toolbar">
+          <input class="inspector-input" id="exportsSearch" type="search" placeholder="Cari nama file / project / hook..." aria-label="Search exports">
+          <select class="inspector-input" id="exportsSort" aria-label="Sort exports">
+            <option value="newest" selected>Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="name">Name</option>
+          </select>
         </div>
         <div class="table-list" id="exportsList">
           <div class="empty-state">Belum ada export. Export clip dari Studio akan muncul di sini.</div>
@@ -765,8 +1017,7 @@
   </main>
 </div>
 <div class="toast" id="toast"></div>
-<div class="modal-overlay" id="newProjectModal" hidden>
-  <div class="modal-card panel" role="dialog" aria-modal="true" aria-labelledby="npTitle">
+<div class="modal-overlay" id="newProjectModal" hidden>  <div class="modal-card panel" role="dialog" aria-modal="true" aria-labelledby="npTitle">
     <div class="panel-heading"><h2 id="npTitle">NEW PROJECT</h2></div>
     <p class="field-label">Project name</p>
     <input class="inspector-input" id="npName" type="text" maxlength="80" placeholder="Misal: Podcast Episode 42 (kosongkan = otomatis)">
@@ -783,6 +1034,28 @@
     <div class="proc-actions">
       <button class="primary-button" id="npCreateBtn" type="button">CREATE PROJECT</button>
       <button class="secondary-button" id="npCancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="batchModal" hidden>
+  <div class="modal-card panel" role="dialog" aria-modal="true" aria-labelledby="bpTitle">
+    <div class="panel-heading"><h2 id="bpTitle">BATCH PRODUCTION</h2><span class="status-pill status-pill-running" id="bpCount">0</span></div>
+    <p class="field-label">FORMAT</p>
+    <div class="segmented bp-format">
+      <button data-bpratio="portrait" type="button">9:16</button>
+      <button data-bpratio="wide" type="button">16:9</button>
+      <button data-bpratio="four5" type="button">4:5</button>
+    </div>
+    <label class="audio-opt" style="margin:8px 0">
+      <input type="checkbox" id="bpCaptions" checked> Captions ON (pakai style &amp; posisi dari Settings)
+    </label>
+    <p class="field-label">OUTPUT</p>
+    <div class="caption-hint">MP4 — renderer existing (FFmpeg + queue)</div>
+    <p class="field-label">VALIDATION</p>
+    <ul class="bp-validation" id="bpValidation"></ul>
+    <div class="proc-actions">
+      <button class="primary-button" id="bpStartBtn" type="button">START BATCH</button>
+      <button class="secondary-button" id="bpCancelBtn" type="button">CANCEL</button>
     </div>
   </div>
 </div>

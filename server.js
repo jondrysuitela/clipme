@@ -6202,6 +6202,146 @@ async function handleSttSearch(req, res) {
   }
 }
 
+// Status integrasi platform — DETEKSI NYATA, bukan klaim.
+// Terhubung hanya jika kredensial OAuth benar-benar dikonfigurasi via env
+// (atau integrations.json). Tanpa kredensial = NOT CONNECTED, tanpa pengecualian.
+// ===== Phase 7: Content Intelligence orchestrator ============================
+// Orkestrasi di atas engine existing: transkrip STT (nyata), skor/ranking
+// backend, field reason asli. Ringkasan EKSTRAKTIF dari transkrip (bukan
+// generatif — callClipmeLLM terikat schema analisis clip). Cache per project
+// dengan invalidasi berdasar mtime transkrip.
+const intelCache = new Map();
+
+const INTEL_STOPWORDS = new Set([
+  "yang", "dan", "di", "ke", "dari", "ini", "itu", "untuk", "dengan", "pada",
+  "adalah", "akan", "sudah", "tidak", "bisa", "ada", "juga", "karena", "kalau",
+  "saya", "kami", "kita", "mereka", "anda", "dia", "nya", "punya", "atau",
+  "the", "and", "that", "this", "with", "for", "you", "your", "have", "has",
+  "are", "was", "were", "but", "not", "can", "will", "they", "them", "from",
+  "what", "when", "where", "how", "why", "who", "its", "it's", "about", "just",
+  "like", "know", "think", "really", "very", "much", "many", "more", "than"
+]);
+
+function intelExtractKeywords(text, limit = 12) {
+  const counts = {};
+  const words = String(text || "").toLowerCase().match(/[a-zà-ÿ0-9']{4,}/g) || [];
+  for (const w of words) {
+    if (INTEL_STOPWORDS.has(w)) continue;
+    counts[w] = (counts[w] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([word, count]) => ({ word, count }));
+}
+
+function intelExtractiveSummary(text, keywords, maxSentences = 3) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (clean.length < 120) return null;
+  const sentences = clean.split(/(?<=[.!?])\s+/).filter((s) => s.length >= 40 && s.length <= 320);
+  if (!sentences.length) return null;
+  const kw = keywords.map((k) => k.word);
+  const scored = sentences.map((s, i) => {
+    const low = s.toLowerCase();
+    const hits = kw.reduce((acc, w) => acc + (low.includes(w) ? 1 : 0), 0);
+    // posisi awal sedikit diutamakan (ekstraktif, deterministik)
+    return { s, score: hits * 2 - i * 0.01 };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxSentences).map((x) => x.s.trim()).join(" ");
+}
+
+async function handleProjectIntelligence(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
+  const manifest = readProjectManifest(projectDir);
+
+  let transcriptText = "";
+  let transcriptAbs = "";
+  let transcriptMtime = 0;
+  try {
+    const rel = manifest.transcriptPath || "";
+    if (rel) {
+      const abs = path.join(projectDir, rel);
+      if (isSafePath(abs, UPLOAD_DIR) && fs.existsSync(abs)) {
+        transcriptAbs = abs;
+        transcriptMtime = fs.statSync(abs).mtimeMs;
+        const parsed = JSON.parse(fs.readFileSync(abs, "utf8"));
+        if (Array.isArray(parsed)) {
+          transcriptText = parsed.map((seg) => String(seg.text || "")).join(" ");
+        }
+      }
+    }
+  } catch {}
+
+  const clips = Array.isArray(manifest.clips) ? manifest.clips : [];
+  const sig = `${transcriptMtime}:${clips.length}:${clips.reduce((n, c) => n + (c.score != null ? 1 : 0), 0)}`;
+  const cached = intelCache.get(projectId);
+  if (cached && cached.sig === sig) {
+    sendJson(res, 200, cached.data);
+    return;
+  }
+
+  const keywords = intelExtractKeywords(transcriptText);
+  const summary = intelExtractiveSummary(transcriptText, keywords);
+  const analyzedClips = clips.filter((c) => c.score != null);
+  const scored = analyzedClips
+    .slice()
+    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+  const topClips = scored.slice(0, 5).map((c) => ({
+    id: c.id,
+    title: c.deepTitle || c.title || "",
+    hook: c.recommendedHook || c.hook || "",
+    hookType: c.hookType || "",
+    start: c.start,
+    end: c.end,
+    score: c.score,
+    why: [c.naturalCutReason, c.deepTitleReason, c.openingStrategy, c.hookIntent]
+      .filter(Boolean)
+      .map(String)
+      .slice(0, 3)
+  }));
+
+  const data = {
+    projectId,
+    name: manifest.name || "project",
+    hasTranscript: Boolean(transcriptText),
+    summary,
+    summaryMode: summary ? "extractive-from-transcript" : "unavailable",
+    keywords,
+    stats: {
+      clips: clips.length,
+      analyzed: analyzedClips.length,
+      avgScore: analyzedClips.length
+        ? Math.round(analyzedClips.reduce((n, c) => n + Number(c.score), 0) / analyzedClips.length)
+        : null
+    },
+    topClips,
+    transcriptAbs,
+    generatedAt: Date.now()
+  };
+  intelCache.set(projectId, { sig, data });
+  if (intelCache.size > 50) intelCache.delete(intelCache.keys().next().value);
+  sendJson(res, 200, data);
+}
+
+function handleIntegrations(req, res) {
+  let fileCfg = {};
+  try {
+    fileCfg = JSON.parse(fs.readFileSync(path.join(__dirname, "integrations.json"), "utf8")) || {};
+  } catch {}
+  const has = (...keys) => keys.every((k) => Boolean(process.env[k]) || Boolean(fileCfg[k]));
+  sendJson(res, 200, {
+    platforms: [
+      { id: "youtube", name: "YouTube", connected: has("YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET") },
+      { id: "tiktok", name: "TikTok", connected: has("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET") },
+      { id: "instagram", name: "Instagram", connected: has("IG_APP_ID", "IG_APP_SECRET") }
+    ]
+  });
+}
+
 async function handleSttModels(req, res) {
   try {
     const pythonPath = process.env.LOCAL_WHISPER_PYTHON || VENV_PYTHON;
@@ -6253,7 +6393,9 @@ router
     .add("GET", "/api/localai/status", handleEngineStatus)
   .add("POST", "/api/localai/analyze", handleLocalAIAnalyze)
   .add("POST", "/api/localai/download-model", handleLocalAIDownloadModel)
-.add("GET", "/api/stt/models", handleSttModels)
+    .add("GET", "/api/stt/models", handleSttModels)
+  .add("GET", "/api/integrations", handleIntegrations)
+  .add("GET", "/api/intelligence/:projectId", handleProjectIntelligence)
   .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)

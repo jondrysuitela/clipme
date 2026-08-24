@@ -1125,6 +1125,7 @@ async function loadProjects() {
     if (!response.ok) throw new Error(data.error || "Gagal memuat Library.");
     state.projects = (Array.isArray(data.projects) ? data.projects : []).map((p) => ({
       ...p,
+      _ts: Number(p.createdAt) || 0,
       createdAt: p.createdAt ? new Date(p.createdAt).toLocaleString() : ""
     }));
   } catch (err) {
@@ -1144,7 +1145,12 @@ async function loadExports() {
       clipTitle: e.hook || e.project || "Export",
       status: e.hook || e.project ? "Selesai" : "Selesai",
       createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
-      size: e.size
+      size: e.size,
+      _ts: Number(e.createdAt) || 0,
+      project: e.project || "",
+      hook: e.hook || "",
+      caption: e.caption || "",
+      ratio: e.ratio || ""
     }));
   } catch (err) {
     state.exports = [];
@@ -3711,6 +3717,11 @@ $$(".nav-item").forEach((button) => {
     if (button.dataset.view === "dashboard") loadDashboardData();
     if (button.dataset.view === "studio") checkEngineReadiness(false);
     if (button.dataset.view === "results" && resultsState.projectId) renderResultsAll();
+    if (button.dataset.view === "publish") { populatePubSources(); pubChecklistUpdate(); }
+    if (button.dataset.view === "calendar") { populateCalSources(); renderCalendar(); }
+    if (button.dataset.view === "integrations") loadIntegrations();
+    if (button.dataset.view === "analytics") { loadIntegrations(); computeProductionInsights(); }
+    if (button.dataset.view === "intel") populateIntelProjects();
     if (button.dataset.view === "library") loadProjects();
     if (button.dataset.view === "exports") loadExports();
   });
@@ -3835,6 +3846,8 @@ async function loadDashboardData() {
     await Promise.all([loadProjects(), loadExports()]);
     updateDashboardStats();
     renderDashboardProjects(state.projects);
+    renderRecentExportsDashboard();
+    renderDashboardActivity();
     await updateDashboardAvgScore();
   } catch {}
   dashBusy = false;
@@ -3873,6 +3886,7 @@ async function updateDashboardAvgScore() {
     }
   }
   renderRecentResults(details);
+  renderDashboardInsights(details, { scoredClips: n, totalScore: sum });
   if (!n) {
     el.textContent = "—";
     el.classList.add("is-empty");
@@ -4420,6 +4434,8 @@ async function openResultsForProject(projectId) {
     resultsState.sourceLabel = data.url || String(data.type || "local").toUpperCase();
     resultsState.duration = Number(data.probe && data.probe.duration) || 0;
     resultsState.clips = Array.isArray(data.clips) ? data.clips : [];
+    resultsState.selectedIds = resultsState.selectedIds || new Set();
+    resultsState.selectedIds.clear();
     resultsState.selectedClipId = null;
     resultsState.transcripts = {};
     resultsState.status = resultsState.clips.length ? "ready" : "empty";
@@ -4498,6 +4514,20 @@ function applyResView() {
 
     const head = document.createElement("div");
     head.className = "rc-head";
+    const sel = document.createElement("label");
+    sel.className = "rc-select";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = resultsState.selectedIds.has(clip.id);
+    cb.setAttribute("aria-label", `Select clip ${clip.id}`);
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      if (cb.checked) resultsState.selectedIds.add(clip.id);
+      else resultsState.selectedIds.delete(clip.id);
+      updateResSelectionBar();
+    });
+    sel.appendChild(cb);
+    head.appendChild(sel);
     const idEl = document.createElement("span");
     idEl.className = "rc-id";
     idEl.textContent = `CLIP ${String(clip.id).padStart(2, "0")}${analyzed ? "" : " · NEW"}`;
@@ -4567,8 +4597,15 @@ function applyResView() {
     studioBtn.className = "secondary-button compact";
     studioBtn.textContent = "STUDIO";
     studioBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(false); });
+    const pubBtn = document.createElement("button");
+    pubBtn.type = "button";
+    pubBtn.className = "ghost-button compact";
+    pubBtn.textContent = "PUBLISH";
+    pubBtn.title = "Siapkan metadata publish dari intel clip ini";
+    pubBtn.addEventListener("click", (e) => { e.stopPropagation(); openPublishForClip(clip); });
     actions.appendChild(prevBtn);
     actions.appendChild(studioBtn);
+    actions.appendChild(pubBtn);
     card.appendChild(actions);
 
     card.addEventListener("click", () => {
@@ -4579,6 +4616,7 @@ function applyResView() {
 
     list.appendChild(card);
   }
+  updateResSelectionBar();
 }
 
 function fillResultIntel(clip) {
@@ -4914,6 +4952,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !document.getElementById("newProjectModal").hidden) {
     closeNewProjectModal();
   }
+  if (event.key === "Escape" && !document.getElementById("batchModal").hidden) {
+    document.getElementById("batchModal").hidden = true;
+  }
 });
 
 $("#backToResultsBtn").addEventListener("click", () => {
@@ -4958,6 +4999,989 @@ previewVideo.addEventListener("error", () => {
   console.error("[preview] source failed to load:", previewVideo.src);
   uploadStatus.textContent = "VIDEO UNAVAILABLE";
   showToast("Video sumber tidak bisa dimuat. Coba BACK TO RESULTS lalu buka ulang clip.");
+});
+
+// ================= BATCH PRODUCTION + EXPORT MANAGER + PUBLISHING (Phase 5) ==
+// Orkestrasi di atas sistem existing: multi-select Results → modal config →
+// POST /api/export-batch (queue & FFmpeg yang sama). Tidak ada queue kedua,
+// tidak ada publishing palsu — metadata disiapkan & dicopy manual.
+
+resultsState.selectedIds = new Set();
+
+function updateResSelectionBar() {
+  const n = resultsState.selectedIds.size;
+  const pill = document.getElementById("resSelCount");
+  const produce = document.getElementById("batchProduceBtn");
+  const selAll = document.getElementById("resSelectAllBtn");
+  const clearBtn = document.getElementById("resClearSelBtn");
+  if (pill) {
+    pill.hidden = !n;
+    pill.textContent = `${n} SELECTED`;
+  }
+  if (produce) produce.hidden = !n;
+  if (selAll) selAll.hidden = !resultsState.clips.length;
+  if (clearBtn) clearBtn.hidden = !n;
+}
+
+$("#resSelectAllBtn").addEventListener("click", () => {
+  resultsState.visible.forEach((c) => resultsState.selectedIds.add(c.id));
+  updateResSelectionBar();
+  applyResView();
+});
+$("#resClearSelBtn").addEventListener("click", () => {
+  resultsState.selectedIds.clear();
+  updateResSelectionBar();
+  applyResView();
+});
+
+// ---- Batch modal ----
+let batchRatio = "portrait";
+let lastFailedClipIds = [];
+
+function bpValidateSelected() {
+  const dur = resultsState.duration || 0;
+  return resultsState.clips
+    .filter((c) => resultsState.selectedIds.has(c.id))
+    .map((clip) => {
+      const start = Number(clip.start);
+      const end = Number(clip.end);
+      let ok = true;
+      let why = "";
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 1) { ok = false; why = "rentang waktu tidak valid"; }
+      else if (dur > 0 && (start < -0.5 || end > dur + 0.5)) { ok = false; why = `di luar durasi sumber (${formatTime(dur)})`; }
+      return { clip, ok, why };
+    });
+}
+
+function openBatchModal() {
+  if (!resultsState.projectId) { showToast("Buka project dari Results dulu."); return; }
+  const items = bpValidateSelected();
+  $("#bpCount").textContent = `${items.length} CLIP`;
+  $$(".bp-format button").forEach((b) => b.classList.toggle("active", b.dataset.bpratio === currentRatio()));
+  batchRatio = currentRatio();
+  $("#bpCaptions").checked = autoCaptionEnabled();
+  const list = $("#bpValidation");
+  list.innerHTML = "";
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = it.ok ? "ok" : "warn";
+    li.textContent = `Clip ${String(it.clip.id).padStart(2, "0")}${it.ok ? "" : ` — ${it.why}`}`;
+    list.appendChild(li);
+  }
+  $("#bpStartBtn").disabled = !items.some((it) => it.ok);
+  document.getElementById("batchModal").hidden = false;
+}
+
+$$(".bp-format button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".bp-format button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    batchRatio = btn.dataset.bpratio;
+  });
+});
+
+$("#bpCancelBtn").addEventListener("click", () => { document.getElementById("batchModal").hidden = true; });
+document.getElementById("batchModal").addEventListener("click", (event) => {
+  if (event.target.id === "batchModal") event.target.hidden = true;
+});
+
+let batchRunning = false;
+
+async function startBatch() {
+  if (batchRunning) return;
+  const valid = bpValidateSelected().filter((it) => it.ok);
+  if (!valid.length) { showToast("Tidak ada clip valid untuk batch."); return; }
+  if (!state.projectId || state.projectId !== resultsState.projectId) {
+    // pastikan project aktif di Studio state agar segments/caption cache dipakai
+    await ensureResultsProjectInStudio();
+  }
+  batchRunning = true;
+  $("#bpStartBtn").disabled = true;
+  document.getElementById("batchModal").hidden = true;
+
+  try {
+    const response = await fetch("/api/export-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: resultsState.projectId,
+        clips: valid.map(({ clip }) => ({
+          clipId: clip.id,
+          start: clip.start,
+          end: clip.end,
+          caption: clip.caption || "",
+          language: CAPTION_LANG,
+          captionStyle: $("#bpCaptions").checked ? effectiveCaptionStyle() : "off",
+          captionSize: captionSize.value,
+          fontFamily: captionFontSelect ? captionFontSelect.value : "Arial",
+          captionColor: captionColorInput ? captionColorInput.value : "",
+          captionPosition: state.captionPosition || 0.76,
+          ratio: batchRatio,
+          fps: Number(state.fps) || 0,
+          crf: Number(state.crf) || 23,
+          audioBitrate: Number(state.audioBitrate) || 128,
+          speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+          faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+          segments: captionSegmentsForClip(clip)
+        }))
+      })
+    });
+    const data = await response.json();
+    if (!response.ok && response.status !== 202) throw new Error(data.error || "Batch export gagal.");
+    if (!data.jobId) throw new Error("Server tidak mengembalikan job batch export.");
+
+    enterProcessingView(data.jobId, `Batch ${valid.length} clips`, retryFailedBatch, { projectId: resultsState.projectId });
+    const result = await waitForJob(data.jobId, { onUpdate: renderProcessingTick });
+
+    const okResults = (result.results || []).filter((item) => item && item.filename);
+    const failedItems = (result.results || []).filter((item) => item && item.error);
+    for (const item of okResults) addExportResult(item, `Batch export`);
+    completeProcessingView({ clips: okResults.map((r) => ({ id: r.clipId })), _countOnly: true });
+    $("#procExportsBtn").hidden = false;
+    lastFailedClipIds = [];
+    if (failedItems.length) {
+      lastFailedClipIds = failedItems
+        .map((item) => item.clipId)
+        .filter((id) => valid.some(({ clip }) => clip.id === id));
+      processingState.status = "failed";
+      setProcPill("failed", "PARTIAL");
+      $("#procErrorReason").textContent = `${okResults.length}/${valid.length} berhasil. Contoh error: ${failedItems[0].error}`;
+      $("#procErrorBox").hidden = false;
+      $("#procRetryBtn").hidden = false;
+      console.error("[batch]", failedItems);
+    }
+    $("#procTask").textContent = `BATCH COMPLETE — ${okResults.length}/${valid.length} clips exported.`;
+    showToast(`Batch selesai: ${okResults.length}/${valid.length} clip ter-export.`);
+    loadExports();
+  } catch (err) {
+    console.error("[batch]", err);
+    await failProcessingView(err);
+    showToast(err.message);
+  } finally {
+    batchRunning = false;
+    $("#bpStartBtn").disabled = false;
+  }
+}
+
+function retryFailedBatch() {
+  if (!lastFailedClipIds.length) { showToast("Tidak ada clip gagal untuk di-retry."); return; }
+  resultsState.selectedIds = new Set(lastFailedClipIds);
+  openBatchModalFromSelection();
+  showToast(`Retry ${lastFailedClipIds.length} clip gagal — review lalu START BATCH.`);
+}
+
+function openBatchModalFromSelection() {
+  updateResSelectionBar();
+  openBatchModal();
+}
+
+$("#batchProduceBtn").addEventListener("click", openBatchModal);
+$("#bpStartBtn").addEventListener("click", startBatch);
+
+$("#procExportsBtn").addEventListener("click", () => {
+  showView("exports");
+  loadExports();
+});
+
+// ---- Export Manager: filter/search/sort + detail expandable ----
+function renderExports() {
+  const countPill = document.getElementById("exportsCount");
+  if (countPill) countPill.textContent = String(state.exports.length);
+  if (!state.exports.length) {
+    exportsList.innerHTML = '<div class="empty-state">Belum ada export. Export clip dari Studio akan muncul di sini.</div>';
+    return;
+  }
+
+  const q = ($("#exportsSearch").value || "").trim().toLowerCase();
+  const sortMode = ($("#exportsSort").value || "newest");
+  let arr = state.exports.slice();
+  if (q) {
+    arr = arr.filter((e) => `${e.filename} ${e.project || ""} ${e.clipTitle || ""}`.toLowerCase().includes(q));
+  }
+  if (sortMode === "newest") arr.sort((a, b) => b._ts - a._ts);
+  if (sortMode === "oldest") arr.sort((a, b) => a._ts - b._ts);
+  if (sortMode === "name") arr.sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
+
+  exportsList.innerHTML = "";
+  for (const item of arr) {
+    const row = document.createElement("div");
+    row.className = "table-row clickable";
+
+    const main = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = item.filename;
+    const meta = document.createElement("span");
+    meta.textContent = `${item.clipTitle}${item.createdAt ? ` - ${item.createdAt}` : ""}${item.size ? ` (${formatBytes(item.size)})` : ""}`;
+    main.appendChild(name);
+    main.appendChild(meta);
+
+    const status = document.createElement("span");
+    status.textContent = "READY";
+
+    const download = document.createElement("a");
+    download.className = "secondary-button compact";
+    download.href = item.downloadUrl;
+    download.setAttribute("download", item.filename);
+    download.textContent = "Download";
+
+    row.appendChild(main);
+    row.appendChild(status);
+    row.appendChild(download);
+    exportsList.appendChild(row);
+
+    const detail = document.createElement("div");
+    detail.className = "exp-detail";
+    detail.hidden = true;
+    detail.innerHTML = [
+      ["Project", item.project],
+      ["Ratio", item.ratio],
+      ["Caption", item.caption],
+      ["Hook", item.hook]
+    ].map(([k, v]) => `<span>${k}: <b>${v ? String(v).replace(/</g, "&lt;") : "—"}</b></span>`).join("");
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
+      detail.hidden = !detail.hidden;
+    });
+    exportsList.appendChild(detail);
+  }
+
+  const openBtn = document.createElement("button");
+  openBtn.className = "secondary-button compact";
+  openBtn.textContent = "Buka folder output";
+  openBtn.addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/open-output", { method: "POST" });
+      const j = await r.json();
+      if (r.ok) showToast("Folder output dibuka di File Explorer.");
+      else showToast(j.error || "Gagal membuka folder.");
+    } catch {
+      showToast("Gagal membuka folder output.");
+    }
+  });
+  exportsList.appendChild(openBtn);
+}
+
+$("#exportsSearch").addEventListener("input", renderExports);
+$("#exportsSort").addEventListener("change", renderExports);
+
+// Ringkasan export per project di header Results (match via nama project nyata)
+function updateResExportsLine() {
+  const el = document.getElementById("resExports");
+  if (!el || !resultsState.name) return;
+  const matches = state.exports.filter((e) => e.project && e.project === resultsState.name).length;
+  el.textContent = matches ? String(matches) : "—";
+}
+const _origRenderResHeader = renderResHeader;
+renderResHeader = function () { _origRenderResHeader(); updateResExportsLine(); };
+
+// ---- Publishing workspace: metadata prep + copy (TANPA auto-upload) ----
+const publishState = { platform: "YouTube Shorts" };
+
+function populatePubSources() {
+  const selEl = $("#pubSourceSelect");
+  if (!selEl) return;
+  selEl.innerHTML = "";
+  if (!state.exports.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Belum ada export — render clip dulu";
+    selEl.appendChild(opt);
+    return;
+  }
+  for (const [i, e] of state.exports.entries()) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = e.filename;
+    selEl.appendChild(opt);
+  }
+}
+
+async function copyToClipboard(text, label) {
+  try {
+    await navigator.clipboard.writeText(text);
+    $("#pubCopyStatus").textContent = `Copied ${label}.`;
+    showToast(`Copied ${label}.`);
+  } catch (err) {
+    console.error("[publish-copy]", err);
+    $("#pubCopyStatus").textContent = "Gagal menyalin.";
+    showToast("Clipboard diblokir browser — salin manual.");
+  }
+}
+
+function pubChecklistUpdate() {
+  const list = $("#pubChecklist");
+  if (!list) return;
+  const hasExport = !!state.exports.length;
+  const ratioOk = RATIO_PRESETS.includes(currentRatio()) || true; // semua preset renderer supported
+  const title = $("#pubTitle").value.trim();
+  const desc = $("#pubDesc").value.trim();
+  const tags = $("#pubHashtags").value.trim();
+  const items = [
+    [`Video exported (${state.exports.length} file)`, hasExport],
+    [`Format target: ${publishState.platform}`, ratioOk],
+    [`Title ready`, !!title],
+    [`Description ready`, !!desc],
+    [`Hashtags ready`, !!tags]
+  ];
+  list.innerHTML = "";
+  for (const [label, ok] of items) {
+    const li = document.createElement("li");
+    li.className = ok ? "ok" : "warn";
+    li.textContent = label;
+    list.appendChild(li);
+  }
+}
+
+$$(".pub-platform button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".pub-platform button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    publishState.platform = btn.dataset.platform;
+    pubChecklistUpdate();
+  });
+});
+
+["input", "change"].forEach((ev) => {
+  $("#pubTitle").addEventListener(ev, pubChecklistUpdate);
+  $("#pubDesc").addEventListener(ev, pubChecklistUpdate);
+  $("#pubHashtags").addEventListener(ev, pubChecklistUpdate);
+});
+
+$("#copyTitleBtn").addEventListener("click", () => copyToClipboard($("#pubTitle").value.trim() || "—", "title"));
+$("#copyDescBtn").addEventListener("click", () => copyToClipboard($("#pubDesc").value.trim() || "—", "description"));
+$("#copyTagsBtn").addEventListener("click", () => copyToClipboard($("#pubHashtags").value.trim() || "—", "hashtags"));
+$("#copyAllBtn").addEventListener("click", () => {
+  const text = [
+    `Target: ${publishState.platform}`,
+    `Title: ${$("#pubTitle").value.trim() || "—"}`,
+    `Description: ${$("#pubDesc").value.trim() || "—"}`,
+    `Hashtags: ${$("#pubHashtags").value.trim() || "—"}`
+  ].join("\n");
+  copyToClipboard(text, "semua metadata");
+});
+
+// Buka Publishing dengan metadata intel dari clip Results (judul/alternatif/hashtags)
+function openPublishForClip(clip) {
+  showView("publish");
+  populatePubSources();
+  $("#pubMetaSource").hidden = !(clip.deepTitle || (clip.analysis && clip.analysis.hashtags));
+  if (clip.deepTitle) $("#pubTitle").value = clip.deepTitle;
+  if (Array.isArray(clip.deepTitleAlternatives) && clip.deepTitleAlternatives.length) {
+    const box = $("#pubTitleOptions");
+    box.hidden = false;
+    box.innerHTML = "";
+    for (const t of [clip.deepTitle, ...clip.deepTitleAlternatives].filter(Boolean)) {
+      const labelEl = document.createElement("label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "pubTitleOpt";
+      radio.checked = t === clip.deepTitle;
+      radio.addEventListener("change", () => { $("#pubTitle").value = t; pubChecklistUpdate(); });
+      labelEl.appendChild(radio);
+      const span = document.createElement("span");
+      span.textContent = t;
+      labelEl.appendChild(span);
+      box.appendChild(labelEl);
+    }
+  } else {
+    $("#pubTitleOptions").hidden = true;
+  }
+  const tags = clip.analysis && clip.analysis.hashtags;
+  if (Array.isArray(tags) && tags.length) {
+    $("#pubHashtags").value = tags.map((t) => (String(t).startsWith("#") ? t : `#${t}`)).join(" ");
+  } else if (typeof tags === "string" && tags.trim()) {
+    $("#pubHashtags").value = tags.trim();
+  }
+  pubChecklistUpdate();
+  showToast("Metadata siap — review lalu COPY ALL / download video.");
+}
+
+// Dashboard RECENT EXPORTS — top 3 file nyata
+function renderRecentExportsDashboard() {
+  const wrap = document.getElementById("dashRecentExports");
+  const count = document.getElementById("dashExportsCount");
+  if (!wrap) return;
+  if (count) count.textContent = String(state.exports.length);
+  wrap.innerHTML = "";
+  if (!state.exports.length) {
+    wrap.innerHTML = '<div class="empty-state">Belum ada export.</div>';
+    return;
+  }
+  for (const item of state.exports.slice(0, 3)) {
+    const row = document.createElement("div");
+    row.className = "rr-row";
+    const main = document.createElement("div");
+    main.className = "rr-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = item.filename;
+    const metaEl = document.createElement("span");
+    metaEl.textContent = `${item.createdAt || ""}${item.size ? ` · ${formatBytes(item.size)}` : ""}`;
+    main.appendChild(nameEl);
+    main.appendChild(metaEl);
+    const pill = document.createElement("span");
+    pill.className = "status-pill status-pill-done";
+    pill.textContent = "READY";
+    row.appendChild(main);
+    row.appendChild(pill);
+    wrap.appendChild(row);
+  }
+}
+
+// ================= CALENDAR + INTEGRATIONS + INSIGHTS (Phase 6) ==============
+// Kalender = RENCANA LOKAL (localStorage), berlabel jelas — bukan jadwal
+// platform (tidak ada OAuth di build ini). Status integrasi dari deteksi
+// nyata /api/integrations. Insights dihitung dari data export asli.
+
+const CAL_KEY = "clipperStudio.calendar";
+
+function loadCalendar() {
+  try { return JSON.parse(localStorage.getItem(CAL_KEY) || "[]") || []; }
+  catch { return []; }
+}
+function saveCalendar(list) {
+  localStorage.setItem(CAL_KEY, JSON.stringify(list));
+}
+
+const calView = { year: new Date().getFullYear(), month: new Date().getMonth() };
+
+function populateCalSources() {
+  const selEl = $("#calSourceSelect");
+  if (!selEl) return;
+  selEl.innerHTML = "";
+  if (!state.exports.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Belum ada export — render clip dulu";
+    selEl.appendChild(opt);
+    return;
+  }
+  state.exports.forEach((e, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = e.filename;
+    selEl.appendChild(opt);
+  });
+}
+
+function calDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function renderCalendar() {
+  const grid = document.getElementById("calGrid");
+  if (!grid) return;
+  const label = document.getElementById("calMonthLabel");
+  const monthName = new Date(calView.year, calView.month, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+  if (label) label.textContent = monthName;
+
+  const entries = loadCalendar();
+  const byDay = {};
+  for (const e of entries) {
+    const d = new Date(e.at);
+    const key = calDateKey(d);
+    (byDay[key] = byDay[key] || []).push(e);
+  }
+
+  grid.innerHTML = "";
+  for (const dow of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
+    const h = document.createElement("span");
+    h.className = "cal-dow";
+    h.textContent = dow;
+    grid.appendChild(h);
+  }
+
+  const first = new Date(calView.year, calView.month, 1);
+  const startOffset = (first.getDay() + 6) % 7;
+  const todayKey = calDateKey(new Date());
+  for (let i = 0; i < 42; i++) {
+    const cellDate = new Date(calView.year, calView.month, 1 - startOffset + i);
+    const cell = document.createElement("div");
+    cell.className = "cal-cell" + (cellDate.getMonth() !== calView.month ? " out" : "") + (calDateKey(cellDate) === todayKey ? " today" : "");
+    const num = document.createElement("span");
+    num.textContent = String(cellDate.getDate());
+    cell.appendChild(num);
+    for (const e of byDay[calDateKey(cellDate)] || []) {
+      const chip = document.createElement("div");
+      chip.className = "cal-entry";
+      chip.title = `${e.filename} — ${e.platform} (klik untuk hapus dari plan)`;
+      const t = new Date(e.at);
+      const time = document.createElement("b");
+      time.textContent = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      chip.appendChild(time);
+      chip.append(` ${String(e.platform || "")}`);
+      chip.setAttribute("role", "button");
+      chip.setAttribute("tabindex", "0");
+      const removeEntry = () => {
+        if (!confirm(`Hapus rencana "${e.platform} — ${e.filename}"?`)) return;
+        saveCalendar(loadCalendar().filter((x) => x.id !== e.id));
+        renderCalendar();
+        renderUpcoming();
+        showToast("Rencana dihapus.");
+      };
+      chip.addEventListener("click", removeEntry);
+      chip.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); removeEntry(); } });
+      cell.appendChild(chip);
+    }
+    grid.appendChild(cell);
+  }
+  renderUpcoming();
+}
+
+function renderUpcoming() {
+  const wrap = document.getElementById("calUpcoming");
+  const count = document.getElementById("calCount");
+  if (!wrap) return;
+  const entries = loadCalendar().sort((a, b) => new Date(a.at) - new Date(b.at));
+  if (count) count.textContent = String(entries.length);
+  if (!entries.length) {
+    wrap.innerHTML = '<div class="empty-state">Belum ada rencana.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const e of entries) {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    const main = document.createElement("div");
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = e.filename;
+    const meta = document.createElement("span");
+    const t = new Date(e.at);
+    meta.textContent = `${t.toLocaleString()} · ${e.platform}`;
+    main.appendChild(nameEl);
+    main.appendChild(meta);
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ghost-button compact danger-btn";
+    del.textContent = "Hapus";
+    del.addEventListener("click", () => {
+      saveCalendar(loadCalendar().filter((x) => x.id !== e.id));
+      renderCalendar();
+      showToast("Rencana dihapus.");
+    });
+    row.appendChild(main);
+    row.appendChild(del);
+    wrap.appendChild(row);
+  }
+}
+
+$("#calAddBtn").addEventListener("click", () => {
+  const idx = $("#calSourceSelect").value;
+  if (idx === "" || idx == null) { showToast("Belum ada file export untuk dipilih."); return; }
+  const whenVal = $("#calWhen").value;
+  if (!whenVal) { showToast("Pilih tanggal & jam dulu."); return; }
+  const when = new Date(whenVal);
+  if (Number.isNaN(when.getTime())) { showToast("Tanggal tidak valid."); return; }
+  if (when.getTime() < Date.now()) { showToast("Tidak bisa menjadwalkan waktu yang sudah lewat."); return; }
+  const entry = {
+    id: Date.now(),
+    filename: state.exports[Number(idx)].filename,
+    platform: $("#calPlatform").value,
+    at: when.toISOString()
+  };
+  const list = loadCalendar();
+  list.push(entry);
+  saveCalendar(list);
+  $("#calStatus").textContent = `Plan tersimpan lokal: ${entry.platform} @ ${when.toLocaleString()}`;
+  showToast("Rencana disimpan ke kalender lokal.");
+  renderCalendar();
+});
+$("#calPrevBtn").addEventListener("click", () => { calView.month--; if (calView.month < 0) { calView.month = 11; calView.year--; } renderCalendar(); });
+$("#calNextBtn").addEventListener("click", () => { calView.month++; if (calView.month > 11) { calView.month = 0; calView.year++; } renderCalendar(); });
+$("#calTodayBtn").addEventListener("click", () => { calView.year = new Date().getFullYear(); calView.month = new Date().getMonth(); renderCalendar(); });
+
+// ---- Integrations: deteksi nyata, tanpa OAuth palsu ----
+async function loadIntegrations() {
+  const wrap = document.getElementById("integList");
+  if (!wrap) return;
+  let platforms = [];
+  try {
+    const r = await fetch("/api/integrations");
+    const data = await r.json();
+    platforms = Array.isArray(data.platforms) ? data.platforms : [];
+  } catch (err) {
+    console.error("[integrations]", err);
+  }
+  wrap.innerHTML = "";
+  if (!platforms.length) {
+    wrap.innerHTML = '<div class="empty-state">Status tidak tersedia (server offline?).</div>';
+    updatePublishAvailability(false);
+    return;
+  }
+  let anyConnected = false;
+  for (const p of platforms) {
+    anyConnected = anyConnected || p.connected;
+    const card = document.createElement("div");
+    card.className = "integ-card";
+    const main = document.createElement("div");
+    main.className = "integ-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = p.name;
+    const sub = document.createElement("span");
+    sub.textContent = p.connected
+      ? "Kredensial terdeteksi — siap dipakai publishing."
+      : "Tidak ada kredensial OAuth di server.";
+    main.appendChild(nameEl);
+    main.appendChild(sub);
+
+    const pill = document.createElement("span");
+    pill.className = `status-pill ${p.connected ? "status-pill-done" : "status-pill-queued"} integ-state`;
+    pill.textContent = p.connected ? "✓ CONNECTED" : "— NOT CONNECTED";
+
+    card.appendChild(main);
+    card.appendChild(pill);
+    wrap.appendChild(card);
+  }
+  updatePublishAvailability(anyConnected);
+}
+
+function updatePublishAvailability(anyConnected) {
+  const btn = document.getElementById("pubPublishNowBtn");
+  const hint = document.getElementById("pubPublishHint");
+  if (!btn) return;
+  btn.disabled = !anyConnected;
+  btn.title = anyConnected ? "" : "Butuh platform terhubung — buka tab Integrations.";
+  if (hint) {
+    hint.textContent = anyConnected
+      ? "Integrasi terdeteksi."
+      : "PUBLISH NOW butuh integrasi platform terhubung (tab Integrations). Tidak ada simulasi upload.";
+  }
+}
+
+$("#integRefreshBtn").addEventListener("click", () => loadIntegrations());
+
+// Publishing → SCHEDULE (local plan): pindah ke Calendar dengan export terpilih
+$("#pubScheduleBtn").addEventListener("click", () => {
+  showView("calendar");
+  populateCalSources();
+  const pubIdx = $("#pubSourceSelect").value;
+  if (pubIdx) $("#calSourceSelect").value = pubIdx;
+  $("#calPlatform").value = publishState.platform;
+  showToast("Atur tanggal & jam lalu klik ADD TO PLAN.");
+});
+
+// ---- Production insights: observasi dari data nyata, tanpa klaim AI ----
+function computeProductionInsights() {
+  const list = document.getElementById("prodInsights");
+  if (!list) return;
+  const lines = [];
+  const exportsArr = state.exports;
+  if (exportsArr.length >= 3) {
+    const ratioCount = {};
+    for (const e of exportsArr) {
+      const k = e.ratio ? String(e.ratio) : "unknown";
+      ratioCount[k] = (ratioCount[k] || 0) + 1;
+    }
+    const topRatio = Object.entries(ratioCount).sort((a, b) => b[1] - a[1])[0];
+    if (topRatio && topRatio[0] !== "unknown") {
+      lines.push(`Format paling sering di-export: ${topRatio[0]} (${topRatio[1]}/${exportsArr.length} file).`);
+    }
+    const projCount = {};
+    for (const e of exportsArr) {
+      const k = e.project ? String(e.project) : "unknown";
+      projCount[k] = (projCount[k] || 0) + 1;
+    }
+    const topProj = Object.entries(projCount).sort((a, b) => b[1] - a[1])[0];
+    if (topProj && topProj[0] !== "unknown") {
+      lines.push(`Project paling produktif: "${topProj[0]}" (${topProj[1]} export).`);
+    }
+    const planned = loadCalendar().length;
+    lines.push(planned
+      ? `${planned} rencana tayang tersimpan di kalender lokal.`
+      : "Belum ada rencana tayang di kalender lokal.");
+    lines.push("Observasi berbasis data lokal yang tersedia — tanpa prediksi performa.");
+  } else {
+    lines.push("Belum cukup data export untuk observasi (minimal 3 file).");
+  }
+  list.innerHTML = "";
+  for (const line of lines) {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = line;
+    list.appendChild(li);
+  }
+}
+
+$$("[data-qview]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const view = btn.dataset.qview;
+    showView(view);
+    if (view === "exports") loadExports();
+    if (view === "calendar") { populateCalSources(); renderCalendar(); }
+    if (view === "integrations") loadIntegrations();
+  });
+});
+
+// ================= CONTENT INTELLIGENCE (Phase 7) ============================
+// Orkestrasi engine existing via GET /api/intelligence/:projectId (transkrip
+// STT + ranking backend + field reason asli). Tidak ada AI karangan: field
+// yang tidak ada tampil "—"/"not available".
+
+const intelState = { projectId: null, data: null, loading: false };
+
+function setIntelPill(state, text) {
+  const pill = document.getElementById("intelStatePill");
+  if (!pill) return;
+  pill.className = `status-pill ${statusPillClass(state)}`;
+  pill.textContent = text;
+}
+
+async function populateIntelProjects() {
+  const selEl = $("#intelProjectSelect");
+  if (!selEl) return;
+  if (!state.projects.length) await loadProjects();
+  selEl.innerHTML = "";
+  if (!state.projects.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Belum ada project";
+    selEl.appendChild(opt);
+    return;
+  }
+  for (const p of state.projects.slice(0, 12)) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    if (resultsState.projectId === p.id || state.projectId === p.id) opt.selected = true;
+    selEl.appendChild(opt);
+  }
+}
+
+async function loadProjectIntelligence() {
+  const pid = $("#intelProjectSelect").value;
+  if (!pid) { showToast("Belum ada project untuk dianalisis."); return; }
+  if (intelState.loading) return;
+  intelState.loading = true;
+  intelState.projectId = pid;
+  $("#intelErrorBox").hidden = true;
+  setIntelPill("running", "ANALYZING…");
+
+  try {
+    const response = await fetch(`/api/intelligence/${pid}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal memuat intelligence.");
+    intelState.data = data;
+    renderIntelligence(data);
+    setIntelPill("done", "READY");
+  } catch (err) {
+    console.error("[intel]", err);
+    $("#intelErrorReason").textContent = err.message || "Unknown error";
+    $("#intelErrorBox").hidden = false;
+    setIntelPill("failed", "FAILED");
+  } finally {
+    intelState.loading = false;
+  }
+}
+
+function renderIntelligence(data) {
+  // Summary ekstraktif dari transkrip asli — kalau tidak ada transkrip, jujur.
+  $("#intelSummary").textContent = data.summary
+    ? data.summary
+    : (data.hasTranscript ? "Summary not available." : "No transcript yet — jalankan analisis/STT dulu.");
+  const srcPill = document.getElementById("intelSourcePill");
+  if (srcPill) {
+    srcPill.hidden = !data.summary;
+    srcPill.textContent = data.summary ? "extractive · transcript" : "";
+  }
+
+  const kwWrap = document.getElementById("intelKeywords");
+  kwWrap.innerHTML = "";
+  if (!data.keywords || !data.keywords.length) {
+    kwWrap.innerHTML = '<span class="caption-hint">&mdash;</span>';
+  } else {
+    for (const k of data.keywords.slice(0, 10)) {
+      const chip = document.createElement("span");
+      chip.className = "kw-chip";
+      chip.innerHTML = `${String(k.word).replace(/</g, "&lt;")}<b>${k.count}</b>`;
+      kwWrap.appendChild(chip);
+    }
+  }
+
+  $("#intelStatClips").textContent = String(data.stats.clips);
+  $("#intelStatAnalyzed").textContent = `${data.stats.analyzed} / ${data.stats.clips}`;
+  $("#intelStatAvg").textContent = data.stats.avgScore != null ? `${data.stats.avgScore}/100` : "—";
+
+  const topWrap = document.getElementById("intelTopClips");
+  topWrap.innerHTML = "";
+  if (!data.topClips.length) {
+    topWrap.innerHTML = '<div class="empty-state">Belum ada clip ter-analisis.</div>';
+  } else {
+    data.topClips.forEach((clip, i) => {
+      const card = document.createElement("article");
+      card.className = "rc-card";
+      const head = document.createElement("div");
+      head.className = "rc-head";
+      const rank = document.createElement("span");
+      rank.className = "rc-id";
+      rank.textContent = `#${i + 1} · CLIP ${String(clip.id).padStart(2, "0")}`;
+      const scoreEl = document.createElement("span");
+      scoreEl.className = "rc-score";
+      scoreEl.textContent = clip.score != null ? String(Math.round(Number(clip.score))) : "—";
+      head.appendChild(rank);
+      head.appendChild(scoreEl);
+      card.appendChild(head);
+
+      const time = document.createElement("p");
+      time.className = "rc-time";
+      time.textContent = `${formatTime(clip.start)} → ${formatTime(clip.end)}${clip.hookType ? ` · ${clip.hookType}` : ""}`;
+      card.appendChild(time);
+
+      const quote = document.createElement("p");
+      quote.className = "rc-quote";
+      quote.textContent = clip.hook ? `"${clip.hook}"` : (clip.title || "—");
+      card.appendChild(quote);
+
+      if (clip.why && clip.why.length) {
+        const whyLabel = document.createElement("p");
+        whyLabel.className = "caption-hint";
+        whyLabel.style.marginTop = "6px";
+        whyLabel.textContent = "WHY (dari engine):";
+        card.appendChild(whyLabel);
+        const ul = document.createElement("ul");
+        ul.className = "why-list";
+        for (const reason of clip.why) {
+          const li = document.createElement("li");
+          li.textContent = reason;
+          ul.appendChild(li);
+        }
+        card.appendChild(ul);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "rc-actions";
+      const prevBtn = document.createElement("button");
+      prevBtn.type = "button";
+      prevBtn.className = "primary-button compact";
+      prevBtn.textContent = "PREVIEW";
+      prevBtn.addEventListener("click", () => openIntelClip(clip.start, true));
+      const studioBtn = document.createElement("button");
+      studioBtn.type = "button";
+      studioBtn.className = "secondary-button compact";
+      studioBtn.textContent = "STUDIO";
+      studioBtn.addEventListener("click", () => openIntelClip(clip.start, false));
+      actions.appendChild(prevBtn);
+      actions.appendChild(studioBtn);
+      card.appendChild(actions);
+      topWrap.appendChild(card);
+    });
+  }
+
+  renderIntelRecommendations(data);
+}
+
+// Rekomendasi deterministik dari hitungan nyata — tanpa prediksi.
+function renderIntelRecommendations(data) {
+  const list = document.getElementById("intelRecommendations");
+  if (!list) return;
+  list.innerHTML = "";
+  const recs = [];
+  const unanalyzed = data.stats.clips - data.stats.analyzed;
+  if (unanalyzed > 0) {
+    recs.push([`${unanalyzed} clip belum dianalisis — jalankan ANALYZE ALL di Results.`, () => {
+      resultsState.projectId = intelState.projectId;
+      openResultsForProject(intelState.projectId);
+    }, "OPEN RESULTS"]);
+  }
+  if (data.stats.analyzed > 0 && data.topClips.length) {
+    const top = data.topClips[0];
+    recs.push([`Top clip #${top.id} (skor ${Math.round(Number(top.score))}) siap diproduksi.`, () => openIntelClip(top.start, true), "PREVIEW TOP"]);
+  }
+  if (state.exports.filter((e) => e.project && data.name && e.project === data.name).length === 0 && data.stats.analyzed > 0) {
+    recs.push(["Project ini belum punya export — batch produce dari Results.", () => {
+      resultsState.projectId = intelState.projectId;
+      openResultsForProject(intelState.projectId);
+    }, "GO RESULTS"]);
+  }
+  if (!loadCalendar().length && state.exports.length) {
+    recs.push(["Ada export tapi kalender masih kosong — susun rencana tayang.", () => {
+      showView("calendar");
+      populateCalSources();
+      renderCalendar();
+    }, "OPEN CALENDAR"]);
+  }
+  if (!recs.length) recs.push(["Semua tahap utama sudah berjalan untuk project ini.", null, null]);
+
+  for (const [text, fn, label] of recs) {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.style.display = "flex";
+    li.style.justifyContent = "space-between";
+    li.style.gap = "10px";
+    li.style.alignItems = "center";
+    const span = document.createElement("span");
+    span.textContent = text;
+    li.appendChild(span);
+    if (fn && label) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary-button compact";
+      btn.textContent = label;
+      btn.addEventListener("click", fn);
+      li.appendChild(btn);
+    }
+    list.appendChild(li);
+  }
+}
+
+async function openIntelClip(startSec, autoplay) {
+  if (!intelState.projectId) return;
+  await openResultsForProject(intelState.projectId);
+  const target = resultsState.clips.find((c) => Number(c.start) <= startSec + 0.5 && Number(c.end) >= startSec - 0.5)
+    || resultsState.clips.find((c) => c.id === 1)
+    || resultsState.clips[0];
+  if (!target) { showToast("Clip tidak ditemukan di project ini."); return; }
+  resultsState.selectedClipId = target.id;
+  applyResView();
+  fillResultIntel(target);
+  await handoffToStudio(autoplay);
+}
+
+$("#intelLoadBtn").addEventListener("click", loadProjectIntelligence);
+$("#intelRetryBtn").addEventListener("click", loadProjectIntelligence);
+$("#intelProjectSelect").addEventListener("focus", populateIntelProjects);
+
+// Transcript search memakai endpoint EXISTING /api/stt/search (python search).
+$("#intelSearchBtn").addEventListener("click", async () => {
+  const wrap = document.getElementById("intelSearchResults");
+  const keyword = $("#intelSearchInput").value.trim();
+  if (!wrap) return;
+  if (!intelState.data || !intelState.data.transcriptAbs) { showToast("Butuh transcript — jalankan ANALYZE SOURCE dulu."); return; }
+  if (!keyword) { showToast("Ketik frasa yang dicari."); return; }
+  wrap.innerHTML = '<div class="empty-state">Mencari…</div>';
+  try {
+    const response = await fetch("/api/stt/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcriptPath: intelState.data.transcriptAbs, keyword })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Pencarian gagal.");
+    const rows = Array.isArray(data.results) ? data.results : [];
+    wrap.innerHTML = "";
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty-state">Tidak ada hasil.</div>';
+      return;
+    }
+    for (const row of rows.slice(0, 30)) {
+      const line = document.createElement("div");
+      line.className = "rt-line";
+      const t = document.createElement("time");
+      const startVal = Number(row.start) || 0;
+      t.textContent = formatTime(startVal);
+      t.title = "Buka clip ini di Studio";
+      t.addEventListener("click", () => openIntelClip(startVal, true));
+      const p = document.createElement("p");
+      p.textContent = row.text || "";
+      line.appendChild(t);
+      line.appendChild(p);
+      wrap.appendChild(line);
+    }
+  } catch (err) {
+    console.error("[intel-search]", err);
+    wrap.innerHTML = `<div class="empty-state">${String(err.message || "Gagal mencari.").replace(/</g, "&lt;")}</div>`;
+  }
 });
 
 const SETTINGS_KEY = "clipperStudio.settings";
@@ -5061,15 +6085,159 @@ settingsControls.forEach(([eventName, sel]) => {
 
 loadSettings();
 
-renderClips();
-selectClip(clips[0]);
-initDashboard();
-checkEngineReadiness(true);
-setRatio(currentRatio());
-refreshStorage();
-pollQueue();
-loadEngineCompute();
-syncUndoRedoButtons();
+function setBootStep(name, state, text) {
+  const item = document.querySelector(`[data-boot-step="${name}"]`);
+  if (!item) return;
+  item.dataset.state = state;
+  const status = item.querySelector("em");
+  if (status) status.textContent = text;
+}
+
+function renderDashboardActivity() {
+  const chart = document.getElementById("dashActivityChart");
+  const note = document.getElementById("dashActivityNote");
+  if (!chart) return;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const start = today.getTime() - ((6 - index) * dayMs);
+    return { start, end: start + dayMs, projects: 0, exports: 0 };
+  });
+  const add = (items, field) => {
+    for (const item of items) {
+      const ts = Number(item._ts) || 0;
+      const day = days.find((entry) => ts >= entry.start && ts < entry.end);
+      if (day) day[field] += 1;
+    }
+  };
+  add(state.projects, "projects");
+  add(state.exports, "exports");
+  const max = Math.max(1, ...days.map((day) => Math.max(day.projects, day.exports)));
+  chart.innerHTML = "";
+  for (const day of days) {
+    const column = document.createElement("div");
+    column.className = "dash-chart-column";
+    const date = new Date(day.start);
+    column.title = `${date.toLocaleDateString()}: ${day.projects} project, ${day.exports} export`;
+    const bars = document.createElement("div");
+    bars.className = "dash-chart-bars";
+    for (const [kind, count] of [["project", day.projects], ["export", day.exports]]) {
+      const bar = document.createElement("span");
+      bar.className = `dash-chart-bar${kind === "export" ? " export" : ""}`;
+      bar.style.height = `${count ? Math.max(8, Math.round((count / max) * 100)) : 3}%`;
+      bars.appendChild(bar);
+    }
+    const label = document.createElement("span");
+    label.className = "dash-chart-day";
+    label.textContent = date.toLocaleDateString(undefined, { weekday: "short" });
+    column.appendChild(bars);
+    column.appendChild(label);
+    chart.appendChild(column);
+  }
+  if (note) {
+    const total = days.reduce((sum, day) => sum + day.projects + day.exports, 0);
+    note.textContent = total
+      ? `${total} local project/export event${total === 1 ? "" : "s"} in the last 7 days.`
+      : "No project or export events recorded in the last 7 days.";
+  }
+}
+
+function renderDashboardInsights(details, metrics) {
+  const list = document.getElementById("dashInsightList");
+  if (!list) return;
+  const clips = (details || []).flatMap((detail) => Array.isArray(detail && detail.clips) ? detail.clips : []);
+  const scored = clips.filter((clip) => typeof clip.score === "number" && Number.isFinite(clip.score));
+  const transcriptReady = (details || []).filter((detail) => detail && detail.transcriptStatus && detail.transcriptStatus !== "No transcript").length;
+  const insights = [];
+  if (scored.length) {
+    const top = scored.reduce((best, clip) => Number(clip.score) > Number(best.score) ? clip : best);
+    insights.push(`Highest observed clip score is ${Math.round(Number(top.score))}${top.hookType ? ` (${top.hookType})` : ""}.`);
+    insights.push(`Average score is ${Math.round(metrics.totalScore / metrics.scoredClips)} across ${metrics.scoredClips} analyzed clips.`);
+  }
+  if (transcriptReady) insights.push(`${transcriptReady} recent project${transcriptReady === 1 ? " has" : "s have"} transcript data available for analysis.`);
+  if (!insights.length) insights.push("Run clip analysis to generate evidence-based local insights.");
+  list.innerHTML = "";
+  for (const insight of insights.slice(0, 3)) {
+    const item = document.createElement("li");
+    item.textContent = insight;
+    list.appendChild(item);
+  }
+}
+
+function updateBootSummary() {
+  const checks = Array.from(document.querySelectorAll("[data-boot-step]"));
+  const done = checks.filter((item) => item.dataset.state && item.dataset.state !== "running").length;
+  const summary = document.getElementById("bootSummary");
+  if (summary) summary.textContent = `${done} / ${checks.length} checks complete`;
+}
+
+async function bootCheck(name, label, work) {
+  setBootStep(name, "running", "Checking");
+  const message = document.getElementById("bootMessage");
+  if (message) message.textContent = label;
+  try {
+    const value = await work();
+    setBootStep(name, value ? "ready" : "warning", value ? "Ready" : "Unavailable");
+    updateBootSummary();
+    return value;
+  } catch {
+    setBootStep(name, "offline", "Offline");
+    updateBootSummary();
+    return null;
+  }
+}
+
+async function bootstrapApplication() {
+  const system = await bootCheck("system", "Connecting to the local engine…", async () => {
+    const response = await fetch("/api/system");
+    return response.ok ? response.json() : null;
+  });
+
+  setBootStep("ffmpeg", "running", "Checking");
+  const runtime = system && system.runtime ? system.runtime : null;
+  setBootStep("ffmpeg", system ? "ready" : "offline", system
+    ? (runtime && runtime.encoder ? String(runtime.encoder).toUpperCase() : "Ready")
+    : "Offline");
+  updateBootSummary();
+
+  const stt = await bootCheck("stt", "Checking local speech-to-text models…", async () => {
+    const response = await fetch("/api/stt/models");
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Array.isArray(data.models) ? data : null;
+  });
+  if (stt) setBootStep("stt", "ready", `${stt.models.length} model${stt.models.length === 1 ? "" : "s"}`);
+
+  const queue = await bootCheck("queue", "Initializing the local job queue…", async () => {
+    const response = await fetch("/api/queue");
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Array.isArray(data.jobs) ? data : null;
+  });
+  if (queue) setBootStep("queue", "ready", queue.jobs.length ? `${queue.jobs.length} active` : "Ready");
+
+  await bootCheck("workspace", "Loading projects and export metadata…", async () => {
+    await Promise.all([loadProjects(), loadExports(), refreshStorage()]);
+    return true;
+  });
+
+  renderClips();
+  selectClip(clips[0]);
+  setRatio(currentRatio());
+  syncUndoRedoButtons();
+  initDashboard();
+  await Promise.allSettled([checkEngineReadiness(true), loadEngineCompute(), loadLocalAIStatus(), pollQueue()]);
+
+  const message = document.getElementById("bootMessage");
+  if (message) {
+    const gpuPresent = Boolean(system && system.hardware && system.hardware.gpu && system.hardware.gpu.present);
+    message.textContent = `Engine ready — ${gpuPresent ? "GPU detected" : "CPU runtime ready"}.`;
+  }
+  const boot = document.getElementById("engineBoot");
+  if (boot) boot.hidden = true;
+}
+
 const analyzeSpeakerBtn = document.getElementById("analyzeSpeakerBtn");
 if (analyzeSpeakerBtn) analyzeSpeakerBtn.addEventListener("click", analyzeSpeakerForClip);
 const speakerCutToggle = document.getElementById("speakerCutToggle");
@@ -5081,7 +6249,7 @@ if (speakerCutToggle) {
 }
 const downloadModelBtn = document.getElementById("downloadModelBtn");
 if (downloadModelBtn) downloadModelBtn.addEventListener("click", downloadLocalAIModel);
-loadLocalAIStatus();
+bootstrapApplication();
 setInterval(pollQueue, 5000);
 setInterval(loadEngineCompute, 15000);
 setInterval(loadLocalAIStatus, 30000);
