@@ -12,7 +12,7 @@
   "scripts": {
     "start": "node server.js",
     "desktop": "electron .",
-    "test": "node phase2-test.js && node phase2a-test.js && node phase2b-test.js && node phase2c-test.js && node phase2d-test.js && node phase3-test.js && node phase3a-test.js && node phase3b-test.js && node phase4a-test.js && node phase4b-test.js && node phase5-test.js && node phase6-test.js && node phase7-test.js && node hook-engine-test.js && node hook-engine-v2-test.js && node editorial-opening-test.js && node duration-engine-test.js && node cut-to-face-test.js && node mode-lite-test.js && node preview-caption-sync-test.js && node encoder-fallback-test.js && node translation-words-test.js && node deep-title-engine-test.js && node deep-e2e-test.js && node preview-boundary-test.js && node preview-local-e2e-test.js && node hook-toggle-e2e-test.js",
+    "test": "node phase2-test.js && node phase2a-test.js && node phase2b-test.js && node phase2c-test.js && node phase2d-test.js && node phase3-test.js && node phase3a-test.js && node phase3b-test.js && node phase4a-test.js && node phase4b-test.js && node phase5-test.js && node phase6-test.js && node phase7-test.js && node hook-engine-test.js && node hook-engine-v2-test.js && node editorial-opening-test.js && node duration-engine-test.js && node cut-to-face-test.js && node mode-lite-test.js && node preview-caption-sync-test.js && node encoder-fallback-test.js && node translation-words-test.js && node deep-title-engine-test.js && node deep-e2e-test.js && node preview-boundary-test.js && node preview-local-e2e-test.js && node hook-toggle-e2e-test.js && node clipme-director-test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
