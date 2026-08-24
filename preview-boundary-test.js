@@ -377,12 +377,28 @@ test("phase3: handoff Processing→Results & Dashboard RECENT RESULTS dari data 
   assert.match(rr, /openResultsForProject\(latest\.id\)/, "VIEW RESULTS opens real project results");
 });
 
-test("dashboard: CTA New Project membuka workflow upload Studio existing", () => {
+test("dashboard: CTA New Project membuka modal pembuatan project", () => {
   const block = script.slice(script.indexOf("// ================= DASHBOARD"));
   const open = block.slice(block.indexOf("function openCreateWorkspace"), block.indexOf("let dashBusy"));
-  assert.match(open, /showView\("studio"\)/);
-  assert.match(open, /getElementById\("videoInput"\)/, "reuse input upload Studio");
+  assert.match(open, /openNewProjectModal\(\)/, "CTA opens the new-project modal");
   assert.match(script, /initDashboard\(\);/, "dashboard di-init saat boot");
+});
+
+test("phase4: modal New Project menyimpan nama & reuse alur upload/YouTube existing", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["newProjectModal", "npName", "npUrl", "npCreateBtn", "npCancelBtn"]) {
+    assert.ok(html.includes(`id="${id}"`), `modal part ${id} must exist`);
+  }
+  const block = script.slice(script.indexOf("// ---- New Project modal"), script.indexOf("// Strip konfigurasi render final"));
+  // nama distage ke input yang SAMA dipakai applyProjectNamePatch (Phase 2)
+  assert.match(block, /\$\("#projectNameInput"\)\.value = name/, "staged name flows into existing PATCH mechanism");
+  // jalur video tetap pakai file picker/upload existing
+  assert.match(block, /getElementById\("videoInput"\)/, "video path reuses existing picker");
+  assert.match(block, /input\.click\(\)/, "picker opened via existing input");
+  // jalur youtube memindah URL ke kolom Analyze existing
+  assert.match(block, /\$\("#videoUrl"\)\.value = urls/, "youtube path reuses Analyze field");
+  // esc menutup modal
+  assert.match(block, /"Escape"/, "Esc closes the modal");
 });
 
 // ── Phase 2: Engine readiness + processing workspace (REAL, no mock) ────────

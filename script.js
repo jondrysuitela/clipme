@@ -1984,7 +1984,7 @@ async function exportSelectedClip() {
 
 $("#videoInput").addEventListener("change", (event) => attachFile(event.target.files[0]));
 
-$("#newProjectBtn").addEventListener("click", () => $("#videoInput").click());
+$("#newProjectBtn").addEventListener("click", () => openNewProjectModal());
 
 $("#dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -3823,9 +3823,7 @@ $("#clearExports").addEventListener("click", async () => {
 // belum ada, tampil "—".
 
 function openCreateWorkspace() {
-  showView("studio");
-  const input = document.getElementById("videoInput");
-  if (input) input.click();
+  openNewProjectModal();
 }
 
 let dashBusy = false;
@@ -4859,6 +4857,64 @@ async function saveStudioToServer() {
 }
 
 $("#saveProjectBtn").addEventListener("click", () => saveStudioToServer());
+
+// ---- New Project modal: bikin project dengan nama + pilih sumber ----
+// Video  → file picker existing (attachFile → upload → PATCH nama).
+// YouTube→ URL dipindah ke kolom Analyze existing (proses & nama sama).
+function openNewProjectModal() {
+  $("#npName").value = $("#projectNameInput").value || "";
+  $("#npUrl").value = "";
+  $$(".np-source button").forEach((b) => b.classList.toggle("active", b.dataset.npsrc === "video"));
+  $("#npUrlRow").style.display = "none";
+  $("#npVideoHint").style.display = "";
+  document.getElementById("newProjectModal").hidden = false;
+  $("#npName").focus();
+}
+
+function closeNewProjectModal() {
+  document.getElementById("newProjectModal").hidden = true;
+}
+
+$$(".np-source button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".np-source button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const isYt = btn.dataset.npsrc === "youtube";
+    $("#npUrlRow").style.display = isYt ? "" : "none";
+    $("#npVideoHint").style.display = isYt ? "none" : "";
+    if (isYt) $("#npUrl").focus();
+  });
+});
+
+$("#npCreateBtn").addEventListener("click", () => {
+  const name = $("#npName").value.trim();
+  $("#projectNameInput").value = name;
+  const isYt = $(".np-source button.active") && $(".np-source button.active").dataset.npsrc === "youtube";
+  if (isYt) {
+    const urls = $("#npUrl").value.trim();
+    if (!urls) { showToast("Paste URL YouTube dulu."); return; }
+    closeNewProjectModal();
+    showView("studio");
+    $("#videoUrl").value = urls;
+    $("#videoUrl").focus();
+    showToast("Klik Analyze untuk mulai analisis YouTube.");
+  } else {
+    closeNewProjectModal();
+    showView("studio");
+    const input = document.getElementById("videoInput");
+    if (input) input.click();
+  }
+});
+
+$("#npCancelBtn").addEventListener("click", closeNewProjectModal);
+document.getElementById("newProjectModal").addEventListener("click", (event) => {
+  if (event.target.id === "newProjectModal") closeNewProjectModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.getElementById("newProjectModal").hidden) {
+    closeNewProjectModal();
+  }
+});
 
 $("#backToResultsBtn").addEventListener("click", () => {
   if (resultsState.projectId) openResultsForProject(resultsState.projectId);

@@ -765,6 +765,27 @@
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-overlay" id="newProjectModal" hidden>
+  <div class="modal-card panel" role="dialog" aria-modal="true" aria-labelledby="npTitle">
+    <div class="panel-heading"><h2 id="npTitle">NEW PROJECT</h2></div>
+    <p class="field-label">Project name</p>
+    <input class="inspector-input" id="npName" type="text" maxlength="80" placeholder="Misal: Podcast Episode 42 (kosongkan = otomatis)">
+    <p class="field-label">Source</p>
+    <div class="segmented np-source">
+      <button class="active" data-npsrc="video" type="button">Video</button>
+      <button data-npsrc="youtube" type="button">YouTube</button>
+    </div>
+    <p class="caption-hint" id="npVideoHint">File picker video akan terbuka setelah Create.</p>
+    <div id="npUrlRow" style="display:none">
+      <p class="field-label">YouTube URL</p>
+      <textarea class="inspector-input" id="npUrl" rows="3" placeholder="Paste 1 atau lebih URL (max 10, satu per baris)"></textarea>
+    </div>
+    <div class="proc-actions">
+      <button class="primary-button" id="npCreateBtn" type="button">CREATE PROJECT</button>
+      <button class="secondary-button" id="npCancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
 <script src="clipme-cut-to-face.js"></script>
 <script src="clipme-active-speaker.js"></script>
 <script src="script.js"></script>

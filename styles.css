@@ -2843,3 +2843,26 @@ textarea:focus-visible {
 }
 .pos-presets { display: flex; gap: 6px; margin-top: 4px; }
 #studioDirtyPill { letter-spacing: .08em; }
+
+/* New Project modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 12, .72);
+  backdrop-filter: blur(2px);
+}
+.modal-overlay[hidden] { display: none; }
+.modal-card {
+  width: min(460px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  padding-bottom: 18px;
+  animation: npPop .16s ease both;
+}
+.modal-card .panel-heading h2 { font-size: 15px; letter-spacing: .08em; }
+.np-source { margin: 2px 0 10px; }
+@keyframes npPop { from { opacity: 0; transform: translateY(8px) scale(.985); } }
