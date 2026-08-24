@@ -5534,7 +5534,7 @@ function readExportInfo(outputPath) {
   let text;
   try { text = fs.readFileSync(infoPath, "utf8"); } catch { return null; }
   const meta = {};
-  const map = { "Project:": "project", "Hook:": "hook", "Caption:": "caption", "Rasio:": "ratio" };
+  const map = { "Project:": "project", "Clip ID:": "clipId", "Hook:": "hook", "Caption:": "caption", "Rasio:": "ratio" };
   for (const line of text.split(/\r?\n/)) {
     for (const [prefix, key] of Object.entries(map)) {
       if (line.startsWith(prefix)) meta[key] = line.slice(prefix.length).trim();
@@ -5551,6 +5551,66 @@ function handleDeleteExport(req, res, params) {
   if (!fs.existsSync(fpath)) { sendJson(res, 404, { error: "Export not found" }); return; }
   fs.unlinkSync(fpath);
   sendJson(res, 200, { ok: true });
+}
+
+// ===== Performance Ledger (#9) ===============================================
+// Angka performa AKTUAL diisi user dari dashboard platform (bukan API, bukan
+// prediksi). Disimpan sebagai sidecar JSON di samping file export.
+function perfPathFor(relFilename) {
+  return path.join(OUTPUT_DIR, `${relFilename}.perf.json`);
+}
+
+function readPerf(fpath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(fpath, "utf8"));
+    if (!parsed || typeof parsed !== "object") throw new Error("bad");
+    return {
+      postId: String(parsed.postId || ""),
+      platform: String(parsed.platform || ""),
+      records: Array.isArray(parsed.records) ? parsed.records.slice(-50) : [],
+      updatedAt: Number(parsed.updatedAt) || 0
+    };
+  } catch {
+    return { postId: "", platform: "", records: [], updatedAt: 0 };
+  }
+}
+
+function perfInt(value) {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function handleGetPerf(req, res, params) {
+  const rel = decodeURIComponent(params.filename || "").replace(/\\/g, "/");
+  if (!rel) { sendJson(res, 400, { error: "Invalid filename" }); return; }
+  const fpath = perfPathFor(rel);
+  if (!isSafePath(fpath, OUTPUT_DIR)) { sendJson(res, 403, { error: "Forbidden" }); return; }
+  sendJson(res, 200, { perf: readPerf(fpath), exists: fs.existsSync(fpath) });
+}
+
+function handleSavePerf(req, res, params) {
+  const rel = decodeURIComponent(params.filename || "").replace(/\\/g, "/");
+  if (!rel) { sendJson(res, 400, { error: "Invalid filename" }); return; }
+  const fpath = perfPathFor(rel);
+  if (!isSafePath(fpath, OUTPUT_DIR)) { sendJson(res, 403, { error: "Forbidden" }); return; }
+  collectRequest(req, 20).then((buf) => {
+    let body;
+    try { body = JSON.parse(buf.toString("utf8")); } catch { sendJson(res, 400, { error: "Invalid JSON" }); return; }
+    const perf = readPerf(fpath);
+    if (body.postId != null) perf.postId = String(body.postId).slice(0, 120);
+    if (body.platform != null) perf.platform = String(body.platform).slice(0, 40);
+    perf.records.push({
+      at: Date.now(),
+      views: perfInt(body.views),
+      likes: perfInt(body.likes),
+      comments: perfInt(body.comments),
+      shares: perfInt(body.shares)
+    });
+    if (perf.records.length > 50) perf.records = perf.records.slice(-50);
+    perf.updatedAt = Date.now();
+    fs.writeFileSync(fpath, JSON.stringify(perf, null, 2));
+    sendJson(res, 200, { ok: true, perf });
+  });
 }
 
 function handleOpenOutput(req, res) {
@@ -6327,6 +6387,44 @@ async function handleProjectIntelligence(req, res, params) {
   sendJson(res, 200, data);
 }
 
+// Thumbnail clip nyata: 1 frame dari sumber pada t=start, cache di disk.
+// Dipakai kartu clip di Results & Studio. Tanpa ffmpeg/sumber -> error bersih.
+async function handleClipThumb(req, res, params) {
+  const projectId = params.projectId || "";
+  const clipId = Number(params.clipId);
+  if (!isValidUUID(projectId) || !Number.isInteger(clipId)) { sendJson(res, 400, { error: "Invalid request" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  if (!fs.existsSync(projectDir)) { sendJson(res, 404, { error: "Project not found" }); return; }
+  const manifest = readProjectManifest(projectDir);
+  const clip = (Array.isArray(manifest.clips) ? manifest.clips : []).find((c) => Number(c.id) === clipId);
+  if (!clip) { sendJson(res, 404, { error: "Clip not found" }); return; }
+  const sourcePath = findSourceFile(projectDir);
+  if (!sourcePath || !isSafePath(sourcePath, UPLOAD_DIR)) { sendJson(res, 404, { error: "Source unavailable" }); return; }
+
+  const thumbDir = path.join(projectDir, "thumbs");
+  const thumbPath = path.join(thumbDir, `${clipId}.jpg`);
+  if (!fs.existsSync(thumbPath)) {
+    fs.mkdirSync(thumbDir, { recursive: true });
+    try {
+      await run(FFMPEG, [
+        "-y",
+        "-ss", String(Math.max(0, Number(clip.start) || 0)),
+        "-i", sourcePath,
+        "-frames:v", "1",
+        "-vf", "scale=320:-2",
+        "-q:v", "5",
+        thumbPath
+      ], 30000);
+    } catch (err) {
+      sendJson(res, 500, { error: "Thumbnail gagal dibuat." });
+      return;
+    }
+  }
+  if (!fs.existsSync(thumbPath)) { sendJson(res, 500, { error: "Thumbnail tidak tersedia." }); return; }
+  res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" });
+  fs.createReadStream(thumbPath).pipe(res);
+}
+
 function handleIntegrations(req, res) {
   let fileCfg = {};
   try {
@@ -6396,6 +6494,7 @@ router
     .add("GET", "/api/stt/models", handleSttModels)
   .add("GET", "/api/integrations", handleIntegrations)
   .add("GET", "/api/intelligence/:projectId", handleProjectIntelligence)
+  .add("GET", "/api/thumb/:projectId/:clipId", handleClipThumb)
   .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)
@@ -6404,6 +6503,8 @@ router
   .add("DELETE", "/api/projects/:projectId", handleDeleteProject)
   .add("GET", "/api/exports", handleListExports)
   .add("DELETE", /^\/api\/exports\/(.+)$/, (req, res, m) => handleDeleteExport(req, res, { filename: m[1] }))
+  .add("GET", /^\/api\/perf\/(.+)$/, (req, res, m) => handleGetPerf(req, res, { filename: m[1] }))
+  .add("POST", /^\/api\/perf\/(.+)$/, (req, res, m) => handleSavePerf(req, res, { filename: m[1] }))
   .add("POST", "/api/open-output", handleOpenOutput)
   .add("GET", "/api/queue", handleListQueue)
   .add("GET", "/api/system", handleSystemInfo)

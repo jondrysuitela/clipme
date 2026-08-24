@@ -313,7 +313,7 @@ test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
   assert.strictEqual(coming, 1, "only Content DNA remains a future placeholder");
   assert.ok(html.includes('data-view-panel="results"'), "results panel exists");
   assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
-  assert.match(html, /Analytics unavailable/, "analytics honestly reports missing integrations");
+  assert.match(html, /Belum ada data performa/, "analytics honestly reports missing ledger data");
   assert.ok(!/<canvas/i.test(html), "no fake canvas charts");
   assert.doesNotMatch(script, /Chart\(/, "no chart library stubs");
 });
@@ -624,7 +624,58 @@ test("phase5: dashboard recent exports dari file nyata + tombol VIEW EXPORTS pas
   assert.match(fn, /status-pill-done[\s\S]{0,40}READY|"READY"/, "READY because files exist server-side");
 });
 
-// ── Phase 7: Content Intelligence (orchestration, no fake AI) ────────────────
+// ── Create Clips v2 (user point #3): instant inspect + URL validation ───────
+test("create-v2: inspeksi instan dari metadata video lokal — fps/audio jujur dash", () => {
+  const fn = script.slice(script.indexOf("function inspectLocalVideo"), script.indexOf("async function attachFile"));
+  assert.match(fn, /URL\.createObjectURL\(file\)/, "local object URL");
+  assert.match(fn, /onloadedmetadata/, "waits real metadata event");
+  assert.match(fn, /probe\.duration|localVideo\.duration/);
+  assert.match(fn, /videoWidth && localVideo\.videoHeight|videoWidth && probe\.videoHeight/);
+  // fps & audio tidak dikarang di sisi klien
+  assert.match(fn, /siFps"\)\.textContent = "—"/);
+  assert.match(fn, /siAudio"\)\.textContent = "—"/);
+  assert.match(fn, /revokeObjectURL/, "object URL released");
+  const af = script.slice(script.indexOf("async function attachFile"), script.indexOf("function playSelectedClip"));
+  assert.match(af, /inspectLocalVideo\(file\)/, "wired into drop flow before upload");
+});
+
+test("create-v2: URL YouTube divalidasi sebelum fetch — baris invalid ditolak", () => {
+  const fn = script.slice(script.indexOf("async function processYouTubeUrl"), script.indexOf('fetch("/api/youtube"'));
+  assert.match(fn, /\(youtube\\\.com\|youtu\\\.be\)/, "host allowlist check");
+  assert.match(fn, /Baris tidak valid/, "explicit line feedback");
+  assert.match(script, /classList\.add\("dragging"\)/, "drag-over class wired in JS");
+  const css = fs.readFileSync("styles.css", "utf8");
+  assert.match(css, /\.dropzone\.dragging/, "drag-over state styled");
+});
+test("dash-v2: TOP CLIPS dari skor backend via detail yang sama, OPEN ke Results", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dashTopClips", "dashTopClipsCount"]) {
+    assert.ok(html.includes(`id="${id}"`), `top clips part ${id} must exist`);
+  }
+  assert.match(html, /By backend score/, "ranking source labeled honestly");
+  const fn = script.slice(script.indexOf("function renderDashTopClips"), script.indexOf("// Dashboard — RECENT ACTIVITY feed"));
+  assert.match(fn, /typeof c\.score === "number"/, "only real scores");
+  assert.match(fn, /openResultsForProject\(entry\.projectId, entry\.clip\.id\)/, "OPEN preselects the exact clip");
+  assert.doesNotMatch(fn, /Math\.random|predict/i, "no fabricated ranking");
+});
+
+test("dash-v2: RECENT ACTIVITY feed gabungan event lokal nyata (project+export)", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["dashActivityFeed", "dashFeedCount"]) {
+    assert.ok(html.includes(`id="${id}"`), `feed part ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("function renderDashActivityFeed"), script.indexOf("async function updateDashboardAvgScore"));
+  assert.match(fn, /state\.projects/, "projects feed source");
+  assert.match(fn, /state\.exports/, "exports feed source");
+  assert.match(fn, /\.sort\(\(a, b\) => b\.ts - a\.ts\)/, "chronological desc by real timestamps");
+  assert.match(fn, /slice\(0, 8\)/, "bounded render");
+});
+
+test("dash-v2: openResultsForProject mendukung preselect clip", () => {
+  const fn = script.slice(script.indexOf("async function openResultsForProject"), script.indexOf("function setResPill"));
+  assert.match(fn, /selectClipId = null/, "optional preselect param");
+  assert.match(fn, /resultsState\.selectedClipId = wanted \? wanted\.id : null/, "preselect applied after load");
+});
 test("phase7: endpoint intelligence — ekstraktif dari transkrip + cache invalidasi", () => {
   const fn = server.slice(server.indexOf("async function handleProjectIntelligence"), server.indexOf("function handleIntegrations"));
   assert.match(server, /\.add\("GET", "\/api\/intelligence\/:projectId"/, "route registered");
@@ -689,6 +740,8 @@ test("phase0: engine boot verifies local services before revealing the workspace
   assert.match(boot, /Promise\.all\(\[loadProjects\(\), loadExports\(\), refreshStorage\(\)\]\)/, "workspace loads real local data");
   assert.match(boot, /boot\.hidden = true/, "workspace is revealed only when checks finish");
   assert.doesNotMatch(boot, /Math\.random|setTimeout\(/, "boot has no fabricated progress or timed reveal");
+  const css = fs.readFileSync("styles.css", "utf8");
+  assert.match(css, /\.engine-boot\[hidden\]\s*{\s*display:\s*none/, "hidden attribute must actually hide the overlay (class display would otherwise override it)");
 });
 
 test("dashboard: operational activity and insights use only persisted local evidence", () => {
@@ -760,6 +813,145 @@ test("phase6: quick actions dashboard + nav lengkap (10 view)", () => {
   }
   assert.ok(html.includes("data-qview=\"exports\"".replace(/\\"/g, '"')), "quick action exports");
   assert.ok(html.includes("data-qview=\"calendar\"".replace(/\\"/g, '"')), "quick action calendar");
+});
+
+// ── Poin #4/#5: per-engine status + analysis complete tiering ────────────────
+test("p4-gap: chip engine processing diturunkan dari job.stage nyata", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["procEngineWrap", "engSource", "engFfmpeg", "engWhisper", "engHook", "engDeep"]) {
+    assert.ok(html.includes(`id="${id}"`), `engine chip ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("const PROC_ENGINES"), script.indexOf("const processingState"));
+  assert.match(fn, /PIPELINE_STAGES\[jobType\]/, "engine states only for mapped job types");
+  assert.match(fn, /wrapEl\.style\.display = "none"/, "unmapped jobs hide engine row (no invention)");
+  assert.match(fn, /idx === curIdx[\s\S]{0,40}"ACTIVE"/, "current stage marks its engine ACTIVE");
+});
+
+test("p4-gap: complete menandai semua engine DONE via sinyal job selesai", () => {
+  const done = script.slice(script.indexOf("function completeProcessingView"), script.indexOf("async function failProcessingView"));
+  assert.match(done, /renderProcEngines\(processingState\.lastType, "", true\)/, "done flag drives all-DONE state");
+});
+
+test("p5-tier: bucket skor asli — threshold eksplisit, tanpa skor diubah", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["procTierStrip", "resTierStrip"]) {
+    assert.ok(html.includes(`id="${id}"`), `tier strip ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("const SCORE_TIERS"), script.indexOf("function setProcPill"));
+  assert.match(fn, /min: 85/, "High Potential threshold");
+  assert.match(fn, /min: 70/, "Strong threshold");
+  assert.match(fn, /min: 50/, "Moderate threshold");
+  assert.match(fn, /return null/, "unscored → no tier");
+  assert.match(fn, /wrap\.hidden = true/, "no scores → strip hidden (no fake)");
+  const done = script.slice(script.indexOf("function completeProcessingView"), script.indexOf("async function failProcessingView"));
+  assert.match(done, /renderScoreTiers\(result && result\.clips/, "completion tiers from real result clips");
+  const res = script.slice(script.indexOf("function renderResHeader"), script.indexOf("function applyResView"));
+  assert.match(res, /renderScoreTiers\(resultsState\.clips/, "Results header shows tiers");
+});
+
+// ── Poin #6: clip list thumbnails (real ffmpeg) + tier badge ─────────────────
+test("p6-thumb: endpoint thumbnail — ffmpeg real, cache disk, validasi ketat", () => {
+  const fn = server.slice(server.indexOf("async function handleClipThumb"), server.indexOf("function handleIntegrations"));
+  assert.match(server, /\.add\("GET", "\/api\/thumb\/:projectId\/:clipId"/, "route registered");
+  assert.match(fn, /isValidUUID\(projectId\)/, "project id validated");
+  assert.match(fn, /Number\.isInteger\(clipId\)/, "clip id validated");
+  assert.match(fn, /"-frames:v", "1"/, "single frame extraction");
+  assert.match(fn, /scale=320:-2/, "bounded thumbnail size");
+  assert.match(fn, /thumbs/, "cached under project thumbs dir");
+  assert.match(fn, /existsSync\(thumbPath\)/, "disk cache reused when present");
+  assert.match(fn, /image\/jpeg/, "served as jpeg");
+});
+
+test("p6-thumb: Studio & Results pakai thumbnail lazy + tier badge dari skor asli", () => {
+  const studio = script.slice(script.indexOf("function renderClips(list = clips)"), script.indexOf("const body = document.createElement"));
+  assert.match(studio, /thumbUrlFor\(state\.projectId, clip\.id\)/, "studio thumb wired");
+  assert.match(studio, /loading = "lazy"/, "lazy loading (performance rule)");
+  const results = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("// ================= BATCH PRODUCTION"));
+  assert.match(results, /thumbUrlFor\(resultsState\.projectId, clip\.id\)/, "results thumb wired");
+  assert.match(results, /scoreTierOf\(clip\.score\)/, "tier class from real score");
+  assert.ok(!/retention prediction|engagement prediction/i.test(script), "no fabricated predictions in production flow");
+});
+
+// ── Poin #7: AI suggestions di Clip editor (satu jalur apply) ────────────────
+test("p7-suggest: strip saran di tab Clip — hanya dari analysis nyata", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="suggestStrip"'), "suggest strip exists in clipTab");
+  const fn = script.slice(script.indexOf("function renderClipSuggestions"), script.indexOf('$("#intelApplyHook").addEventListener'));
+  assert.match(fn, /= clip && clip\.analysis/, "reads real per-clip analysis");
+  assert.match(fn, /belum dianalisis/, "honest empty state");
+  assert.match(fn, /analyzeSelectedClip\(\)/, "quick analyze jumps into existing intel flow");
+  for (const applier of ["applyHookSuggestion(a.recommendedHook", "applyCaptionVariant()", "applyTitleSuggestion(a.deepTitle)"]) {
+    assert.ok(fn.includes(applier), "chip reuses shared applier: " + applier);
+  }
+  const appliers = script.slice(script.indexOf("function applyHookSuggestion"), script.indexOf('$("#intelUseTitle").addEventListener'));
+  assert.match(appliers, /markStudioDirty\(\)/, "applied suggestions mark studio dirty");
+});
+
+test("p7-suggest: strip refresh saat pilih clip & setelah analisis selesai", () => {
+  const sel = script.slice(script.indexOf("function selectClip(clip)"), script.indexOf("function showToast"));
+  assert.match(sel, /renderClipSuggestions\(\)/, "selectClip refreshes suggestions");
+  const ana = script.slice(script.indexOf("async function analyzeSelectedClip"), script.indexOf("function renderIntel"));
+  assert.match(ana, /renderIntel\(a\);[\s\S]{0,60}renderClipSuggestions\(\)/, "analysis success refreshes suggestions");
+});
+
+// ── Poin #9: Performance Ledger (angka aktual manual, sidecar server) ────────
+test("p9-perf: endpoint ledger — sanitasi int, path-safe, sidecar di OUTPUT_DIR", () => {
+  const fn = server.slice(server.indexOf("// ===== Performance Ledger (#9)"), server.indexOf("function handleOpenOutput"));
+  assert.match(fn, /perfPathFor/, "sidecar path helper");
+  assert.match(fn, /isSafePath\(fpath, OUTPUT_DIR\)/, "path traversal blocked");
+  assert.match(fn, /Math\.floor\(Number\(value\)\)/, "values coerced to non-negative ints");
+  assert.match(fn, /\.perf\.json/, "sidecar extension next to export file");
+  const routes = server.slice(server.indexOf('.add("POST", "/api/projects/:projectId/generate"'));
+  assert.match(routes, /handleGetPerf/, "perf GET route wired");
+  assert.match(routes, /handleSavePerf/, "perf POST route wired");
+  const save = fn.slice(fn.indexOf("function handleSavePerf"));
+  assert.match(save, /records\.push/, "appends history snapshot");
+  assert.match(save, /slice\(-50\)/, "history bounded");
+});
+
+test("p9-perf: UI editor manual + engagement terhitung dari input nyata", () => {
+  const fn = script.slice(script.indexOf("// Performance Ledger UI:"), script.indexOf("// ================= ANALYTICS + CONTENT DNA"));
+  for (const field of ["Post ID", "Views", "Likes", "Comments", "Shares"]) {
+    assert.ok(fn.includes(`"${field}"`), `ledger field ${field}`);
+  }
+  assert.match(fn, /likes \+ comments \+ shares\) \/ views/, "engagement computed from entered numbers");
+  assert.match(fn, /POST/);
+  assert.match(fn, /encodeURIComponent\(filename\)/, "nested filename encoded");
+  assert.match(fn, /HISTORY/, "snapshot history rendered");
+  assert.doesNotMatch(fn, /Math\.random|predict/i, "no invented metrics");
+});
+
+// ── Poin #10-12: Analytics + AI insights + Learning/DNA (dari ledger asli) ───
+test("p10-12: server membawa clipId dari info.txt — kunci join prediksi-vs-aktual", () => {
+  const fn = server.slice(server.indexOf("function readExportInfo"), server.indexOf("function handleDeleteExport"));
+  assert.match(fn, /"Clip ID:": "clipId"/, "clipId exposed in export listing");
+  const perf = server.slice(server.indexOf("// ===== Performance Ledger (#9)"), server.indexOf("function handleOpenOutput"));
+  assert.match(perf, /body\.platform/, "platform stored per export sidecar");
+});
+
+test("p10-12: analytics view — totals/top/platform/growth/velocity dari ledger", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const id of ["analyticsEmpty", "analyticsPanels", "anViews", "anLikes", "anComments", "anShares", "anTop", "anPlatforms", "anGrowth"]) {
+    assert.ok(html.includes(`id="${id}"`), `analytics part ${id} must exist`);
+  }
+  const fn = script.slice(script.indexOf("// ================= ANALYTICS + CONTENT DNA"), script.indexOf('$("#anRefreshBtn")'));
+  assert.match(fn, /\/api\/perf\//, "reads real ledger snapshots");
+  assert.match(fn, /api\/projects\/\$\{pid\}/, "joins engine intel via project detail");
+  assert.match(fn, /totalViews/, "empty until views exist (no fake)");
+  assert.match(fn, /snapshot pertama/, "growth anchored to first snapshot");
+  assert.match(fn, /views\/hari/, "velocity formula labeled");
+  assert.doesNotMatch(fn, /Math\.random|estimated views/i);
+});
+
+test("p10-12: Content DNA observed + prediction-vs-actual tanpa klaim kausal", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes("CONTENT DNA"), "DNA panel exists");
+  assert.match(html, /observational/, "labeled observational");
+  const fn = script.slice(script.indexOf("// ================= ANALYTICS + CONTENT DNA"), script.indexOf('$("#anRefreshBtn")'));
+  assert.match(fn, /hookType/, "best hook type aggregation");
+  assert.match(fn, /bucket \$\{byDur\[0\]\.k\}/ || fn.includes("bucket "), "duration bucket aggregation");
+  assert.match(fn, /skor engine tertinggi/, "prediction vs actual comparison present");
+  assert.match(fn, /tidak disimpulkan sebagai sebab-akibat/, "no causal claim");
 });
 
 if (!process.exitCode) console.log(`Preview boundary done: ${results.length}/${results.length} PASS`);

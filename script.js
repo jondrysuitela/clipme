@@ -474,6 +474,11 @@ function sourceIsBoundedSection(url) {
   return /\/sections\//.test(String(url || state.sourceUrl || ""));
 }
 
+// Thumbnail clip via ffmpeg server-side (cache disk) — dipakai Studio & Results.
+function thumbUrlFor(projectId, clipId) {
+  return `/api/thumb/${projectId}/${clipId}`;
+}
+
 function renderClips(list = clips) {
   clipList.innerHTML = "";
 
@@ -522,6 +527,15 @@ function renderClips(list = clips) {
     const thumb = document.createElement("span");
     thumb.className = `thumb ${clip.previewReady ? "ready" : ""} ${clip.previewLoading ? "loading" : ""}`;
     thumb.setAttribute("aria-hidden", "true");
+    if (state.projectId) {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = "";
+      img.src = thumbUrlFor(state.projectId, clip.id);
+      img.addEventListener("error", () => img.remove());
+      thumb.appendChild(img);
+      thumb.classList.add("has-img");
+    }
     const thumbBadge = document.createElement("span");
     thumbBadge.className = "thumb-badge";
     thumbBadge.textContent = readiness;
@@ -712,6 +726,7 @@ function selectClip(clip) {
   syncTrimHandles();
   updatePreviewFaceTransform();
   updateFinalPreviewStrip();
+  renderClipSuggestions();
 }
 
 function showToast(message) {
@@ -1147,6 +1162,7 @@ async function loadExports() {
       createdAt: e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
       size: e.size,
       _ts: Number(e.createdAt) || 0,
+      clipId: e.clipId != null ? Number(e.clipId) : null,
       project: e.project || "",
       hook: e.hook || "",
       caption: e.caption || "",
@@ -1563,6 +1579,15 @@ async function processYouTubeUrl() {
     return;
   }
 
+  // Validasi ringan sebelum kirim — tolak baris yang bukan link YouTube.
+  const badLines = urls
+    .map((u, i) => ({ u: u.trim(), line: i + 1 }))
+    .filter(({ u }) => !/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(u));
+  if (badLines.length) {
+    showToast(`Baris tidak valid: ${badLines.map((b) => b.line).join(", ")} — gunakan link youtube.com atau youtu.be.`);
+    return;
+  }
+
   uploadStatus.textContent = "Analyzing";
   setProcessStep("metadata");
   renderClipSkeleton();
@@ -1691,6 +1716,30 @@ function markDropzone(mode, file) {
   }
 }
 
+// Inspeksi instan sisi klien: metadata nyata dari elemen <video> lokal
+// (bukan tebakan). FPS & audio butuh ffprobe — ditampilkan "—" sampai
+// probe server mengganti kartu ini setelah upload.
+function inspectLocalVideo(file) {
+  const card = document.getElementById("sourceInfoCard");
+  if (!card || !file) return;
+  const url = URL.createObjectURL(file);
+  const localVideo = document.createElement("video");
+  localVideo.preload = "metadata";
+  localVideo.onloadedmetadata = () => {
+    $("#siName").textContent = file.name;
+    $("#siDuration").textContent = Number.isFinite(localVideo.duration)
+      ? formatTime(localVideo.duration) : "—";
+    $("#siRes").textContent = localVideo.videoWidth && localVideo.videoHeight
+      ? `${localVideo.videoWidth} × ${localVideo.videoHeight}` : "—";
+    $("#siFps").textContent = "—";
+    $("#siAudio").textContent = "—";
+    card.hidden = false;
+    URL.revokeObjectURL(url);
+  };
+  localVideo.onerror = () => URL.revokeObjectURL(url);
+  localVideo.src = url;
+}
+
 async function attachFile(file) {
   if (!file) return;
 
@@ -1700,6 +1749,7 @@ async function attachFile(file) {
   }
 
   markDropzone("uploading", file);
+  inspectLocalVideo(file);
   try {
     setLocalPreview(file);
     const uploadPromise = uploadToBackend(file);
@@ -3261,27 +3311,86 @@ $("#analyzeIntelBtn").addEventListener("click", analyzeSelectedClip);
 
 $("#intelRegenerate").addEventListener("click", analyzeSelectedClip);
 
-$("#intelApplyHook").addEventListener("click", () => {
-  const value = $("#intelRecommendedHook").textContent;
-  if (value && value !== "--") {
-    hookInput.value = value;
-    state.activeClip.hook = value;
-    showToast("Recommended hook dipakai sebagai hook.");
-  }
-});
+// ---- Applier saran engine: SATU jalur untuk tombol Intel & strip Clip tab ----
+function applyHookSuggestion(value, label) {
+  if (!value || value === "—" || value === "--") return false;
+  hookInput.value = value;
+  if (state.activeClip) state.activeClip.hook = value;
+  markStudioDirty();
+  showToast(`${label} dipakai sebagai hook.`);
+  return true;
+}
 
-$("#intelApplyCaption").addEventListener("click", () => {
-  const value = $("#intelCaptionA").textContent;
+function applyCaptionVariant() {
   const meta = state.activeClip && state.activeClip.analysis;
-  const best = meta && meta.bestCaption ? meta.captionVariants[meta.bestCaption] : value;
-  if (best && best !== "--") {
-    captionInput.value = best;
-    state.activeClip.caption = best;
-    captionBox.textContent = `"${best}"`;
-    renderStaticCaption();
-    showToast(`Caption ${meta ? meta.bestCaption : "A"} diterapkan.`);
+  const best = meta && meta.bestCaption ? meta.captionVariants[meta.bestCaption] : $("#intelCaptionA").textContent;
+  if (!best || best === "--" || best === "—") return false;
+  captionInput.value = best;
+  if (state.activeClip) state.activeClip.caption = best;
+  captionBox.textContent = `"${best}"`;
+  renderStaticCaption();
+  markStudioDirty();
+  showToast(`Caption ${meta && meta.bestCaption ? meta.bestCaption : "A"} diterapkan.`);
+  return true;
+}
+
+function applyTitleSuggestion(value) {
+  if (!value || value === "—" || value === "--") return false;
+  hookInput.value = value;
+  if (state.activeClip) { state.activeClip.hook = value; state.activeClip.title = value; }
+  markStudioDirty();
+  showToast("Judul rekomendasi dipakai sebagai judul & hook.");
+  return true;
+}
+
+// ---- Suggestions strip di tab Clip: saran engine aktif, apply satu klik ----
+function renderClipSuggestions() {
+  const strip = document.getElementById("suggestStrip");
+  if (!strip) return;
+  const clip = state.activeClip;
+  const a = clip && clip.analysis;
+  strip.innerHTML = "";
+  const labelEl = document.createElement("span");
+  labelEl.className = "ss-label";
+  strip.appendChild(labelEl);
+
+  if (!a) {
+    labelEl.textContent = "AI SUGGESTIONS — belum dianalisis";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary-button compact";
+    btn.textContent = "ANALYZE CLIP";
+    btn.addEventListener("click", () => {
+      $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "intel"));
+      $$(".tab-panel").forEach((p) => p.classList.remove("active"));
+      $("#intelTab").classList.add("active");
+      analyzeSelectedClip();
+    });
+    strip.appendChild(btn);
+    return;
   }
-});
+
+  labelEl.textContent = "AI SUGGESTIONS";
+  const addChip = (text, title, fn) => {
+    if (!text || text === "—" || text === "--") return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "ghost-button compact ss-chip";
+    chip.title = title || "";
+    chip.textContent = String(text).length > 42 ? `${String(text).slice(0, 42)}…` : String(text);
+    chip.addEventListener("click", fn);
+    strip.appendChild(chip);
+  };
+  addChip(a.recommendedHook, "Pakai recommended hook", () => applyHookSuggestion(a.recommendedHook, "Recommended hook"));
+  addChip(a.deepHook, "Pakai deep hook", () => applyHookSuggestion(a.deepHook, "Deep hook"));
+  const capKey = a.bestCaption || (a.captionVariants ? "A" : "");
+  addChip(a.captionVariants && a.captionVariants[capKey], `Pakai caption ${capKey}`, () => applyCaptionVariant());
+  addChip(a.deepTitle, "Pakai judul", () => applyTitleSuggestion(a.deepTitle));
+}
+
+$("#intelApplyHook").addEventListener("click", () => applyHookSuggestion($("#intelRecommendedHook").textContent, "Recommended hook"));
+
+$("#intelApplyCaption").addEventListener("click", () => applyCaptionVariant());
 
 async function analyzeSelectedClip() {
   if (!state.projectId || !state.activeClip) {
@@ -3313,6 +3422,7 @@ async function analyzeSelectedClip() {
     const a = data.analysis;
     state.activeClip.analysis = a;
     renderIntel(a);
+    renderClipSuggestions();
     $("#intelStatus").textContent = data.provider === "clipme-llm" ? "AI (LLM)" : "Heuristic";
   } catch (error) {
     $("#intelStatus").textContent = "Gagal";
@@ -3594,23 +3704,9 @@ function renderDeepIntel(a) {
   }
 }
 
-$("#intelUseTitle").addEventListener("click", () => {
-  const value = $("#intelDeepTitle").textContent;
-  if (value && value !== "--") {
-    hookInput.value = value;
-    if (state.activeClip) { state.activeClip.hook = value; state.activeClip.title = value; }
-    showToast("Judul rekomendasi dipakai sebagai judul & hook.");
-  }
-});
+$("#intelUseTitle").addEventListener("click", () => applyTitleSuggestion($("#intelDeepTitle").textContent));
 
-$("#intelUseDeepHook").addEventListener("click", () => {
-  const value = $("#intelDeepHook").textContent;
-  if (value && value !== "--") {
-    hookInput.value = value;
-    if (state.activeClip) state.activeClip.hook = value;
-    showToast("Deep hook dipakai sebagai hook.");
-  }
-});
+$("#intelUseDeepHook").addEventListener("click", () => applyHookSuggestion($("#intelDeepHook").textContent, "Deep hook"));
 
 $("#exportButton").addEventListener("click", exportSelectedClip);
 
@@ -3720,7 +3816,7 @@ $$(".nav-item").forEach((button) => {
     if (button.dataset.view === "publish") { populatePubSources(); pubChecklistUpdate(); }
     if (button.dataset.view === "calendar") { populateCalSources(); renderCalendar(); }
     if (button.dataset.view === "integrations") loadIntegrations();
-    if (button.dataset.view === "analytics") { loadIntegrations(); computeProductionInsights(); }
+    if (button.dataset.view === "analytics") { loadIntegrations(); loadAnalytics(); }
     if (button.dataset.view === "intel") populateIntelProjects();
     if (button.dataset.view === "library") loadProjects();
     if (button.dataset.view === "exports") loadExports();
@@ -3848,6 +3944,7 @@ async function loadDashboardData() {
     renderDashboardProjects(state.projects);
     renderRecentExportsDashboard();
     renderDashboardActivity();
+    renderDashActivityFeed();
     await updateDashboardAvgScore();
   } catch {}
   dashBusy = false;
@@ -3869,6 +3966,444 @@ function updateDashboardStats() {
   if (count) count.textContent = String(state.projects.length);
 }
 
+// Dashboard — TOP CLIPS dari detail project yang sama (ranking backend score).
+function renderDashTopClips(details) {
+  const wrap = document.getElementById("dashTopClips");
+  const count = document.getElementById("dashTopClipsCount");
+  if (!wrap) return;
+  const scored = [];
+  for (const d of details || []) {
+    if (!d || !Array.isArray(d.clips)) continue;
+    for (const c of d.clips) {
+      if (typeof c.score === "number" && Number.isFinite(c.score)) {
+        scored.push({ clip: c, projectId: d.id, projectName: d.name });
+      }
+    }
+  }
+  scored.sort((a, b) => b.clip.score - a.clip.score);
+  const top = scored.slice(0, 5);
+  if (count) count.textContent = String(top.length);
+  if (!top.length) {
+    wrap.innerHTML = '<div class="empty-state">Belum ada clip ter-analisis.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  top.forEach((entry, i) => {
+    const row = document.createElement("div");
+    row.className = "rr-row";
+    const rankEl = document.createElement("span");
+    rankEl.className = "tc-rank";
+    rankEl.textContent = `#${i + 1}`;
+    const main = document.createElement("div");
+    main.className = "rr-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = entry.clip.deepTitle || entry.clip.recommendedHook || entry.clip.hook || `Clip ${entry.clip.id}`;
+    nameEl.title = `${entry.projectName} · Clip ${entry.clip.id}`;
+    const metaEl = document.createElement("span");
+    metaEl.textContent = [
+      entry.projectName,
+      `${formatTime(entry.clip.start)} → ${formatTime(entry.clip.end)}`,
+      entry.clip.hookType
+    ].filter(Boolean).join(" · ");
+    main.appendChild(nameEl);
+    main.appendChild(metaEl);
+    const scoreEl = document.createElement("span");
+    scoreEl.className = "dj-pct";
+    scoreEl.textContent = String(Math.round(Number(entry.clip.score)));
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary-button compact";
+    openBtn.textContent = "OPEN";
+    openBtn.setAttribute("aria-label", `Open ${nameEl.textContent} in Results`);
+    openBtn.addEventListener("click", () => openResultsForProject(entry.projectId, entry.clip.id));
+    row.appendChild(rankEl);
+    row.appendChild(main);
+    row.appendChild(scoreEl);
+    row.appendChild(openBtn);
+    wrap.appendChild(row);
+  });
+}
+
+// Dashboard — RECENT ACTIVITY feed: event lokal nyata (project & export).
+function renderDashActivityFeed() {
+  const wrap = document.getElementById("dashActivityFeed");
+  const count = document.getElementById("dashFeedCount");
+  if (!wrap) return;
+  const events = [];
+  for (const p of state.projects) {
+    if (p._ts) events.push({ ts: p._ts, kind: "Project", label: p.name });
+  }
+  for (const e of state.exports) {
+    if (e._ts) events.push({ ts: e._ts, kind: "Export", label: e.filename });
+  }
+  events.sort((a, b) => b.ts - a.ts);
+  const recent = events.slice(0, 8);
+  if (count) count.textContent = String(events.length);
+  if (!recent.length) {
+    wrap.innerHTML = '<div class="empty-state">Belum ada aktivitas.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const ev of recent) {
+    const row = document.createElement("div");
+    row.className = "af-row";
+    const kindEl = document.createElement("span");
+    kindEl.className = `af-kind${ev.kind === "Export" ? " export" : ""}`;
+    kindEl.textContent = ev.kind.toUpperCase();
+    const main = document.createElement("div");
+    main.className = "rr-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = ev.label;
+    nameEl.title = ev.label;
+    const timeEl = document.createElement("span");
+    timeEl.textContent = new Date(ev.ts).toLocaleString();
+    main.appendChild(nameEl);
+    main.appendChild(timeEl);
+    row.appendChild(kindEl);
+    row.appendChild(main);
+    wrap.appendChild(row);
+  }
+}
+
+// Performance Ledger UI: form angka aktual + history snapshot per export.
+function engagementPct(rec) {
+  if (!rec || !rec.views) return "—";
+  const eng = (Number(rec.likes) + Number(rec.comments) + Number(rec.shares)) / Number(rec.views) * 100;
+  return `${eng.toFixed(2)}%`;
+}
+
+async function renderPerfEditor(container, filename) {
+  const enc = encodeURIComponent(filename);
+  let perf = { postId: "", records: [], updatedAt: 0 };
+  try {
+    const r = await fetch(`/api/perf/${enc}`);
+    const d = await r.json();
+    if (r.ok && d.perf) perf = d.perf;
+  } catch (err) {
+    console.error("[perf]", err);
+  }
+  const latest = perf.records.length ? perf.records[perf.records.length - 1] : null;
+
+  container.innerHTML = "";
+  const grid = document.createElement("div");
+  grid.className = "perf-grid";
+
+  const platformSelect = document.createElement("select");
+  platformSelect.className = "inspector-input";
+  platformSelect.dataset.perfField = "Platform";
+  for (const p of ["", "YouTube Shorts", "TikTok", "Instagram Reels", "Facebook", "X"]) {
+    const opt = document.createElement("option");
+    opt.value = p;
+    opt.textContent = p || "Platform…";
+    if (perf.platform === p && p) opt.selected = true;
+    platformSelect.appendChild(opt);
+  }
+  const platWrap = document.createElement("label");
+  platWrap.className = "perf-field";
+  const platSpan = document.createElement("span");
+  platSpan.textContent = "Platform";
+  platWrap.appendChild(platSpan);
+  platWrap.appendChild(platformSelect);
+  grid.appendChild(platWrap);
+
+  const fields = [
+    ["Post ID", "text", perf.postId || ""],
+    ["Views", "number", latest ? latest.views : ""],
+    ["Likes", "number", latest ? latest.likes : ""],
+    ["Comments", "number", latest ? latest.comments : ""],
+    ["Shares", "number", latest ? latest.shares : ""]
+  ].map(([label, type, value]) => {
+    const wrapEl = document.createElement("label");
+    wrapEl.className = "perf-field";
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = label;
+    const input = document.createElement("input");
+    input.className = "inspector-input";
+    input.type = type;
+    input.min = type === "number" ? "0" : undefined;
+    input.step = type === "number" ? "1" : undefined;
+    input.dataset.perfField = label;
+    if (value !== "") input.value = String(value);
+    wrapEl.appendChild(nameSpan);
+    wrapEl.appendChild(input);
+    grid.appendChild(wrapEl);
+    return input;
+  });
+
+  const engLine = document.createElement("p");
+  engLine.className = "caption-hint";
+  const refreshEngagement = () => {
+    const get = (name) => Number(fields.find((f) => f.dataset.perfField === name).value) || 0;
+    const views = get("Views");
+    const likes = get("Likes");
+    const comments = get("Comments");
+    const shares = get("Shares");
+    engLine.textContent = views > 0
+      ? `Engagement (terhitung dari angka di atas): ${(((likes + comments + shares) / views) * 100).toFixed(2)}%`
+      : "Engagement muncul setelah Views > 0.";
+  };
+  fields.forEach((f) => f.addEventListener("input", refreshEngagement));
+  refreshEngagement();
+  grid.appendChild(engLine);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "primary-button compact";
+  saveBtn.textContent = "SAVE SNAPSHOT";
+  saveBtn.addEventListener("click", async () => {
+    const get = (name) => fields.find((f) => f.dataset.perfField === name).value;
+    saveBtn.disabled = true;
+    try {
+      const r = await fetch(`/api/perf/${encodeURIComponent(filename)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          postId: get("Post ID").trim(),
+          platform: (fields.find((f) => f.dataset.perfField === "Platform").value || "").trim(),
+          views: get("Views"),
+          likes: get("Likes"),
+          comments: get("Comments"),
+          shares: get("Shares")
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Gagal menyimpan.");
+      perf = d.perf;
+      showToast("Snapshot performa tersimpan.");
+      renderPerfHistory(container, perf);
+    } catch (err) {
+      showToast(err.message || "Gagal menyimpan snapshot.");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+  grid.appendChild(saveBtn);
+  container.appendChild(grid);
+
+  renderPerfHistory(container, perf);
+}
+
+function renderPerfHistory(container, perf) {
+  let hist = container.querySelector(".perf-hist");
+  if (!hist) {
+    hist = document.createElement("div");
+    hist.className = "perf-hist";
+    container.appendChild(hist);
+  }
+  hist.innerHTML = "";
+  const records = perf.records || [];
+  if (!records.length) return;
+  const title = document.createElement("p");
+  title.className = "field-label";
+  title.textContent = `HISTORY (${records.length} snapshot)`;
+  hist.appendChild(title);
+  for (const rec of records.slice(-6).reverse()) {
+    const line = document.createElement("div");
+    line.className = "af-row";
+    const main = document.createElement("div");
+    main.className = "rr-main";
+    const strong = document.createElement("strong");
+    strong.textContent = new Date(rec.at).toLocaleString();
+    const meta = document.createElement("span");
+    meta.textContent = `${rec.views.toLocaleString()} views · ${rec.likes.toLocaleString()} likes · ${rec.comments.toLocaleString()} comments · ${rec.shares.toLocaleString()} shares · engagement ${engagementPct(rec)}`;
+    main.appendChild(strong);
+    main.appendChild(meta);
+    line.appendChild(main);
+    hist.appendChild(line);
+  }
+}
+
+// ================= ANALYTICS + CONTENT DNA (#10-12) ==========================
+// Semua dari Performance Ledger (input aktual user) + skor engine.
+// Tidak ada views/likes karangan; korelasi dilabel observasional.
+
+const analyticsCache = { details: new Map(), perf: new Map() };
+
+function latestRecord(perf) {
+  return perf && perf.records && perf.records.length ? perf.records[perf.records.length - 1] : null;
+}
+
+async function loadAnalytics() {
+  const emptyEl = document.getElementById("analyticsEmpty");
+  const panels = document.getElementById("analyticsPanels");
+  if (!emptyEl || !panels) return;
+
+  // 1) Ledger untuk ≤20 export terbaru (cache per filename)
+  const targets = state.exports.slice(0, 20);
+  const ledger = [];
+  for (const item of targets) {
+    if (!analyticsCache.perf.has(item.filename)) {
+      try {
+        const r = await fetch(`/api/perf/${encodeURIComponent(item.filename)}`);
+        const d = await r.json();
+        analyticsCache.perf.set(item.filename, r.ok && d.perf ? d.perf : { records: [] });
+      } catch { analyticsCache.perf.set(item.filename, { records: [] }); }
+    }
+    const perf = analyticsCache.perf.get(item.filename);
+    const rec = latestRecord(perf);
+    if (rec) ledger.push({ item, perf, rec });
+  }
+
+  const totalViews = ledger.reduce((n, l) => n + (Number(l.rec.views) || 0), 0);
+  if (!ledger.length || !totalViews) {
+    emptyEl.hidden = false;
+    panels.hidden = true;
+    return;
+  }
+  emptyEl.hidden = true;
+  panels.hidden = false;
+
+  // 2) Join intel: clipId (dari info.txt) → project detail (skor/hookType/duration)
+  const byName = new Map(state.projects.map((p) => [p.name, p.id]));
+  for (const l of ledger) {
+    l.clip = null;
+    const pid = l.item.project ? byName.get(l.item.project) : null;
+    const cid = Number(l.item.clipId);
+    if (!pid || !cid) continue;
+    if (!analyticsCache.details.has(pid)) {
+      try {
+        const r = await fetch(`/api/projects/${pid}`);
+        const d = await r.json();
+        analyticsCache.details.set(pid, r.ok ? d : null);
+      } catch { analyticsCache.details.set(pid, null); }
+    }
+    const detail = analyticsCache.details.get(pid);
+    if (detail && Array.isArray(detail.clips)) {
+      l.clip = detail.clips.find((c) => Number(c.id) === cid) || null;
+      l.projectId = pid;
+    }
+  }
+
+  // 3) Totals
+  $("#anViews").textContent = ledger.reduce((n, l) => n + (Number(l.rec.views) || 0), 0).toLocaleString();
+  $("#anLikes").textContent = ledger.reduce((n, l) => n + (Number(l.rec.likes) || 0), 0).toLocaleString();
+  $("#anComments").textContent = ledger.reduce((n, l) => n + (Number(l.rec.comments) || 0), 0).toLocaleString();
+  $("#anShares").textContent = ledger.reduce((n, l) => n + (Number(l.rec.shares) || 0), 0).toLocaleString();
+
+  // 4) Top clips by views (dengan skor engine bila ter-link)
+  const topWrap = document.getElementById("anTop");
+  topWrap.innerHTML = "";
+  [...ledger].sort((a, b) => (Number(b.rec.views) || 0) - (Number(a.rec.views) || 0)).slice(0, 5).forEach((l, i) => {
+    const row = document.createElement("div");
+    row.className = "rr-row";
+    const rank = document.createElement("span");
+    rank.className = "tc-rank";
+    rank.textContent = `#${i + 1}`;
+    const main = document.createElement("div");
+    main.className = "rr-main";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = l.item.hook || l.item.filename;
+    nameEl.title = l.item.filename;
+    const meta = document.createElement("span");
+    meta.textContent = [
+      `${Number(l.rec.views).toLocaleString()} views`,
+      `eng ${engagementPct(l.rec)}`,
+      l.clip && typeof l.clip.score === "number" ? `engine score ${Math.round(Number(l.clip.score))}` : null
+    ].filter(Boolean).join(" · ");
+    main.appendChild(nameEl);
+    main.appendChild(meta);
+    row.appendChild(rank);
+    row.appendChild(main);
+    topWrap.appendChild(row);
+  });
+
+  // 5) Platform breakdown (platform diisi manual di ledger)
+  const platWrap = document.getElementById("anPlatforms");
+  platWrap.innerHTML = "";
+  const byPlat = {};
+  for (const l of ledger) {
+    const key = (l.perf.platform || "").trim() || "(belum ditandai)";
+    byPlat[key] = (byPlat[key] || 0) + (Number(l.rec.views) || 0);
+  }
+  Object.entries(byPlat).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = `${k}: ${v.toLocaleString()} views`;
+    platWrap.appendChild(li);
+  });
+
+  // 6) Growth & velocity — hanya dari snapshot yang benar-benar ada
+  const growth = document.getElementById("anGrowth");
+  growth.innerHTML = "";
+  let prevSum = 0;
+  const dated = ledger.flatMap((l) => l.perf.records.map((r) => ({ ...r, file: l.item.filename })));
+  const sortedRecs = dated.sort((a, b) => a.at - b.at);
+  if (sortedRecs.length >= 2) {
+    const lastT = sortedRecs[sortedRecs.length - 1].at;
+    const firstT = sortedRecs[0].at;
+    const lastViews = sortedRecs.filter((r) => r.at === lastT).reduce((n, r) => n + (Number(r.views) || 0), 0);
+    const firstViews = sortedRecs.filter((r) => r.at === firstT).reduce((n, r) => n + (Number(r.views) || 0), 0);
+    const days = Math.max(1, Math.round((lastT - firstT) / 86400000));
+    const delta = lastViews - firstViews;
+    const li1 = document.createElement("li");
+    li1.className = delta >= 0 ? "ok" : "warn";
+    li1.textContent = `Growth: ${delta >= 0 ? "+" : ""}${delta.toLocaleString()} views dibanding snapshot pertama (${days} hari).`;
+    growth.appendChild(li1);
+    const velocity = (lastViews / days).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const li2 = document.createElement("li");
+    li2.className = "ok";
+    li2.textContent = `Observed velocity ≈ ${velocity} views/hari (rata-rata sejak snapshot pertama).`;
+    growth.appendChild(li2);
+  } else {
+    const li = document.createElement("li");
+    li.className = "warn";
+    li.textContent = "Simpan ≥2 snapshot untuk melihat growth & velocity.";
+    growth.appendChild(li);
+  }
+
+  // 7) Content DNA — observed bests dari join ledger × intel
+  const dna = document.getElementById("anDNA");
+  dna.innerHTML = "";
+  const linked = ledger.filter((l) => l.clip && typeof l.clip.score === "number" && Number(l.rec.views) > 0);
+  const groupAvg = (keyFn) => {
+    const g = {};
+    for (const l of linked) {
+      const k = keyFn(l);
+      if (!k) continue;
+      (g[k] = g[k] || { sum: 0, n: 0 }).sum += Number(l.rec.views);
+      g[k].n += 1;
+    }
+    return Object.entries(g).map(([k, v]) => ({ k, avg: v.sum / v.n, n: v.n })).sort((a, b) => b.avg - a.avg);
+  };
+  const addDna = (text) => {
+    if (!text) return;
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = text;
+    dna.appendChild(li);
+  };
+  const byHook = groupAvg((l) => l.clip.hookType);
+  if (byHook.length && byHook[0].n >= 1) addDna(`Hook type dengan views tertinggi (observed): ${byHook[0].k} — avg ${Math.round(byHook[0].avg).toLocaleString()} views.`);
+  const byDur = groupAvg((l) => {
+    const d = (Number(l.clip.end) || 0) - (Number(l.clip.start) || 0);
+    if (d < 30) return "<30s";
+    if (d < 45) return "30–45s";
+    if (d < 60) return "45–60s";
+    return "≥60s";
+  });
+  if (byDur.length) addDna(`Durasi dengan views tertinggi (observed): bucket ${byDur[0].k}.`);
+  const byRatio = groupAvg(() => "");
+  const ratioCount = {};
+  for (const l of ledger) { const k = l.item.ratio || ""; if (k) ratioCount[k] = (ratioCount[k] || 0) + 1; }
+  const topRatio = Object.entries(ratioCount).sort((a, b) => b[1] - a[1])[0];
+  if (topRatio) addDna(`Format paling sering diproduksi: ${topRatio[0]} (${topRatio[1]} file).`);
+  // Prediction vs actual (observational): apakah clip berskor tertinggi juga paling banyak dilihat?
+  const withBoth = linked.slice().sort((a, b) => b.clip.score - a.clip.score);
+  if (withBoth.length >= 2) {
+    const topScoredViewRank = withBoth.map((l) => Number(l.rec.views));
+    const isTopAlsoBest = Math.max(...topScoredViewRank) === topScoredViewRank[0];
+    addDna(isTopAlsoBest
+      ? "Clip dengan skor engine tertinggi juga yang paling banyak dilihat (observasi awal)."
+      : "Clip skor tertinggi BELUM menjadi yang paling banyak dilihat (observasi awal).");
+    addDna("Korelasi tidak disimpulkan sebagai sebab-akibat; data observasional.");
+  } else if (linked.length === 1) {
+    addDna("Butuh ≥2 clip ter-link untuk membandingkan prediksi vs aktual.");
+  }
+  computeProductionInsights();
+}
+
+$("#anRefreshBtn").addEventListener("click", () => loadAnalytics());
+
 async function updateDashboardAvgScore() {
   const el = document.getElementById("kpiScore");
   const hint = document.getElementById("kpiScoreHint");
@@ -3886,6 +4421,7 @@ async function updateDashboardAvgScore() {
     }
   }
   renderRecentResults(details);
+  renderDashTopClips(details);
   renderDashboardInsights(details, { scoredClips: n, totalScore: sum });
   if (!n) {
     el.textContent = "—";
@@ -4114,6 +4650,40 @@ const PIPELINE_STAGES = {
   ]
 };
 
+// Peta tahap → engine untuk indikator per-engine (dari stage nyata server).
+const PROC_ENGINES = [
+  { chip: "engSource", stage: PIPELINE_STAGES["upload-analyze"][0], label: "SOURCE" },
+  { chip: "engFfmpeg", stage: PIPELINE_STAGES["upload-analyze"][1], label: "FFMPEG" },
+  { chip: "engWhisper", stage: PIPELINE_STAGES["upload-analyze"][2], label: "WHISPER" },
+  { chip: "engHook", stage: PIPELINE_STAGES["upload-analyze"][3], label: "HOOK" },
+  { chip: "engDeep", stage: PIPELINE_STAGES["upload-analyze"][4], label: "DEEP TITLE" }
+];
+
+function setProcEngine(chipId, state, text) {
+  const chip = document.getElementById(chipId);
+  if (!chip) return;
+  chip.dataset.state = state;
+  const b = chip.querySelector("b");
+  if (b) b.textContent = text;
+}
+
+function renderProcEngines(jobType, currentStage, done) {
+  const wrapEl = document.getElementById("procEngineWrap");
+  const stages = PIPELINE_STAGES[jobType];
+  if (!wrapEl) return;
+  if (!stages) { wrapEl.style.display = "none"; return; }
+  wrapEl.style.display = "";
+  const curIdx = stages.indexOf(currentStage);
+  for (const eng of PROC_ENGINES) {
+    const idx = stages.indexOf(eng.stage);
+    if (done) setProcEngine(eng.chip, "ok", "DONE");
+    else if (curIdx === -1) setProcEngine(eng.chip, "idle", "WAITING");
+    else if (idx < curIdx) setProcEngine(eng.chip, "ok", "DONE");
+    else if (idx === curIdx) setProcEngine(eng.chip, "busy", "ACTIVE");
+    else setProcEngine(eng.chip, "idle", "WAITING");
+  }
+}
+
 const processingState = {
   jobId: null,
   projectId: null,
@@ -4228,6 +4798,43 @@ async function checkEngineReadiness(force = false) {
 }
 
 // ---- Processing view controller ----
+// Tiering Analysis Complete: bucket presentasi dari SKOR BACKEND ASLI.
+// Threshold eksplisit di sini hanya mengelompokkan, tidak mengubah nilai.
+const SCORE_TIERS = [
+  { key: "HIGH POTENTIAL", min: 85 },
+  { key: "STRONG", min: 70 },
+  { key: "MODERATE", min: 50 },
+  { key: "LOW", min: 0 }
+];
+
+function scoreTierOf(score) {
+  const s = Number(score);
+  if (!Number.isFinite(s)) return null;
+  return SCORE_TIERS.find((t) => s >= t.min) || SCORE_TIERS[SCORE_TIERS.length - 1];
+}
+
+function renderScoreTiers(clips, wrapId) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const counts = {};
+  let scored = 0;
+  for (const c of clips || []) {
+    const t = scoreTierOf(c && c.score);
+    if (!t) continue;
+    scored += 1;
+    counts[t.key] = (counts[t.key] || 0) + 1;
+  }
+  if (!scored) { wrap.hidden = true; wrap.innerHTML = ""; return; }
+  wrap.hidden = false;
+  wrap.innerHTML = "";
+  for (const t of SCORE_TIERS) {
+    const chip = document.createElement("span");
+    chip.className = `tier-chip tier-${t.key.split(" ")[0].toLowerCase()}`;
+    chip.textContent = `${t.key} · ${counts[t.key] || 0}`;
+    wrap.appendChild(chip);
+  }
+}
+
 function setProcPill(state, text) {
   const pill = document.getElementById("procStatePill");
   if (!pill) return;
@@ -4259,6 +4866,7 @@ function enterProcessingView(jobId, label, retryFn, opts = {}) {
   $("#procTask").textContent = "Waiting to start…";
   $("#procEta").textContent = "—";
   $("#procElapsed").textContent = "00:00";
+  renderProcEngines(processingState.lastType || "upload-analyze", "", false);
   setProcPill("preparing", "PREPARING");
 
   window.clearInterval(processingState.timer);
@@ -4288,6 +4896,7 @@ function renderProcessingTick(job) {
   $("#procFill").style.width = `${processingState.progress}%`;
   $("#procPct").textContent = `${Math.round(processingState.progress)}%`;
   $("#procTask").textContent = job.stage || JOB_LABELS[job.type] || "Working…";
+  renderProcEngines(job.type, job.stage || "", false);
 
   const pctNum = processingState.progress;
   if (pctNum >= 10) {
@@ -4339,6 +4948,8 @@ function completeProcessingView(result) {
   if (list && list.children.length) {
     [...list.children].forEach((li) => { li.className = "done"; });
   }
+  renderProcEngines(processingState.lastType, "", true);
+  renderScoreTiers(result && result.clips, "procTierStrip");
 }
 
 async function failProcessingView(err) {
@@ -4421,7 +5032,7 @@ function resIsAnalyzed(clip) {
   return clip.score != null || !!clip.analysis;
 }
 
-async function openResultsForProject(projectId) {
+async function openResultsForProject(projectId, selectClipId = null) {
   if (!projectId) return;
   showView("results");
   setResPill("loading", "LOADING");
@@ -4436,7 +5047,10 @@ async function openResultsForProject(projectId) {
     resultsState.clips = Array.isArray(data.clips) ? data.clips : [];
     resultsState.selectedIds = resultsState.selectedIds || new Set();
     resultsState.selectedIds.clear();
-    resultsState.selectedClipId = null;
+    const wanted = selectClipId != null
+      ? resultsState.clips.find((c) => c.id === selectClipId)
+      : null;
+    resultsState.selectedClipId = wanted ? wanted.id : null;
     resultsState.transcripts = {};
     resultsState.status = resultsState.clips.length ? "ready" : "empty";
     $("#resErrorBox").hidden = true;
@@ -4469,6 +5083,7 @@ function renderResHeader() {
   $("#resDuration").textContent = resultsState.duration ? formatTime(resultsState.duration) : "—";
   $("#resClipsCount").textContent = String(resultsState.clips.length);
   $("#resAnalyzed").textContent = `${resAnalyzedCount()} / ${resultsState.clips.length}`;
+  renderScoreTiers(resultsState.clips, "resTierStrip");
   $("#analyzeAllBtn").disabled = !resultsState.clips.length || resultsState.analyzing;
   if (resultsState.analyzing) setResPill("analyzing", "ANALYZING");
   else if (!resultsState.clips.length) setResPill("idle", "NO RESULTS");
@@ -4512,6 +5127,18 @@ function applyResView() {
     card.className = `rc-card${clip.id === resultsState.selectedClipId ? " selected" : ""}`;
     card.dataset.clipId = clip.id;
 
+    if (resultsState.projectId) {
+      const imgWrap = document.createElement("div");
+      imgWrap.className = "rc-thumb";
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = "";
+      img.src = thumbUrlFor(resultsState.projectId, clip.id);
+      img.addEventListener("error", () => imgWrap.remove());
+      imgWrap.appendChild(img);
+      card.appendChild(imgWrap);
+    }
+
     const head = document.createElement("div");
     head.className = "rc-head";
     const sel = document.createElement("label");
@@ -4533,6 +5160,8 @@ function applyResView() {
     idEl.textContent = `CLIP ${String(clip.id).padStart(2, "0")}${analyzed ? "" : " · NEW"}`;
     const scoreEl = document.createElement("span");
     scoreEl.className = "rc-score";
+    const tierOfClip = scoreTierOf(clip.score);
+    if (tierOfClip) scoreEl.classList.add(`tier-${tierOfClip.key.split(" ")[0].toLowerCase()}`);
     scoreEl.textContent = clip.score != null ? String(Math.round(Number(clip.score))) : "—";
     head.appendChild(idEl);
     head.appendChild(scoreEl);
@@ -5238,6 +5867,25 @@ function renderExports() {
       ["Caption", item.caption],
       ["Hook", item.hook]
     ].map(([k, v]) => `<span>${k}: <b>${v ? String(v).replace(/</g, "&lt;") : "—"}</b></span>`).join("");
+
+    const perfWrap = document.createElement("div");
+    perfWrap.className = "perf-block";
+    const perfHead = document.createElement("p");
+    perfHead.className = "field-label";
+    perfHead.style.marginTop = "8px";
+    perfHead.textContent = "PERFORMANCE (isi angka aktual dari platform — manual)";
+    perfWrap.appendChild(perfHead);
+    const loadBtn = document.createElement("button");
+    loadBtn.type = "button";
+    loadBtn.className = "secondary-button compact";
+    loadBtn.textContent = "LOAD / EDIT PERFORMANCE";
+    loadBtn.addEventListener("click", () => {
+      loadBtn.disabled = true;
+      renderPerfEditor(perfWrap, item.filename).finally(() => { loadBtn.remove(); });
+    });
+    perfWrap.appendChild(loadBtn);
+    detail.appendChild(perfWrap);
+
     row.addEventListener("click", (event) => {
       if (event.target.closest("a")) return;
       detail.hidden = !detail.hidden;
@@ -6189,10 +6837,32 @@ async function bootCheck(name, label, work) {
 }
 
 async function bootstrapApplication() {
-  const system = await bootCheck("system", "Connecting to the local engine…", async () => {
-    const response = await fetch("/api/system");
-    return response.ok ? response.json() : null;
-  });
+  // Paralel — total waktu tunggu = check terlambat, bukan jumlah semua.
+  const checks = await Promise.all([
+    bootCheck("system", "Connecting to the local engine…", async () => {
+      const response = await fetch("/api/system");
+      return response.ok ? response.json() : null;
+    }),
+    bootCheck("stt", "Checking local speech-to-text models…", async () => {
+      const response = await fetch("/api/stt/models");
+      if (!response.ok) return null;
+      const data = await response.json();
+      return Array.isArray(data.models) ? data : null;
+    }),
+    bootCheck("queue", "Initializing the local job queue…", async () => {
+      const response = await fetch("/api/queue");
+      if (!response.ok) return null;
+      const data = await response.json();
+      return Array.isArray(data.jobs) ? data : null;
+    }),
+    bootCheck("workspace", "Loading projects and export metadata…", async () => {
+      await Promise.all([loadProjects(), loadExports(), refreshStorage()]);
+      return true;
+    })
+  ]);
+  const system = checks[0];
+  const stt = checks[1];
+  const queue = checks[2];
 
   setBootStep("ffmpeg", "running", "Checking");
   const runtime = system && system.runtime ? system.runtime : null;
@@ -6201,41 +6871,34 @@ async function bootstrapApplication() {
     : "Offline");
   updateBootSummary();
 
-  const stt = await bootCheck("stt", "Checking local speech-to-text models…", async () => {
-    const response = await fetch("/api/stt/models");
-    if (!response.ok) return null;
-    const data = await response.json();
-    return Array.isArray(data.models) ? data : null;
-  });
   if (stt) setBootStep("stt", "ready", `${stt.models.length} model${stt.models.length === 1 ? "" : "s"}`);
-
-  const queue = await bootCheck("queue", "Initializing the local job queue…", async () => {
-    const response = await fetch("/api/queue");
-    if (!response.ok) return null;
-    const data = await response.json();
-    return Array.isArray(data.jobs) ? data : null;
-  });
   if (queue) setBootStep("queue", "ready", queue.jobs.length ? `${queue.jobs.length} active` : "Ready");
 
-  await bootCheck("workspace", "Loading projects and export metadata…", async () => {
-    await Promise.all([loadProjects(), loadExports(), refreshStorage()]);
-    return true;
-  });
-
-  renderClips();
-  selectClip(clips[0]);
-  setRatio(currentRatio());
-  syncUndoRedoButtons();
-  initDashboard();
-  await Promise.allSettled([checkEngineReadiness(true), loadEngineCompute(), loadLocalAIStatus(), pollQueue()]);
-
+  // Reveal TIDAK BOLEH digagalkan oleh error inisialisasi mana pun:
+  // workspace selalu tampil, detail error tetap tercatat di console.
   const message = document.getElementById("bootMessage");
-  if (message) {
-    const gpuPresent = Boolean(system && system.hardware && system.hardware.gpu && system.hardware.gpu.present);
-    message.textContent = `Engine ready — ${gpuPresent ? "GPU detected" : "CPU runtime ready"}.`;
-  }
   const boot = document.getElementById("engineBoot");
-  if (boot) boot.hidden = true;
+  try {
+    renderClips();
+    selectClip(clips[0]);
+    setRatio(currentRatio());
+    syncUndoRedoButtons();
+    initDashboard();
+    if (message) {
+      const gpuPresent = Boolean(system && system.hardware && system.hardware.gpu && system.hardware.gpu.present);
+      message.textContent = `Engine ready — ${gpuPresent ? "GPU detected" : "CPU runtime ready"}.`;
+    }
+  } catch (err) {
+    console.error("[boot] init warning:", err);
+    if (message) message.textContent = "Workspace loaded with init warnings — check console (F12).";
+  } finally {
+    if (boot) boot.hidden = true;
+  }
+
+  // Check sekunder berat (STT readiness penuh, LocalAI/pyannote probing)
+  // berjalan SETELAH workspace tampil — tidak boleh menahan UI.
+  if (stt) { readinessCache.stt = stt; readinessCache.sttAt = Date.now(); }
+  Promise.allSettled([checkEngineReadiness(false), loadEngineCompute(), loadLocalAIStatus(), pollQueue()]);
 }
 
 const analyzeSpeakerBtn = document.getElementById("analyzeSpeakerBtn");
