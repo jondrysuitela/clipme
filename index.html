@@ -38,36 +38,40 @@
 
     <div class="sidebar-group sidebar-group-nav">
       <p class="sidebar-section-label">Workspace</p>
+      <button class="primary-button new-project-cta" id="sidebarNewProjectBtn" type="button" title="Buka New Project Workspace">+ NEW PROJECT</button>
       <nav class="nav-list" aria-label="Workspace">
         <button class="nav-item active" data-view="dashboard" type="button" aria-current="page">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg></span> <span class="nav-label">Dashboard</span>
-        </button>
-        <button class="nav-item" data-view="studio" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 5v14M5 12h14"/></svg></span> <span class="nav-label">Create</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg></span> <span class="nav-label">Home</span>
         </button>
         <button class="nav-item" data-view="library" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span> <span class="nav-label">Library</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span> <span class="nav-label">Projects</span>
+        </button>
+        <button class="nav-item" data-view="intel" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg></span> <span class="nav-label">Intelligence</span>
+        </button>
+        <button class="nav-item" data-view="captions" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4M13 15h4M6 10h12"/></svg></span> <span class="nav-label">Captions</span>
+        </button>
+        <button class="nav-item" data-view="results" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M10 9l6 3-6 3z"/></svg></span> <span class="nav-label">Results</span>
         </button>
         <button class="nav-item" data-view="exports" type="button">
           <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 21h16"/></svg></span> <span class="nav-label">Exports</span>
         </button>
-        <button class="nav-item" data-view="publish" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg></span> <span class="nav-label">Publish</span>
-        </button>
-        <button class="nav-item" data-view="calendar" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg></span> <span class="nav-label">Calendar</span>
+        <button class="nav-item" data-view="settings" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.24.57.79.96 1.41 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg></span> <span class="nav-label">Settings</span>
         </button>
       </nav>
     </div>
 
     <div class="sidebar-group sidebar-group-nav">
-      <p class="sidebar-section-label">Intelligence</p>
-      <nav class="nav-list" aria-label="Intelligence">
-        <button class="nav-item" data-view="results" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M10 9l6 3-6 3z"/></svg></span> <span class="nav-label">Results</span>
+      <p class="sidebar-section-label">Tools</p>
+      <nav class="nav-list" aria-label="Tools">
+        <button class="nav-item" data-view="publish" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg></span> <span class="nav-label">Publish</span>
         </button>
-        <button class="nav-item" data-view="intel" type="button">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg></span> <span class="nav-label">Intel</span>
+        <button class="nav-item" data-view="calendar" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg></span> <span class="nav-label">Calendar</span>
         </button>
         <button class="nav-item" data-view="analytics" type="button">
           <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/></svg></span> <span class="nav-label">Analytics</span>
@@ -123,7 +127,7 @@
         <span class="status-pill status-pill-cancelled" id="studioDirtyPill" hidden title="Ada perubahan clip yang belum disimpan ke server">UNSAVED CHANGES</span>
         <button class="secondary-button" id="backToResultsBtn" type="button" hidden>BACK TO RESULTS</button>
         <button class="ghost-button" id="saveProjectBtn" type="button" hidden>SAVE</button>
-        <button class="primary-button" id="newProjectBtn" type="button">+ New Project</button>
+        <button class="primary-button" id="newProjectBtn" type="button">+ CREATE</button>
       </div>
     </div>
 
@@ -148,7 +152,7 @@
           <h1 id="dashGreeting">Good morning</h1>
           <p class="dash-sub">Turn long-form video into high-potential short-form clips.</p>
         </div>
-        <button class="primary-button" id="dashNewProjectBtn" type="button">+ New Project</button>
+        <button class="primary-button" id="dashNewProjectBtn" type="button">+ CREATE</button>
         <div class="dash-quick">
           <button class="ghost-button compact" data-qview="exports" type="button">Exports</button>
           <button class="ghost-button compact" data-qview="calendar" type="button">Calendar</button>
@@ -283,6 +287,15 @@
             <h2>Source</h2>
             <span class="status-pill" id="fileMeta">Ready</span>
           </div>
+          <div class="create-topbar">
+            <button class="ghost-button compact" id="backToProjectsBtn" type="button">&larr; Back to Projects</button>
+            <span class="field-label" style="margin:0">ASPECT RATIO</span>
+            <div class="segmented" id="createRatioSegmented">
+              <button class="active" data-cratio="portrait" type="button">9:16</button>
+              <button data-cratio="four5" type="button">4:5</button>
+              <button data-cratio="wide" type="button">16:9</button>
+            </div>
+          </div>
           <div class="dropzone" id="dropzone">
             <input type="file" accept="video/*" id="videoInput">
             <div class="drop-icon">+</div>
@@ -294,8 +307,8 @@
               <span class="dz-size" id="dzFileSize"></span>
             </div>
           </div>
-          <button class="secondary-button" id="analyzeHookBtn" type="button" style="width:100%; margin-top:8px" title="Analisis hook viral untuk video ini: STT transkrip penuh lalu skor hook + judul Deep AI (proses lebih lama, progres tampil di status)">
-            Start Analysis
+          <button class="wide-button primary-button" id="analyzeHookBtn" type="button" style="width:100%; margin-top:8px; font-weight:800; letter-spacing:.06em" title="AI menganalisis video: STT transkrip penuh lalu AI Clip Director menemukan hook, struktur cerita, dan kandidat clip terbaik">
+            ⚡ GENERATE BEST CLIPS
           </button>
           <div class="field-label" style="margin-top:10px">Project name (opsional)</div>
           <input class="inspector-input" id="projectNameInput" type="text" maxlength="80" placeholder="Nama project — kosongkan untuk otomatis">
@@ -352,8 +365,17 @@
             </label>
             <input class="inspector-input" id="focusInput" type="text" maxlength="120" placeholder="Focus topik (opsional) — mis: margin bisnis">
           </div>
+          <div class="field-label" style="margin-top:12px">GENERATION MODE</div>
+          <div class="segmented" id="genModeSegmented">
+            <button class="active" data-genmode="ai" type="button" title="AI menentukan konfigurasi dan batas clip terbaik">AI Recommended</button>
+            <button data-genmode="hybrid" type="button" title="Kamu kasih batas, AI tentukan batas awal/akhir clip">Hybrid</button>
+            <button data-genmode="manual" type="button" title="Durasi dikunci persis sesuai angka kamu">Manual</button>
+          </div>
           <div class="settings-grid">
-            <label>Max clips
+            <label id="maxCeilingLabel">Max clip duration (detik)
+              <input class="inspector-input" id="maxCeilingInput" type="number" min="15" max="180" step="5" value="90" title="Batas KERAS durasi clip — bukan target. AI boleh memotong lebih pendek saat ending alami ditemukan.">
+            </label>
+            <label>Number of clips
               <select id="maxClipsSelect" title="Jumlah clip final setelah ranking (kandidat pool selalu lebih besar)">
                 <option value="4">4</option>
                 <option value="6" selected>6</option>
@@ -361,21 +383,11 @@
                 <option value="10">10</option>
               </select>
             </label>
-            <button class="secondary-button" id="rerankBtn" type="button" title="Ubah ranking tanpa STT ulang — pakai cache transkrip" style="align-self:end">RE-RANK</button>
           </div>
-          <div class="settings-grid">
-            <label>Clip length mode
-              <select id="durationModeSelect" title="Durasi clip ditentukan editor AI dari hook viral (AUTO), diperpanjang (MAXIMUM/STORY), dipadatkan (SHORT), atau dikunci (FIXED)">
-                <option value="AUTO" selected>AUTO — sesuai hook viral</option>
-                <option value="SHORT">SHORT — padat</option>
-                <option value="STORY">STORY — cerita utuh</option>
-                <option value="MAXIMUM">MAXIMUM — selama masih bernilai</option>
-                <option value="FIXED">FIXED — durasi kunci (isi angka)</option>
-              </select>
-            </label>
-            <input class="inspector-input" id="fixedDurationInput" type="number" min="5" max="600" step="5" value="30" placeholder="Fixed duration (detik)" style="display:none">
-          </div>
-          <button class="wide-button" id="generateButton" type="button" disabled>Generate clips</button>
+          <button class="secondary-button wide-button" id="templateGalleryBtn" type="button" style="width:100%; margin-top:8px" title="43+ template caption dengan preview nyata">
+            🎨 CAPTION TEMPLATE LIBRARY
+          </button>
+          <button class="wide-button primary-button" id="generateButton" type="button" disabled style="margin-top:8px">Generate clips</button>
         </div>
 
         <!-- Clips Panel -->
@@ -385,6 +397,7 @@
             <div>
               <button class="ghost-button compact" id="undoBtn" type="button" title="Undo (Ctrl+Z)">Undo</button>
               <button class="ghost-button compact" id="redoBtn" type="button" title="Redo (Ctrl+Y)">Redo</button>
+              <button class="ghost-button compact" id="rerankBtn" type="button" title="Ubah ranking tanpa STT ulang — pakai cache transkrip">Re-rank</button>
               <button class="ghost-button compact" id="sortClips" type="button">Sort by score</button>
               <button class="ghost-button compact" id="selectAllClips" type="button">Select all</button>
               <button class="primary-button compact" id="exportAllBtn" type="button">Export all</button>
@@ -690,11 +703,14 @@
     <div class="app-view page-view" data-view-panel="library">
       <div class="page-panel panel">
         <div class="panel-heading">
-          <h2>Library</h2>
-          <button class="ghost-button compact" id="clearLibrary" type="button">Clear</button>
+          <h2>Projects</h2>
+          <div>
+            <button class="primary-button compact" id="libNewProjectBtn" type="button">+ NEW PROJECT</button>
+            <button class="ghost-button compact" id="clearLibrary" type="button">Clear</button>
+          </div>
         </div>
         <div class="table-list" id="libraryList">
-          <div class="empty-state">Belum ada project. Paste URL YouTube di Studio untuk mulai.</div>
+          <div class="empty-state">Belum ada project. Klik + NEW PROJECT untuk mulai.</div>
         </div>
       </div>
     </div>
@@ -906,6 +922,16 @@
             <div class="intel-block" id="riKeyMessage">&mdash;</div>
             <p class="field-label">TRANSCRIPT</p>
             <div class="res-transcript" id="riTranscript"><div class="empty-state">Jalankan ANALYZE pada clip ini untuk mendapat baris transkrip bertimestamp.</div></div>
+            <p class="field-label">METADATA</p>
+            <div class="meta-card" id="riMetaCard">
+              <div class="meta-row"><span>Title</span><div class="meta-actions"><button class="ghost-button compact" id="riMetaTitleCopy" type="button">COPY TITLE</button><button class="ghost-button compact" id="riMetaRegen" type="button" title="Generate ulang title/description/hashtags dari konten clip">REGENERATE</button></div></div>
+              <div class="intel-block" id="riMetaTitle">&mdash;</div>
+              <div class="meta-row"><span>Description</span><button class="ghost-button compact" id="riMetaDescCopy" type="button">COPY DESCRIPTION</button></div>
+              <div class="intel-block" id="riMetaDesc">&mdash;</div>
+              <div class="meta-row"><span>Hashtags</span><button class="ghost-button compact" id="riMetaTagsCopy" type="button">COPY HASHTAGS</button></div>
+              <div class="intel-block" id="riMetaTags">&mdash;</div>
+              <button class="secondary-button compact" id="riMetaCopyAll" type="button" style="width:100%; margin-top:6px">COPY ALL</button>
+            </div>
             <div class="res-intel-actions">
               <button class="primary-button compact" id="riPreviewBtn" type="button">PREVIEW</button>
               <button class="secondary-button compact" id="riStudioBtn" type="button">OPEN IN STUDIO</button>
@@ -1124,26 +1150,93 @@
       </div>
     </div>
 
+    <!-- NEW PROJECT WORKSPACE — input + analysis + configuration. TANPA preview clip hasil. -->
+    <div class="app-view page-view" data-view-panel="newproject">
+      <section class="panel res-hero">
+        <div>
+          <button class="ghost-button compact" id="npBackBtn" type="button">&larr; Back to Projects</button>
+          <p class="eyebrow">New Project</p>
+          <h2>Project creation workspace</h2>
+          <p class="dash-sub">Source + analisis AI + konfigurasi. Hasil clip tampil di tab Results setelah generate.</p>
+        </div>
+      </section>
+      <div id="npMount"></div>
+    </div>
+
+    <!-- CAPTION WORKSPACE — desain + preview caption -->
+    <div class="app-view page-view" data-view-panel="captions">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Captions</p>
+          <h2>Caption design workspace</h2>
+          <p class="dash-sub">Template library, styling, dan timeline kata. Preview memakai konfigurasi render nyata (font/warna/stroke/shadow/posisi).</p>
+        </div>
+        <button class="primary-button compact" id="capOpenLibraryBtn" type="button">BROWSE FULL LIBRARY</button>
+      </section>
+      <div class="captions-grid">
+        <section class="panel cap-lib-panel">
+          <div class="panel-heading"><h2>TEMPLATES</h2><span class="status-pill status-pill-running" id="capLibCount">0</span></div>
+          <input class="inspector-input" id="capLibSearch" type="text" maxlength="60" placeholder="Cari template&hellip;">
+          <div class="tpl-grid tpl-grid-flat" id="capLibList"></div>
+        </section>
+        <section class="panel cap-preview-panel">
+          <div class="panel-heading"><h2>PREVIEW</h2><span class="status-pill" id="capPreviewName">&mdash;</span></div>
+          <div class="cap-stage">
+            <div class="cap-frame">
+              <div class="cap-lines" id="capPreviewLines"></div>
+            </div>
+            <p class="caption-hint">Contoh kalimat dirender dengan style template aktif &mdash; konfigurasi identik dipakai renderer FFmpeg saat export.</p>
+          </div>
+        </section>
+        <section class="panel cap-props-panel">
+          <div class="panel-heading"><h2>PROPERTIES</h2></div>
+          <dl class="ri-grid" id="capProps"></dl>
+        </section>
+      </div>
+      <div id="capTimelineMount"></div>
+    </div>
+
+    <!-- SETTINGS — system, integrasi, storage -->
+    <div class="app-view page-view" data-view-panel="settings">
+      <section class="panel res-hero">
+        <div>
+          <p class="eyebrow">Settings</p>
+          <h2>System &amp; preferences</h2>
+          <p class="dash-sub">Informasi engine lokal dan pintasan konfigurasi.</p>
+        </div>
+      </section>
+      <div class="settings-duo">
+        <section class="panel">
+          <div class="panel-heading"><h2>SYSTEM</h2><button class="ghost-button compact" id="setRefreshBtn" type="button">REFRESH</button></div>
+          <div class="table-list" id="setSysBody"><div class="empty-state">Memuat&hellip;</div></div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><h2>SHORTCUTS</h2></div>
+          <div class="res-intel-actions" style="padding:12px">
+            <button class="secondary-button compact" id="setOpenIntegrations" type="button">SOCIAL INTEGRATIONS</button>
+            <button class="secondary-button compact" id="setOpenTemplates" type="button">CAPTION TEMPLATE LIBRARY</button>
+          </div>
+          <p class="caption-hint" style="padding:0 12px 12px">Preset engine (STT model, runtime AUTO/CPU/GPU) tetap dikonfigurasi per-project dari workspace masing-masing.</p>
+        </section>
+      </div>
+    </div>
+
   </main>
 </div>
 <div class="toast" id="toast"></div>
-<div class="modal-overlay" id="newProjectModal" hidden>  <div class="modal-card panel" role="dialog" aria-modal="true" aria-labelledby="npTitle">
-    <div class="panel-heading"><h2 id="npTitle">NEW PROJECT</h2></div>
-    <p class="field-label">Project name</p>
-    <input class="inspector-input" id="npName" type="text" maxlength="80" placeholder="Misal: Podcast Episode 42 (kosongkan = otomatis)">
-    <p class="field-label">Source</p>
-    <div class="segmented np-source">
-      <button class="active" data-npsrc="video" type="button">Video</button>
-      <button data-npsrc="youtube" type="button">YouTube</button>
+<div class="modal-overlay" id="templateGalleryModal" hidden>
+  <div class="modal-card panel tpl-modal" role="dialog" aria-modal="true" aria-labelledby="tplTitle">
+    <div class="panel-heading">
+      <h2 id="tplTitle">CAPTION TEMPLATE LIBRARY</h2>
+      <span class="status-pill status-pill-running" id="tplCount">0</span>
     </div>
-    <p class="caption-hint" id="npVideoHint">File picker video akan terbuka setelah Create.</p>
-    <div id="npUrlRow" style="display:none">
-      <p class="field-label">YouTube URL</p>
-      <textarea class="inspector-input" id="npUrl" rows="3" placeholder="Paste 1 atau lebih URL (max 10, satu per baris)"></textarea>
-    </div>
+    <input class="inspector-input" id="tplSearch" type="text" maxlength="60" placeholder="Cari template&hellip;">
+    <div class="tpl-categories" id="tplCategories"></div>
+    <div class="tpl-grid" id="tplGrid"></div>
+    <p class="caption-hint">Semua template memetakan ke konfigurasi render nyata (font, warna, stroke, shadow, posisi, ukuran) &mdash; hasil akhir sama dengan preview.</p>
     <div class="proc-actions">
-      <button class="primary-button" id="npCreateBtn" type="button">CREATE PROJECT</button>
-      <button class="secondary-button" id="npCancelBtn" type="button">Cancel</button>
+      <button class="primary-button" id="tplApplyBtn" type="button" disabled>APPLY TEMPLATE</button>
+      <button class="secondary-button" id="tplCloseBtn" type="button">Close</button>
     </div>
   </div>
 </div>
@@ -1169,6 +1262,7 @@
     </div>
   </div>
 </div>
+<script src="clipme-caption-templates.js"></script>
 <script src="clipme-cut-to-face.js"></script>
 <script src="clipme-active-speaker.js"></script>
 <script src="script.js"></script>

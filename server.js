@@ -2191,7 +2191,7 @@ function parseJson3Transcript(data) {
         eventWords: words.length ? words : undefined
       };
     })
-    .filter((item) => item.text && !/^™a+$/.test(item.text));
+    .filter((item) => item.text && !/^Ta+$/.test(item.text));
 }
 
 function captionSources(info, preferredLanguage = "Indonesia") {
@@ -2317,7 +2317,7 @@ function clipHook(caption, index) {
 function runDirector(transcript, duration, options) {
   ensureDirectorInit();
   if (!clipmeDirector || !directorInited) return null;
-  const maxDur = targetClipLength(options.maxDuration);
+  const maxDur = Math.max(15, Math.min(180, Number(options.maxDuration) > 0 ? Number(options.maxDuration) : 90));
   const maxClips = clipmeDirector.clampMaxClips(options.maxClips, 6);
   const langTag = clipmeLangTag(options.language || "Indonesia");
   const langKey = langTag === "mix" ? "mix" : (langTag === "en" ? "en" : "id");
@@ -5533,8 +5533,10 @@ function handleGenerateClips(req, res, params) {
   }
   collectRequest(req, 50).then((buf) => {
     const data = JSON.parse(buf.toString("utf8"));
+    const maxDurIn = Number(data.maxDuration) > 0 ? Number(data.maxDuration) : 0;
     const target = ["15", "30", "45", "60", "90"].includes(String(data.duration))
-      ? Number(data.duration) : 90;
+      ? Number(data.duration)
+      : (maxDurIn > 0 ? Math.max(15, Math.min(180, maxDurIn)) : 90);
     const transcriptPath = path.join(projectDir, manifest.transcriptPath);
     let transcript;
     try {
@@ -5551,7 +5553,9 @@ function handleGenerateClips(req, res, params) {
       mode: data.durationMode || "AUTO",
       fixedDuration: Number(data.fixedDuration) > 0 ? Number(data.fixedDuration) : 0,
       focus: sanitizeString(String(data.focus || "").slice(0, 120)),
-      hookStrategy: String(data.hookStrategy || "balanced").slice(0, 20)
+      hookStrategy: String(data.hookStrategy || "balanced").slice(0, 20),
+      maxDuration: Number(data.maxDuration) > 0 ? Number(data.maxDuration) : 0,
+      maxClips: Number(data.maxClips) > 0 ? Number(data.maxClips) : 0
     });
     manifest.clips = clips.map((clip) => ({ ...clip, previewReady: false }));
     fs.writeFileSync(path.join(projectDir, "project.json"), JSON.stringify(manifest, null, 2));
@@ -5561,6 +5565,103 @@ function handleGenerateClips(req, res, params) {
 
 // Tombol "Analyze Hook Viral": analisis ulang project AKTIF via job — progres
 // persen dipoll klien lewat /api/jobs/:id. Worker sama dengan jalur upload.
+// AI METADATA GENERATOR — title/description/hashtags dari konten clip nyata.
+// Deterministik dari transkrip + analysis (deepTitle/hook/hashtags engine).
+// Tanpa kalimat karangan: semua kalimat description diambil verbatim dari clip.
+function composeClipMetadata(clip, sentences) {
+  const analysis = clip.analysis || {};
+  let title = String(clip.deepTitle || analysis.deepTitle || "").trim();
+  if (!title && analysis.recommendedHook) title = String(analysis.recommendedHook).trim();
+  if (!title && analysis.originalHook) title = String(analysis.originalHook).trim();
+  if (!title && Array.isArray(sentences) && sentences.length) {
+    const best = sentences.reduce((a, b) => (String(b.text || "").length > String(a.text || "").length ? b : a), sentences[0]);
+    title = String(best.text || "").trim().slice(0, 90);
+  }
+  if (title.length > 140) title = `${title.slice(0, 137)}...`;
+
+  let description = "";
+  if (analysis.keyMessage) description = String(analysis.keyMessage).trim();
+  const src = Array.isArray(sentences) ? sentences.map((s) => String(s.text || "").trim()).filter(Boolean) : [];
+  if (!description && src.length) {
+    const mid = src.slice(0, Math.min(3, src.length));
+    description = mid.join(" ");
+  }
+  if (description.length > 400) description = `${description.slice(0, 397)}...`;
+  if (analysis.cta && typeof analysis.cta === "string" && !description.includes(analysis.cta)) {
+    description = `${description}\n\n${analysis.cta.trim()}`.trim();
+  }
+  if (!description) description = "Konten dari video sumber — jalankan analisis untuk deskripsi otomatis.";
+
+  let tags = [];
+  const h = analysis.hashtags;
+  if (Array.isArray(h)) tags = h.map((t) => String(t));
+  else if (h && typeof h === "object") tags = [...(h.primary || []), ...(h.niche || []), ...(h.broad || [])];
+  tags = [...new Set(tags.map((t) => (String(t).startsWith("#") ? t : `#${String(t).replace(/[^\w\d]/g, "")}`)).filter((t) => t.length > 1))].slice(0, 10);
+
+  return { title: title || "Untitled Clip", description, hashtags: tags, generatedAt: Date.now() };
+}
+
+function findClipSentences(manifest, clip) {
+  try {
+    const transcriptPath = path.join(path.join(UPLOAD_DIR, manifest.id), manifest.transcriptPath || "transcript.json");
+    if (!fs.existsSync(transcriptPath)) return [];
+    const transcript = JSON.parse(fs.readFileSync(transcriptPath, "utf8"));
+    const segs = Array.isArray(transcript.segments) ? transcript.segments : [];
+    return segs
+      .filter((s) => Number(s.end) > Number(clip.start) - 0.01 && Number(s.start) < Number(clip.end) + 0.01)
+      .map((s) => ({ text: s.text, start: s.start, end: s.end }));
+  } catch { return []; }
+}
+
+async function handleClipMetadata(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  const manifest = readProjectManifest(projectDir);
+  if (!manifest || !Array.isArray(manifest.clips)) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
+  collectRequest(req, 1).then((buf) => {
+    let body = {};
+    try { body = JSON.parse(buf.toString("utf8") || "{}"); } catch {}
+    const idx = manifest.clips.findIndex((c) => String(c.id) === String(body.clipId));
+    if (idx < 0) { sendJson(res, 404, { error: "Clip tidak ditemukan." }); return; }
+    const clip = manifest.clips[idx];
+    const sentences = findClipSentences(manifest, clip);
+    let meta = composeClipMetadata(clip, sentences);
+    if (body.regenerate) {
+      const alts = Array.isArray(clip.deepTitleAlternatives) ? clip.deepTitleAlternatives.filter(Boolean) : [];
+      if (alts.length) {
+        const pick = alts[meta._rot % alts.length] || alts[0];
+        meta.title = String(pick).slice(0, 140);
+        meta._rot = (meta._rot + 1) % Math.max(alts.length, 1);
+        meta.rotatedTitle = true;
+      }
+    }
+    delete meta._rot;
+    clip.metadata = meta;
+    try { fs.writeFileSync(path.join(projectDir, "project.json"), JSON.stringify(manifest, null, 2)); } catch {}
+    sendJson(res, 200, { metadata: meta });
+  }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
+}
+
+async function handleProjectConfig(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  const manifest = readProjectManifest(projectDir);
+  if (!manifest) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
+  collectRequest(req, 1).then((buf) => {
+    let body = {};
+    try { body = JSON.parse(buf.toString("utf8") || "{}"); } catch { body = {}; }
+    const cfg = body.createConfig && typeof body.createConfig === "object" ? body.createConfig : body;
+    const allowed = ["genMode", "maxDuration", "maxClips", "hookStrategy", "focus", "ratio", "captionTemplateId"];
+    const clean = {};
+    for (const k of allowed) if (cfg[k] !== undefined && cfg[k] !== null) clean[k] = typeof cfg[k] === "string" ? String(cfg[k]).slice(0, 140) : cfg[k];
+    manifest.createConfig = { ...(manifest.createConfig || {}), ...clean };
+    try { fs.writeFileSync(path.join(projectDir, "project.json"), JSON.stringify(manifest, null, 2)); } catch {}
+    sendJson(res, 200, { ok: true, createConfig: manifest.createConfig });
+  }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
+}
+
 async function handleAnalyzeHook(req, res, params) {
   const projectId = params.projectId || "";
   if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
@@ -5580,12 +5681,23 @@ async function handleAnalyzeHook(req, res, params) {
     const hookStrategy = clipmeDirector ? clipmeDirector.validStrategy(body.hookStrategy) : "balanced";
     const maxClips = clipmeDirector ? clipmeDirector.clampMaxClips(body.maxClips, 6) : 6;
     const forceStt = Boolean(body.forceStt);
-    const targetLen = durMode === "FIXED" && fixedDur > 0
-      ? targetClipLength(fixedDur)
-      : targetClipLength(undefined);
+    const genModeRaw = String(body.genMode || "");
+    const genMode = ["ai", "hybrid", "manual"].includes(genModeRaw) ? genModeRaw : "";
+    const maxDurationIn = Number(body.maxDuration) > 0 ? Number(body.maxDuration) : 0;
+    let durMode2 = durMode;
+    let fixedDur2 = fixedDur;
+    if (genMode === "manual" && !(durMode === "FIXED" && fixedDur > 0)) {
+      durMode2 = "FIXED";
+      fixedDur2 = maxDurationIn > 0 ? maxDurationIn : 30;
+    }
+    const targetLen = genMode === "hybrid" && maxDurationIn > 0
+      ? Math.max(15, Math.min(180, maxDurationIn))
+      : durMode2 === "FIXED" && fixedDur2 > 0
+        ? targetClipLength(fixedDur2)
+        : targetClipLength(undefined);
     console.log(`[Analyze] Hook viral dimulai: ${manifest.name || projectId}`);
     const job = createJob("upload-analyze", (setProgress, children) =>
-      analyzeLocalUpload(projectDir, sourcePath, probe, projectId, manifest.name || "project", targetLen, durMode, fixedDur, setProgress, children, { focus, hookStrategy, maxClips, forceStt })
+      analyzeLocalUpload(projectDir, sourcePath, probe, projectId, manifest.name || "project", targetLen, durMode2, fixedDur2, setProgress, children, { focus, hookStrategy, maxClips, forceStt })
     );
     sendJson(res, 200, { jobId: job.id });
   }).catch(() => sendJson(res, 400, { error: "Invalid JSON" }));
@@ -6757,7 +6869,7 @@ async function handleSttModels(req, res) {
 
 // Only these exact web assets are served from the project root.
 // Media (upload/preview/output) is served through dedicated /media/, /sections/, /outputs/ routes.
-const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/clipme-active-speaker.js", "/build/icon.png"]);
+const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/clipme-active-speaker.js", "/clipme-caption-templates.js", "/build/icon.png"]);
 
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -6804,6 +6916,8 @@ router
   .add("GET", "/api/projects", handleListProjects)
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)
+  .add("POST", "/api/projects/:projectId/metadata", handleClipMetadata)
+  .add("POST", "/api/projects/:projectId/config", handleProjectConfig)
   .add("POST", "/api/projects/:projectId/analyze-hook", handleAnalyzeHook)
   .add("POST", "/api/projects/:projectId/rerank", handleRerank)
   .add("GET", "/api/projects/:projectId", handleGetProject)

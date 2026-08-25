@@ -147,22 +147,24 @@ function effectiveCaptionStyle() {
     : "off";
 }
 
+function generationMode() {
+  const active = $("#genModeSegmented button.active");
+  return (active && active.dataset.genmode) || "ai";
+}
+
 function durationSettingsPayload() {
-  const modeEl = $("#durationModeSelect");
-  const mode = (modeEl && modeEl.value) || "AUTO";
-  let fixed = 0;
-  if (mode === "FIXED") {
-    const fEl = $("#fixedDurationInput");
-    const n = fEl ? Number(fEl.value) : 0;
-    fixed = Number.isFinite(n) && n > 0 ? n : 30;
-  }
-  return {
-    durationMode: mode,
-    fixedDuration: fixed,
+  const gm = generationMode();
+  const ceilEl = $("#maxCeilingInput");
+  const ceiling = Math.max(15, Math.min(180, Number(ceilEl && ceilEl.value) || 90));
+  const base = {
     maxClips: Number(($("#maxClipsSelect") && $("#maxClipsSelect").value) || 6) || 6,
     hookStrategy: ($("#hookStrategySelect") && $("#hookStrategySelect").value) || "balanced",
-    focus: ($("#focusInput") && $("#focusInput").value.trim()) || ""
+    focus: ($("#focusInput") && $("#focusInput").value.trim()) || "",
+    genMode: gm
   };
+  if (gm === "manual") return { durationMode: "FIXED", fixedDuration: ceiling, ...base };
+  if (gm === "hybrid") return { durationMode: "AUTO", fixedDuration: 0, maxDuration: ceiling, ...base };
+  return { durationMode: "AUTO", fixedDuration: 0, ...base };
 }
 
 function formatBytes(bytes) {
@@ -1320,6 +1322,18 @@ function showView(view) {
   if (backBtn) backBtn.hidden = !(view === "studio" && resultsState.projectId);
   const saveBtn = document.getElementById("saveProjectBtn");
   if (saveBtn) saveBtn.hidden = !(view === "studio" && state.projectId);
+  if (view === "captions") renderCaptionsWorkspace();
+  if (view === "settings") fillSettingsView();
+}
+
+// Pindahkan panel eksisting ke workspace barunya (node move — ID/listener utuh).
+function mountWorkspaces() {
+  const uploadPanel = document.querySelector(".upload-panel");
+  const npMount = document.getElementById("npMount");
+  if (uploadPanel && npMount && uploadPanel.parentElement !== npMount) npMount.appendChild(uploadPanel);
+  const capPanel = document.getElementById("captionTimelinePanel");
+  const capMount = document.getElementById("capTimelineMount");
+  if (capPanel && capMount && capPanel.parentElement !== capMount) capMount.appendChild(capPanel);
 }
 
 function setLocalPreview(file) {
@@ -1438,6 +1452,29 @@ function loadProject(data) {
   state.projects = state.projects.slice(0, 20);
   renderLibrary();
   $("#generateButton").disabled = false;
+  applyCreateConfig(data.createConfig);
+}
+
+// Terapkan konfigurasi create yang tersimpan di manifest saat project dibuka ulang.
+function applyCreateConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return;
+  try {
+    if (cfg.genMode) {
+      $$("#genModeSegmented button").forEach((b) => b.classList.toggle("active", b.dataset.genmode === cfg.genMode));
+      const label = document.getElementById("maxCeilingLabel");
+      if (label) label.textContent = generationMode() === "manual" ? "Fixed duration (detik)" : "Max clip duration (detik)";
+    }
+    if (Number(cfg.maxDuration)) { const el = $("#maxCeilingInput"); if (el) el.value = String(Number(cfg.maxDuration)); }
+    if (Number(cfg.maxClips)) { const el = $("#maxClipsSelect"); if (el) el.value = String(Number(cfg.maxClips)); }
+    if (cfg.hookStrategy) { const el = $("#hookStrategySelect"); if (el) el.value = cfg.hookStrategy; }
+    if (typeof cfg.focus === "string") { const el = $("#focusInput"); if (el) el.value = cfg.focus; }
+    if (cfg.ratio && RATIO_PRESETS.includes(cfg.ratio)) setRatio(cfg.ratio);
+    if (cfg.captionTemplateId) {
+      state.captionTemplateId = cfg.captionTemplateId;
+      const tpl = window.ClipmeCaptionTemplates && window.ClipmeCaptionTemplates.getById(cfg.captionTemplateId);
+      if (tpl) applyCaptionTemplate(tpl, { previewOnly: true });
+    }
+  } catch {}
 }
 
 // ── Banner progres job di dashboard utama ──────────────────────────────────
@@ -2053,7 +2090,8 @@ async function exportSelectedClip() {
 
 $("#videoInput").addEventListener("change", (event) => attachFile(event.target.files[0]));
 
-$("#newProjectBtn").addEventListener("click", () => openNewProjectModal());
+// ---- Create workspace: satu pintu masuk — view studio (tanpa modal duplikat) ----
+$("#newProjectBtn").addEventListener("click", openCreateWorkspace);
 
 $("#dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -2089,6 +2127,7 @@ $("#generateButton").addEventListener("click", async () => {
   renderClipSkeleton();
   showJobProgress("Generate clips", { indeterminate: true });
   try {
+    persistCreateConfig();
     const response = await fetch(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2140,6 +2179,7 @@ async function startHookAnalysis() {
   const label = state.sourceName || "Analysis";
   showJobProgress(JOB_LABELS["upload-analyze"], { indeterminate: true });
   try {
+    persistCreateConfig();
     const response = await fetch(`/api/projects/${state.projectId}/analyze-hook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2158,6 +2198,8 @@ async function startHookAnalysis() {
     setActiveClipOrEmpty(clips[0]);
     uploadStatus.textContent = `${clips.length} clips ready`;
     showToast(`Analisis hook viral selesai: ${(result && result.transcriptStatus) || ""} - ${clips.length} clip.`);
+    persistCreateConfig();
+    openResultsForProject(state.projectId);
   } catch (err) {
     settleJobProgress("error", err.message);
     await failProcessingView(err);
@@ -3973,7 +4015,107 @@ $("#clearExports").addEventListener("click", async () => {
 // belum ada, tampil "—".
 
 function openCreateWorkspace() {
-  openNewProjectModal();
+  showView("newproject");
+  const dz = $("#dropzone");
+  if (dz) { dz.classList.add("dragging"); setTimeout(() => dz.classList.remove("dragging"), 600); }
+}
+
+// ---- CAPTION WORKSPACE renderer ----
+let capLibFilter = "";
+function renderCaptionsWorkspace() {
+  if (!window.ClipmeCaptionTemplates) return;
+  const list = document.getElementById("capLibList");
+  if (!list) return;
+  list.innerHTML = "";
+  const q = capLibFilter.trim().toLowerCase();
+  const activeId = state.captionTemplateId || window.ClipmeCaptionTemplates.DEFAULT_TEMPLATE_ID;
+  let shown = 0;
+  for (const t of window.ClipmeCaptionTemplates.TEMPLATES) {
+    if (q && !(t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q))) continue;
+    shown++;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `tpl-card ${t.id === activeId ? "selected" : ""}`;
+    card.dataset.tplId = t.id;
+    const swatch = document.createElement("span");
+    swatch.className = "tpl-swatch";
+    Object.assign(swatch.style, window.ClipmeCaptionTemplates.swatchStyle(t));
+    swatch.textContent = "Aa";
+    const name = document.createElement("strong");
+    name.textContent = t.name;
+    const cat = document.createElement("span");
+    cat.className = "tpl-cat";
+    cat.textContent = `${t.category} · ${t.style}`;
+    card.append(swatch, name, cat);
+    card.addEventListener("click", () => {
+      applyCaptionTemplate(t, { previewOnly: true });
+      renderCaptionsWorkspace();
+    });
+    list.appendChild(card);
+  }
+  const countEl = document.getElementById("capLibCount");
+  if (countEl) countEl.textContent = `${shown}/${window.ClipmeCaptionTemplates.TEMPLATES.length}`;
+  renderCaptionPreview(activeId);
+}
+
+function renderCaptionPreview(templateId) {
+  const tpl = window.ClipmeCaptionTemplates && window.ClipmeCaptionTemplates.getById(templateId);
+  const wrap = document.getElementById("capPreviewLines");
+  const nameEl = document.getElementById("capPreviewName");
+  if (!wrap || !tpl) return;
+  if (nameEl) nameEl.textContent = tpl.name;
+  wrap.innerHTML = "";
+  for (const line of ["This hook stops the scroll instantly", "kata kedua untuk timing karaoke"]) {
+    const el = document.createElement("span");
+    el.className = "cap-line";
+    Object.assign(el.style, window.ClipmeCaptionTemplates.swatchStyle(tpl));
+    el.style.fontSize = `${Math.round(26 * (tpl.sizeScale || 1))}px`;
+    el.textContent = line;
+    wrap.appendChild(el);
+  }
+  wrap.style.bottom = `${Math.round((1 - (tpl.position || 0.76)) * 100)}%`;
+  const props = document.getElementById("capProps");
+  if (props) {
+    props.innerHTML = "";
+    const rows = [
+      ["Template", tpl.name], ["Category", tpl.category], ["Style preset", tpl.style],
+      ["Font", tpl.fontFamily], ["Color", tpl.color || "preset"], ["Size scale", `×${tpl.sizeScale}`],
+      ["Position", `${Math.round((tpl.position || 0.76) * 100)}%`]
+    ];
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      props.append(dt, dd);
+    }
+  }
+}
+
+// ---- SETTINGS view ----
+let settingsLoadedOnce = false;
+async function fillSettingsView() {
+  const body = document.getElementById("setSysBody");
+  if (!body || settingsLoadedOnce) return;
+  try {
+    const r = await fetch("/api/system");
+    const d = await r.json();
+    body.innerHTML = "";
+    const rows = [
+      ["App", "Clipper Studio desktop"],
+      ["STT engine", d.sttEngine || d.stt || "faster-whisper"],
+      ["Device", d.device || d.runtime?.sttDevice || "auto"],
+      ["FFmpeg", d.ffmpeg || "bundled bin/ffmpeg.exe"],
+      ["Queue", d.queueMax ? `max ${d.queueMax} job` : "ready"],
+      ["Data root", d.dataRoot || d.dataDir || "(userData)"]
+    ];
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = String(v);
+      body.append(dt, dd);
+    }
+    settingsLoadedOnce = true;
+  } catch {
+    body.innerHTML = '<div class="empty-state">System info tidak tersedia.</div>';
+  }
 }
 
 let dashBusy = false;
@@ -5337,7 +5479,66 @@ function fillResultIntel(clip) {
   $("#rtEnd").textContent = formatTime(Math.min(resultsState.duration || clip.end, clip.end));
 
   renderResTranscript(clip);
+  renderClipMetadataCard(clip);
   $("#riStatus").textContent = "";
+}
+
+// ---- AI METADATA GENERATOR (title/description/hashtags) — Results card ----
+let metaInflight = new Set();
+
+function renderClipMetadataCard(clip) {
+  const m = clip.metadata || null;
+  const titleEl = document.getElementById("riMetaTitle");
+  const descEl = document.getElementById("riMetaDesc");
+  const tagsEl = document.getElementById("riMetaTags");
+  if (!titleEl) return;
+  titleEl.textContent = m && m.title ? m.title : "—";
+  descEl.textContent = m && m.description ? m.description : "—";
+  tagsEl.textContent = m && Array.isArray(m.hashtags) && m.hashtags.length ? m.hashtags.join(" ") : "—";
+  const regenBtn = document.getElementById("riMetaRegen");
+  if (regenBtn) {
+    regenBtn.disabled = metaInflight.has(clip.id);
+    regenBtn.textContent = metaInflight.has(clip.id) ? "GENERATING…" : "REGENERATE";
+  }
+  // Auto-generate sekali saat clip dipilih bila metadata belum ada.
+  if (!m && !metaInflight.has(clip.id) && resultsState.projectId) {
+    generateClipMetadata(clip, { quiet: true });
+  }
+}
+
+async function generateClipMetadata(clip, opts = {}) {
+  if (!resultsState.projectId || !clip) return;
+  if (metaInflight.has(clip.id)) return;
+  metaInflight.add(clip.id);
+  renderClipMetadataCard(clip);
+  try {
+    const r = await fetch(`/api/projects/${resultsState.projectId}/metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clipId: clip.id, regenerate: !!opts.regenerate })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Gagal generate metadata.");
+    clip.metadata = d.metadata;
+    const live = (resultsState.clips || []).find((c) => c.id === clip.id);
+    if (live) live.metadata = d.metadata;
+    if (!opts.quiet) showToast("Metadata di-generate dari konten clip.");
+  } catch (err) {
+    if (!opts.quiet) showToast(err.message || "Metadata gagal.");
+  } finally {
+    metaInflight.delete(clip.id);
+    renderClipMetadataCard(clip);
+  }
+}
+
+function metadataTextFor(clip) {
+  const m = clip && clip.metadata;
+  if (!m) return { title: "", description: "", hashtags: "" };
+  return {
+    title: String(m.title || "").trim(),
+    description: String(m.description || "").trim(),
+    hashtags: Array.isArray(m.hashtags) ? m.hashtags.join(" ").trim() : ""
+  };
 }
 
 function renderResTranscript(clip) {
@@ -5572,71 +5773,212 @@ async function saveStudioToServer() {
 
 $("#saveProjectBtn").addEventListener("click", () => saveStudioToServer());
 
-// ---- New Project modal: bikin project dengan nama + pilih sumber ----
-// Video  → file picker existing (attachFile → upload → PATCH nama).
-// YouTube→ URL dipindah ke kolom Analyze existing (proses & nama sama).
-function openNewProjectModal() {
-  $("#npName").value = $("#projectNameInput").value || "";
-  $("#npUrl").value = "";
-  $$(".np-source button").forEach((b) => b.classList.toggle("active", b.dataset.npsrc === "video"));
-  $("#npUrlRow").style.display = "none";
-  $("#npVideoHint").style.display = "";
-  document.getElementById("newProjectModal").hidden = false;
-  $("#npName").focus();
+// ---- Template Gallery: library caption template dengan preview nyata ----
+const CAPTION_TPL = (typeof window !== "undefined" && window.ClipmeCaptionTemplates) ? window.ClipmeCaptionTemplates : null;
+let tplState = { search: "", category: "All", selectedId: "" };
+
+function openTemplateGallery() {
+  if (!CAPTION_TPL) return;
+  const modal = document.getElementById("templateGalleryModal");
+  if (!modal) return;
+  tplState.selectedId = "";
+  renderTplCategories();
+  renderTplGrid();
+  modal.hidden = false;
 }
 
-function closeNewProjectModal() {
-  document.getElementById("newProjectModal").hidden = true;
+function closeTemplateGallery() {
+  const modal = document.getElementById("templateGalleryModal");
+  if (modal) modal.hidden = true;
 }
 
-$$(".np-source button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    $$(".np-source button").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const isYt = btn.dataset.npsrc === "youtube";
-    $("#npUrlRow").style.display = isYt ? "" : "none";
-    $("#npVideoHint").style.display = isYt ? "none" : "";
-    if (isYt) $("#npUrl").focus();
-  });
-});
-
-$("#npCreateBtn").addEventListener("click", () => {
-  const name = $("#npName").value.trim();
-  $("#projectNameInput").value = name;
-  const isYt = $(".np-source button.active") && $(".np-source button.active").dataset.npsrc === "youtube";
-  if (isYt) {
-    const urls = $("#npUrl").value.trim();
-    if (!urls) { showToast("Paste URL YouTube dulu."); return; }
-    closeNewProjectModal();
-    showView("studio");
-    $("#videoUrl").value = urls;
-    $("#videoUrl").focus();
-    showToast("Klik Analyze untuk mulai analisis YouTube.");
-  } else {
-    closeNewProjectModal();
-    showView("studio");
-    const input = document.getElementById("videoInput");
-    if (input) input.click();
+function renderTplCategories() {
+  const wrap = document.getElementById("tplCategories");
+  if (!wrap || !CAPTION_TPL) return;
+  const cats = ["All", ...CAPTION_TPL.CATEGORIES];
+  wrap.innerHTML = "";
+  for (const cat of cats) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `tpl-chip ${tplState.category === cat ? "active" : ""}`;
+    chip.textContent = cat;
+    chip.addEventListener("click", () => { tplState.category = cat; renderTplCategories(); renderTplGrid(); });
+    wrap.appendChild(chip);
   }
-});
+}
 
-$("#npCancelBtn").addEventListener("click", closeNewProjectModal);
-document.getElementById("newProjectModal").addEventListener("click", (event) => {
-  if (event.target.id === "newProjectModal") closeNewProjectModal();
-});
+function tplMatches(t) {
+  const q = tplState.search.trim().toLowerCase();
+  const okCat = tplState.category === "All" || t.category === tplState.category;
+  const okQ = !q || t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q);
+  return okCat && okQ;
+}
+
+function renderTplGrid() {
+  const grid = document.getElementById("tplGrid");
+  if (!grid || !CAPTION_TPL) return;
+  grid.innerHTML = "";
+  const list = CAPTION_TPL.TEMPLATES.filter(tplMatches);
+  const countEl = document.getElementById("tplCount");
+  if (countEl) countEl.textContent = `${list.length}/${CAPTION_TPL.TEMPLATES.length}`;
+  for (const t of list) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `tpl-card ${tplState.selectedId === t.id ? "selected" : ""}`;
+    card.dataset.tplId = t.id;
+    const swatch = document.createElement("span");
+    swatch.className = "tpl-swatch";
+    Object.assign(swatch.style, CAPTION_TPL.swatchStyle(t));
+    swatch.textContent = "Aa";
+    const name = document.createElement("strong");
+    name.textContent = t.name;
+    const cat = document.createElement("span");
+    cat.className = "tpl-cat";
+    cat.textContent = `${t.category} · ${t.style}${t.color ? " · " + t.color : ""}`;
+    card.append(swatch, name, cat);
+    card.addEventListener("click", () => {
+      tplState.selectedId = t.id;
+      grid.querySelectorAll(".tpl-card").forEach((c) => c.classList.toggle("selected", c.dataset.tplId === t.id));
+      applyCaptionTemplate(t, { previewOnly: true });
+    });
+    grid.appendChild(card);
+  }
+}
+
+function applyCaptionTemplate(t, opts = {}) {
+  if (!t) return;
+  const styleSel = $("#captionStyleSelect");
+  const fontSel = $("#captionFontSelect");
+  const colorIn = $("#captionColor");
+  const sizeIn = $("#captionSize");
+  const posIn = $("#captionPosition");
+  if (!styleSel || !fontSel) return;
+  styleSel.value = t.style;
+  fontSel.value = t.fontFamily;
+  if (colorIn && t.color) colorIn.value = t.color;
+  if (sizeIn && t.sizeScale) sizeIn.value = Math.round(23 * t.sizeScale);
+  if (posIn && t.position) posIn.value = Math.round(t.position * 100);
+  state.captionTemplateId = t.id;
+  for (const el of [styleSel, fontSel, colorIn, sizeIn, posIn]) {
+    if (el) el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+  }
+  if (!opts.previewOnly) {
+    saveSettingsDebounced();
+    closeTemplateGallery();
+    showToast(`Template "${t.name}" diterapkan.`);
+  }
+}
+
+if ($("#templateGalleryBtn")) {
+  $("#templateGalleryBtn").addEventListener("click", openTemplateGallery);
+}
+if ($("#tplCloseBtn")) $("#tplCloseBtn").addEventListener("click", closeTemplateGallery);
+if ($("#tplSearch")) {
+  $("#tplSearch").addEventListener("input", () => {
+    tplState.search = $("#tplSearch").value;
+    renderTplGrid();
+  });
+}
+if ($("#tplApplyBtn")) {
+  $("#tplApplyBtn").addEventListener("click", () => {
+    if (!tplState.selectedId || !CAPTION_TPL) { showToast("Pilih satu template dulu."); return; }
+    applyCaptionTemplate(CAPTION_TPL.getById(tplState.selectedId));
+  });
+}
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !document.getElementById("newProjectModal").hidden) {
-    closeNewProjectModal();
+  if (event.key === "Escape" && !document.getElementById("templateGalleryModal").hidden) {
+    closeTemplateGallery();
   }
   if (event.key === "Escape" && !document.getElementById("batchModal").hidden) {
     document.getElementById("batchModal").hidden = true;
   }
 });
 
+// ---- Generation mode segmented control ----
+$$("#genModeSegmented button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$("#genModeSegmented button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const label = document.getElementById("maxCeilingLabel");
+    if (label) label.textContent = generationMode() === "manual" ? "Fixed duration (detik)" : "Max clip duration (detik)";
+    saveSettingsDebounced();
+  });
+});
+
 $("#backToResultsBtn").addEventListener("click", () => {
   if (resultsState.projectId) openResultsForProject(resultsState.projectId);
   else showView("results");
 });
+
+// ---- Metadata card actions (Results) ----
+function currentMetaClip() {
+  return (resultsState.clips || []).find((c) => c.id === resultsState.selectedClipId) || null;
+}
+if ($("#riMetaTitleCopy")) {
+  $("#riMetaTitleCopy").addEventListener("click", () => copyToClipboard(metadataTextFor(currentMetaClip()).title, "title"));
+  $("#riMetaDescCopy").addEventListener("click", () => copyToClipboard(metadataTextFor(currentMetaClip()).description, "description"));
+  $("#riMetaTagsCopy").addEventListener("click", () => copyToClipboard(metadataTextFor(currentMetaClip()).hashtags, "hashtags"));
+  $("#riMetaCopyAll").addEventListener("click", () => {
+    const m = metadataTextFor(currentMetaClip());
+    const text = [`TITLE\n${m.title || "—"}`, `DESCRIPTION\n${m.description || "—"}`, `HASHTAGS\n${m.hashtags || "—"}`].join("\n\n");
+    copyToClipboard(m.title ? text : "", "semua metadata");
+  });
+  $("#riMetaRegen").addEventListener("click", () => {
+    const clip = currentMetaClip();
+    if (clip) generateClipMetadata(clip, { regenerate: true });
+  });
+}
+
+// ---- Create workspace: back-link + aspect ratio sync + workspace mode ----
+if ($("#backToProjectsBtn")) $("#backToProjectsBtn").addEventListener("click", () => showView("library"));
+if ($("#npBackBtn")) $("#npBackBtn").addEventListener("click", () => showView("library"));
+if ($("#libNewProjectBtn")) $("#libNewProjectBtn").addEventListener("click", openCreateWorkspace);
+if ($("#sidebarNewProjectBtn")) $("#sidebarNewProjectBtn").addEventListener("click", openCreateWorkspace);
+if ($("#capOpenLibraryBtn")) $("#capOpenLibraryBtn").addEventListener("click", openTemplateGallery);
+if ($("#setOpenTemplates")) $("#setOpenTemplates").addEventListener("click", () => { showView("captions"); openTemplateGallery(); });
+if ($("#setOpenIntegrations")) $("#setOpenIntegrations").addEventListener("click", () => showView("integrations"));
+if ($("#setRefreshBtn")) $("#setRefreshBtn").addEventListener("click", () => { settingsLoadedOnce = false; fillSettingsView(); });
+if ($("#capLibSearch")) {
+  $("#capLibSearch").addEventListener("input", () => {
+    capLibFilter = $("#capLibSearch").value;
+    renderCaptionsWorkspace();
+  });
+}
+
+$$("#createRatioSegmented button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$("#createRatioSegmented button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    setRatio(btn.dataset.cratio);
+    saveSettingsDebounced();
+  });
+});
+document.addEventListener("click", (event) => {
+  const rb = event.target.closest && event.target.closest("#previewPanel .segmented [data-ratio]");
+  if (!rb) {
+    document.querySelectorAll("#createRatioSegmented button").forEach((b) => b.classList.toggle("active", b.dataset.cratio === currentRatio()));
+  }
+}, true);
+
+// ---- Project create-config persistence ----
+async function persistCreateConfig() {
+  if (!state.projectId) return;
+  try {
+    await fetch(`/api/projects/${state.projectId}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ createConfig: {
+        genMode: generationMode(),
+        maxDuration: Number(($("#maxCeilingInput") && $("#maxCeilingInput").value) || 90),
+        maxClips: Number(($("#maxClipsSelect") && $("#maxClipsSelect").value) || 6),
+        hookStrategy: ($("#hookStrategySelect") && $("#hookStrategySelect").value) || "balanced",
+        focus: ($("#focusInput") && $("#focusInput").value.trim()) || "",
+        ratio: currentRatio(),
+        captionTemplateId: state.captionTemplateId || ""
+      } })
+    });
+  } catch {}
+}
 
 // Strip konfigurasi render final — semua nilai dari state nyata yang sama
 // dengan yang dikirim ke pipeline export.
@@ -5648,8 +5990,10 @@ function updateFinalPreviewStrip() {
   fmtEl.textContent = RATIO_LABELS[currentRatio()] || currentRatio();
   const capEl = document.getElementById("fpCaptions");
   if (capEl) {
+    const tpl = state.captionTemplateId && window.ClipmeCaptionTemplates
+      ? window.ClipmeCaptionTemplates.getById(state.captionTemplateId) : null;
     capEl.textContent = autoCaptionEnabled()
-      ? `ON · ${(($("#captionStyleSelect") && $("#captionStyleSelect").value) || "").toUpperCase()}`
+      ? (tpl ? `ON — ${tpl.name}` : `ON · ${(($("#captionStyleSelect") && $("#captionStyleSelect").value) || "").toUpperCase()}`)
       : "OFF";
   }
   const durEl = document.getElementById("fpDuration");
@@ -5991,8 +6335,14 @@ function populatePubSources() {
   }
 }
 
-async function copyToClipboard(text, label) {
+async function copyToClipboard(text, label, statusEl) {
   const value = String(text == null ? "" : text);
+  const status = statusEl || $("#pubCopyStatus");
+  if (!value.trim() || value.trim() === "—") {
+    if (status) status.textContent = "Kosong — isi/generate metadata dulu.";
+    showToast(`${label} masih kosong — tidak ada yang disalin.`);
+    return false;
+  }
   let ok = false;
   // Jalur 1: Clipboard API (butuh halaman focused — di Electron sering gagal).
   try {
@@ -6021,12 +6371,13 @@ async function copyToClipboard(text, label) {
     }
   }
   if (ok) {
-    $("#pubCopyStatus").textContent = `Copied ${label}.`;
+    if (status) status.textContent = `Copied ${label}.`;
     showToast(`Copied ${label}.`);
   } else {
-    $("#pubCopyStatus").textContent = "Gagal menyalin.";
+    if (status) status.textContent = "Gagal menyalin.";
     showToast("Clipboard diblokir — blok teks lalu Ctrl+C manual.");
   }
+  return ok;
 }
 
 function pubChecklistUpdate() {
@@ -6907,8 +7258,9 @@ function collectSettings() {
     speakerCut: !!$("#speakerCutToggle")?.checked,
     faceTrack: !!$("#faceTrackToggle")?.checked,
     autoCaption: autoCaptionEnabled(),
-    durationMode: ($("#durationModeSelect") && $("#durationModeSelect").value) || "AUTO",
-    fixedDuration: Number(($("#fixedDurationInput") && $("#fixedDurationInput").value) || 30)
+    captionTemplateId: state.captionTemplateId || "",
+    genMode: generationMode(),
+    maxCeiling: Number(($("#maxCeilingInput") && $("#maxCeilingInput").value) || 90)
   };
 }
 
@@ -6940,11 +7292,16 @@ function loadSettings() {
   const act = $("#autoCaptionToggle");
   if (act && data.autoCaption != null) act.checked = !!data.autoCaption;
   syncAutoCaptionToggle();
-  const dm = $("#durationModeSelect");
-  if (dm && data.durationMode) dm.value = data.durationMode;
-  const fd = $("#fixedDurationInput");
-  if (fd) fd.value = String(Number(data.fixedDuration) || 30);
-  syncDurationModeUi();
+  state.captionTemplateId = data.captionTemplateId || "";
+  if (data.genMode) {
+    $$("#genModeSegmented button").forEach((b) => b.classList.toggle("active", b.dataset.genmode === data.genMode));
+    const label = document.getElementById("maxCeilingLabel");
+    if (label) label.textContent = generationMode() === "manual" ? "Fixed duration (detik)" : "Max clip duration (detik)";
+  }
+  if (Number(data.maxCeiling)) {
+    const mci = $("#maxCeilingInput");
+    if (mci) mci.value = String(Number(data.maxCeiling));
+  }
   applyCaptionPosition();
 }
 
@@ -7101,7 +7458,8 @@ async function bootCheck(name, label, work) {
 }
 
 async function bootstrapApplication() {
-  // Paralel — total waktu tunggu = check terlambat, bukan jumlah semua.
+  mountWorkspaces();
+  // Paralel - total waktu tunggu = check terlambat, bukan jumlah semua.
   const checks = await Promise.all([
     bootCheck("system", "Connecting to the local engine…", async () => {
       const response = await fetch("/api/system");

@@ -254,17 +254,30 @@ test("settings: speakerCut & faceTrack benar-benar masuk analisis lokal server",
 // ── Phase 1: Dashboard / command center ─────────────────────────────────────
 test("dashboard: nav lengkap (7 view) & dashboard jadi landing default", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const v of ["dashboard", "studio", "library", "exports", "publish", "results", "analytics", "dna"]) {
+  for (const v of ["dashboard", "library", "exports", "publish", "results", "analytics", "dna"]) {
     assert.ok(html.includes(`data-view="${v}"`), `nav item ${v} must exist`);
     assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} must exist`);
   }
+  assert.ok(html.includes('data-view-panel="studio"'), "editor panel (studio) still exists — reachable via OPEN IN STUDIO");
+  assert.ok(html.includes('data-view-panel="newproject"'), "dedicated new-project workspace panel exists");
   const dash = html.indexOf('data-view-panel="dashboard"');
   const studio = html.indexOf('data-view-panel="studio"');
   assert.ok(dash > -1 && studio > dash, "dashboard panel must precede studio");
   const active = html.slice(html.lastIndexOf("<div", dash), dash);
   assert.match(active, /class="app-view page-view active"/, "dashboard must be the initial active view");
-  // Intelligence dikelompokkan sendiri di sidebar
-  assert.ok(html.includes("Intelligence</p>"), "sidebar Intelligence group label");
+  // Sidebar IA final: Tools group + NEW PROJECT CTA; studio bukan nav sama sekali;
+  // workspace dedikasi: newproject / captions / settings
+  assert.ok(html.includes("Tools</p>"), "sidebar Tools group label");
+  assert.ok(html.includes('id="sidebarNewProjectBtn"'), "primary NEW PROJECT CTA in sidebar");
+  assert.ok(!html.includes('data-view="studio"'), "old create nav item fully removed");
+  for (const v of ["captions", "settings"]) {
+    assert.ok(html.includes(`data-view="${v}"`), `nav ${v} exists`);
+    assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} exists`);
+  }
+  assert.ok(!html.includes('data-view="newproject"'), "newproject is an ACTION (button), not a sidebar destination");
+  assert.ok(html.includes('data-view-panel="newproject"'), "newproject workspace panel exists");
+  assert.match(script, /mountWorkspaces\(\);/, "workspaces mounted at boot");
+  assert.match(script, /function renderCaptionsWorkspace/, "caption workspace renderer");
 });
 
 test("dashboard: 4 KPI card & nilainya dari data nyata (anti-mock)", () => {
@@ -382,25 +395,48 @@ test("phase3: handoff Processing→Results & Dashboard RECENT RESULTS dari data 
 test("dashboard: CTA New Project membuka modal pembuatan project", () => {
   const block = script.slice(script.indexOf("// ================= DASHBOARD"));
   const open = block.slice(block.indexOf("function openCreateWorkspace"), block.indexOf("let dashBusy"));
-  assert.match(open, /openNewProjectModal\(\)/, "CTA opens the new-project modal");
+  assert.match(open, /showView\("newproject"\)/, "CTA navigates to the dedicated New Project workspace");
   assert.match(script, /initDashboard\(\);/, "dashboard di-init saat boot");
 });
 
-test("phase4: modal New Project menyimpan nama & reuse alur upload/YouTube existing", () => {
+test("create-workspace: ClipProfit flow — mode, ceiling, template library, tanpa modal duplikat", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const id of ["newProjectModal", "npName", "npUrl", "npCreateBtn", "npCancelBtn"]) {
-    assert.ok(html.includes(`id="${id}"`), `modal part ${id} must exist`);
+  // Modal lama HAPUS — tidak boleh ada dua alur create yang bersaing
+  assert.ok(!html.includes('id="newProjectModal"'), "legacy new-project modal removed");
+  for (const id of ["genModeSegmented", "maxCeilingInput", "maxClipsSelect", "templateGalleryBtn", "hookStrategySelect", "focusInput"]) {
+    assert.ok(html.includes(`id="${id}"`), `create workspace part ${id} must exist`);
   }
-  const block = script.slice(script.indexOf("// ---- New Project modal"), script.indexOf("// Strip konfigurasi render final"));
-  // nama distage ke input yang SAMA dipakai applyProjectNamePatch (Phase 2)
-  assert.match(block, /\$\("#projectNameInput"\)\.value = name/, "staged name flows into existing PATCH mechanism");
-  // jalur video tetap pakai file picker/upload existing
-  assert.match(block, /getElementById\("videoInput"\)/, "video path reuses existing picker");
-  assert.match(block, /input\.click\(\)/, "picker opened via existing input");
-  // jalur youtube memindah URL ke kolom Analyze existing
-  assert.match(block, /\$\("#videoUrl"\)\.value = urls/, "youtube path reuses Analyze field");
-  // esc menutup modal
-  assert.match(block, /"Escape"/, "Esc closes the modal");
+  assert.match(html, /GENERATE BEST CLIPS/, "primary CTA present");
+  assert.match(html, /id="templateGalleryModal"/, "caption template gallery exists");
+  const block = script.slice(script.indexOf("function generationMode()"), script.indexOf("function formatBytes"));
+  // Generation modes harus nyata: mengubah payload durationMode/maxDuration
+  assert.match(block, /gm === "manual"/, "MANUAL mode branch exists");
+  assert.match(block, /durationMode: "FIXED", fixedDuration: ceiling/, "MANUAL locks duration");
+  assert.match(block, /maxDuration:\s*ceiling/, "HYBRID passes hard ceiling to AI");
+  // Template library: pilihan template menerapkan kontrol render yang benar-benar dipakai export
+  const tplBlock = script.slice(script.indexOf("function applyCaptionTemplate"), script.indexOf("// ---- Generation mode segmented"));
+  for (const sel of ["#captionStyleSelect", "#captionFontSelect", "#captionColor", "#captionSize", "#captionPosition"]) {
+    assert.ok(tplBlock.includes(`$("${sel}")`), `template applies real control ${sel}`);
+  }
+});
+
+test("metadata: generator server-side + copy buttons pakai nilai aktual (bukan placeholder)", () => {
+  const metaSlice = server.slice(server.indexOf("function composeClipMetadata"), server.indexOf("async function handleAnalyzeHook"));
+  assert.match(metaSlice, /deepTitle/, "title dari deep title engine");
+  assert.match(metaSlice, /hashtags/, "hashtags dari analysis");
+  assert.match(server, /\.add\("POST", "\/api\/projects\/:projectId\/metadata"/, "metadata endpoint registered");
+  assert.match(server, /\.add\("POST", "\/api\/projects\/:projectId\/config"/, "config endpoint registered");
+  // Copy TIDAK menyalin placeholder saat kosong — harus menolak dengan pesan.
+  const copyFn = script.slice(script.indexOf("async function copyToClipboard"), script.indexOf("function pubChecklistUpdate"));
+  assert.match(copyFn, /masih kosong/, "empty value refused, never copies placeholder");
+  assert.doesNotMatch(copyFn, /\|\| "—"/, "no silent dash fallback");
+  // Metadata card wired ke endpoint + regenerate
+  const metaUi = script.slice(script.indexOf("function renderClipMetadataCard"), script.indexOf("function updateWorkspaceMode"));
+  assert.match(metaUi, /\/api\/projects\/\$\{resultsState\.projectId\}\/metadata/, "card fetches real metadata");
+  assert.match(script, /persistCreateConfig\(\)/, "create config persisted on generate");
+  // NO PREVIEW RULE: setelah generate → langsung ke Results, bukan menumpuk clip di create workspace
+  const analyzeFlow = script.slice(script.indexOf("async function startHookAnalysis"), script.indexOf("async function startHookAnalysis") + 3200);
+  assert.match(analyzeFlow, /openResultsForProject\(state\.projectId\)/, "generate routes to RESULTS workspace");
 });
 
 // ── Phase 2: Engine readiness + processing workspace (REAL, no mock) ────────
@@ -808,7 +844,7 @@ test("phase6: production insights dari data export asli — tanpa klaim AI/predi
 
 test("phase6: quick actions dashboard + nav lengkap (10 view)", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const v of ["dashboard", "studio", "library", "exports", "publish", "calendar", "results", "intel", "analytics", "dna", "integrations"]) {
+  for (const v of ["dashboard", "library", "exports", "publish", "calendar", "results", "intel", "analytics", "dna", "integrations", "captions", "settings"]) {
     assert.ok(html.includes(`data-view="${v}"`), `nav ${v}`);
     if (v !== "dashboard") assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v}`);
   }

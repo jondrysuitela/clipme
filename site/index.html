@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clipper Studio — Turn long videos into viral-ready clips</title>
+  <meta name="description" content="Clipper Studio is an AI-powered desktop video studio: auto-clipping, face tracking, captions, and one-click publishing to YouTube, TikTok, and Facebook.">
+  <style>
+    :root { --bg:#0c1013; --panel:#12171b; --line:#232b31; --text:#e8edf1; --muted:#9aa7b0; --accent:#4f8cff; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,-apple-system,sans-serif; line-height:1.6; }
+    a { color:var(--accent); text-decoration:none; }
+    .wrap { max-width:1000px; margin:0 auto; padding:0 24px; }
+    nav { display:flex; justify-content:space-between; align-items:center; padding:20px 0; border-bottom:1px solid var(--line); }
+    .logo { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.06em; }
+    .mark { background:var(--accent); color:#fff; border-radius:8px; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:14px; }
+    header { text-align:center; padding:90px 0 60px; }
+    h1 { font-size:44px; line-height:1.15; margin-bottom:18px; }
+    h1 span { color:var(--accent); }
+    .sub { color:var(--muted); font-size:18px; max-width:640px; margin:0 auto 32px; }
+    .cta { display:inline-block; background:var(--accent); color:#fff; padding:14px 36px; border-radius:10px; font-weight:600; font-size:16px; }
+    .cta:hover { filter:brightness(1.1); }
+    section { padding:56px 0; }
+    h2 { font-size:28px; margin-bottom:28px; text-align:center; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; }
+    .card h3 { font-size:17px; margin-bottom:8px; }
+    .card p { color:var(--muted); font-size:14.5px; }
+    .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; counter-reset:step; }
+    .step { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; position:relative; }
+    .step::before { counter-increment:step; content:"0" counter(step); color:var(--accent); font-weight:800; font-size:22px; display:block; margin-bottom:8px; }
+    .platforms { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:8px; }
+    .pill { border:1px solid var(--line); border-radius:999px; padding:8px 20px; color:var(--muted); font-size:14px; }
+    footer { border-top:1px solid var(--line); margin-top:40px; padding:32px 0; color:var(--muted); font-size:14px; text-align:center; }
+    @media (max-width:640px){ h1{font-size:32px} header{padding:60px 0 40px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <!-- TODO: ganti teks brand bila perlu -->
+      <div class="logo"><span class="mark">CS</span> CLIPPER STUDIO</div>
+      <a href="privacy.html">Privacy Policy</a>
+    </nav>
+
+    <header>
+      <h1>Turn long videos into<br><span>viral-ready clips</span></h1>
+      <p class="sub">AI-powered desktop studio: smart clipping, face tracking, auto captions, and direct publishing to your favorite platforms.</p>
+      <!-- TODO: arahkan ke halaman download installer yang sebenarnya -->
+      <a class="cta" href="#">Download for Windows</a>
+    </header>
+
+    <section>
+      <h2>Everything you need to clip fast</h2>
+      <div class="grid">
+        <div class="card"><h3>AI Smart Clipping</h3><p>Hook detection and duration engine find the most engaging moments automatically.</p></div>
+        <div class="card"><h3>Cut-to-Face Tracking</h3><p>Active speaker detection keeps the right person in frame on every cut.</p></div>
+        <div class="card"><h3>Auto Captions</h3><p>Word-level caption sync powered by offline speech recognition — your video never leaves your machine.</p></div>
+        <div class="card"><h3>Title &amp; Hashtag Engine</h3><p>Ready-to-post titles, descriptions, and hashtags generated from your transcript.</p></div>
+        <div class="card"><h3>Publish Everywhere</h3><p>Connect once, publish directly via official platform APIs.</p></div>
+        <div class="card"><h3>Schedule Planner</h3><p>Local calendar planning so your posting rhythm stays consistent.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <div class="steps">
+        <div class="step">Import your long-form video</div>
+        <div class="step">Let the AI find hooks and cut clips with captions</div>
+        <div class="step">Publish or schedule to your connected channels</div>
+      </div>
+    </section>
+
+    <section style="text-align:center">
+      <h2>Publish directly to</h2>
+      <div class="platforms">
+        <span class="pill">YouTube</span>
+        <span class="pill">TikTok</span>
+        <span class="pill">Facebook Pages</span>
+      </div>
+    </section>
+
+    <footer>
+      <p><!-- TODO: ganti email kontak dengan email asli Anda sebelum deploy -->
+        Contact: <strong>jondrysuitela4@gmail.com</strong></p>
+      <p style="margin-top:8px">&copy; 2026 ClipProvit · <a href="privacy.html">Privacy Policy</a></p>
+    </footer>
+  </div>
+</body>
+</html>
