@@ -2,20 +2,18 @@
 // Kredensial aplikasi dari env/integrations.json: YT_OAUTH_CLIENT_ID/SECRET.
 const crypto = require("crypto");
 const tokenManager = require("../token-manager");
+const credentials = require("../credentials");
 
 const AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
 const SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"];
 
 function creds() {
-  let file = {};
-  try { file = JSON.parse(require("fs").readFileSync(path.join(process.cwd(), "integrations.json"), "utf8")); } catch {}
   return {
-    id: process.env.YT_OAUTH_CLIENT_ID || file.YT_OAUTH_CLIENT_ID || "",
-    secret: process.env.YT_OAUTH_CLIENT_SECRET || file.YT_OAUTH_CLIENT_SECRET || ""
+    id: credentials.get("YT_OAUTH_CLIENT_ID"),
+    secret: credentials.get("YT_OAUTH_CLIENT_SECRET")
   };
 }
-const path = require("path");
 
 module.exports = {
   id: "youtube",

@@ -15,8 +15,21 @@ if (accel !== "cpu") {
 let mainWindow;
 let server;
 
+// Port tetap supaya OAuth redirect URI stabil (TikTok/Meta butuh URI exact
+// yang terdaftar di developer console). Fallback ke port acak bila terpakai.
+const OAUTH_PORT = Number(process.env.CLIPFORGE_OAUTH_PORT || 43110);
+
+async function startAppServer() {
+  try {
+    return await startServer(OAUTH_PORT, "127.0.0.1");
+  } catch {
+    console.warn(`[OAuth] Port ${OAUTH_PORT} terpakai — fallback port acak. Connect sosmed mungkin gagal sesi ini.`);
+    return await startServer(0, "127.0.0.1");
+  }
+}
+
 app.whenReady().then(async () => {
-  server = await startServer(0, "127.0.0.1");
+  server = await startAppServer();
 
   mainWindow = new BrowserWindow({
     width: 1400,

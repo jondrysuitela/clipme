@@ -1,7 +1,7 @@
 {
   "name": "clipper-studio",
   "productName": "Clipper Studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop video clipper & caption studio with offline STT",
   "author": "Clipper Studio",
   "private": true,
@@ -48,6 +48,8 @@
       "build/icon.ico",
       "stt-config.json",
       "stt/**/*.py",
+      "social/**/*.js",
+      "integrations.json",
       "electron/**/*",
       "package.json"
     ],

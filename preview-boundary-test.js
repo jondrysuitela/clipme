@@ -723,7 +723,7 @@ test("phase6: /api/integrations deteksi nyata — connected hanya bila kredensia
   assert.match(fn, /process\.env\[k\]/, "reads real env credentials");
   assert.match(fn, /integrations\.json/, "or explicit config file");
   assert.match(server, /\.add\("GET", "\/api\/integrations"/, "route registered");
-  for (const pair of [["YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET"], ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"], ["IG_APP_ID", "IG_APP_SECRET"], ["FB_APP_ID", "FB_APP_SECRET"]]) {
+  for (const pair of [["YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET"], ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"], ["FB_APP_ID", "FB_APP_SECRET"]]) {
     for (const k of pair) assert.ok(fn.includes(`"${k}"`), `platform credential key ${k} declared`);
   }
 });

@@ -1,19 +1,17 @@
 // TikTok provider — Content Posting API (official OAuth + PKCE).
 // Kredensial: TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET.
 const crypto = require("crypto");
-const path = require("path");
 const tokenManager = require("../token-manager");
+const credentials = require("../credentials");
 
 const AUTH = "https://www.tiktok.com/v2/auth/authorize/";
 const TOKEN = "https://open.tiktokapis.com/v2/oauth/token/";
 const SCOPES = ["user.info.basic", "video.upload", "video.publish"];
 
 function creds() {
-  let file = {};
-  try { file = JSON.parse(require("fs").readFileSync(path.join(process.cwd(), "integrations.json"), "utf8")); } catch {}
   return {
-    key: process.env.TIKTOK_CLIENT_KEY || file.TIKTOK_CLIENT_KEY || "",
-    secret: process.env.TIKTOK_CLIENT_SECRET || file.TIKTOK_CLIENT_SECRET || ""
+    key: credentials.get("TIKTOK_CLIENT_KEY"),
+    secret: credentials.get("TIKTOK_CLIENT_SECRET")
   };
 }
 

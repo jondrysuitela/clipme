@@ -6618,6 +6618,7 @@ async function handleClipThumb(req, res, params) {
 // ===== Social Account Hub (PHASE 3) =========================================
 const socialManager = require(path.join(ROOT, "social", "manager.js"));
 const socialTokens = require(path.join(ROOT, "social", "token-manager.js"));
+const socialCredentials = require(path.join(ROOT, "social", "credentials.js"));
 const oauthStates = new Map(); // state -> {provider, exp}
 
 function publicAccount(providerId) {
@@ -6689,19 +6690,53 @@ async function handleSocialAccountInfo(req, res, params) {
 }
 
 function handleIntegrations(req, res) {
+  // Deteksi nyata: env > file user (~/.clipper-studio/integrations.json) >
+  // integrations.json bawaan repo (dev mode). Tanpa kredensial = NOT CONNECTED.
   let fileCfg = {};
   try {
     fileCfg = JSON.parse(fs.readFileSync(path.join(__dirname, "integrations.json"), "utf8")) || {};
   } catch {}
-  const has = (...keys) => keys.every((k) => Boolean(process.env[k]) || Boolean(fileCfg[k]));
+  const userCfg = socialCredentials.configured();
+  const has = (...keys) => keys.every((k) => Boolean(process.env[k]) || Boolean(fileCfg[k]) || Boolean(userCfg[k]));
   sendJson(res, 200, {
     platforms: [
       { id: "youtube", name: "YouTube", connected: has("YT_OAUTH_CLIENT_ID", "YT_OAUTH_CLIENT_SECRET") },
       { id: "tiktok", name: "TikTok", connected: has("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET") },
-      { id: "instagram", name: "Instagram", connected: has("IG_APP_ID", "IG_APP_SECRET") },
       { id: "facebook", name: "Facebook", connected: has("FB_APP_ID", "FB_APP_SECRET") || has("FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET") }
     ]
   });
+}
+
+// BYO credentials — user isi kredensial OAuth miliknya sendiri via UI.
+// Secret TIDAK PERNAH dikirim balik ke renderer; hanya status configured.
+function handleIntegrationsConfigGet(req, res) {
+  const configured = socialCredentials.configured();
+  const envKeys = Object.fromEntries(
+    socialCredentials.KEYS.map((k) => [k.key, Boolean(process.env[k])])
+  );
+  sendJson(res, 200, {
+    file: socialCredentials.USER_FILE,
+    keys: socialCredentials.KEYS.map((k) => ({ ...k, configured: configured[k.key], fromEnv: envKeys[k.key] }))
+  });
+}
+
+async function handleIntegrationsConfigSave(req, res) {
+  try {
+    const raw = (await collectRequest(req, 1)).toString("utf8");
+    let body = {};
+    try { body = JSON.parse(raw); } catch { throw new Error("Body bukan JSON valid."); }
+    const payload = body && typeof body.keys === "object" && body.keys ? body.keys : body;
+    const filtered = {};
+    for (const k of socialCredentials.KEYS.map((x) => x.key)) {
+      if (typeof payload[k] === "string") filtered[k] = payload[k];
+    }
+    if (!Object.keys(filtered).length) throw new Error("Tidak ada kredensial valid untuk disimpan.");
+    socialCredentials.setMany(filtered);
+    console.log("[integrations] kredensial user diperbarui.");
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 400, { error: err.message });
+  }
 }
 
 async function handleSttModels(req, res) {
@@ -6757,6 +6792,8 @@ router
   .add("POST", "/api/localai/download-model", handleLocalAIDownloadModel)
     .add("GET", "/api/stt/models", handleSttModels)
   .add("GET", "/api/integrations", handleIntegrations)
+  .add("GET", "/api/integrations/config", handleIntegrationsConfigGet)
+  .add("POST", "/api/integrations/config", handleIntegrationsConfigSave)
   .add("GET", "/api/social/accounts", handleSocialAccounts)
   .add("GET", "/api/social/connect/:provider", handleSocialConnect)
   .add("POST", "/api/social/disconnect/:provider", handleSocialDisconnect)

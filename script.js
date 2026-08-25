@@ -6340,6 +6340,7 @@ async function pollSocialConnected(providerId, timeoutMs = 120000) {
 async function loadIntegrations() {
   const wrap = document.getElementById("integList");
   if (!wrap) return;
+  loadIntegrationsConfig();
   let platforms = [];
   let socialAccounts = [];
   try {
@@ -6375,7 +6376,7 @@ async function loadIntegrations() {
     sub.dataset.socialSub = p.id;
     sub.textContent = connected
       ? (soc && soc.connected ? "Terhubung via akun." : "Kredensial terdeteksi di server.")
-      : "Belum terhubung — klik Connect untuk otorisasi resmi.";
+      : "Belum terhubung — aktifkan toggle untuk otorisasi resmi.";
     main.appendChild(nameEl);
     main.appendChild(sub);
 
@@ -6385,38 +6386,7 @@ async function loadIntegrations() {
 
     const actions = document.createElement("div");
     actions.className = "integ-actions";
-    if (!connected && soc) {
-      const connectBtn = document.createElement("button");
-      connectBtn.type = "button";
-      connectBtn.className = "primary-button compact";
-      connectBtn.textContent = `Connect ${p.name}`;
-      connectBtn.addEventListener("click", async () => {
-        connectBtn.disabled = true;
-        try {
-          const r = await fetch(`/api/social/connect/${p.id}`);
-          const d = await r.json();
-          if (!r.ok || !d.url) throw new Error(d.error || "Gagal membuat URL otorisasi.");
-          window.open(d.url, "_blank");
-          connectBtn.textContent = "Menunggu otorisasi…";
-          const result = await pollSocialConnected(p.id);
-          if (result && result.account) {
-            sub.textContent = `${result.account.accountName}${result.account.username ? " (" + result.account.username + ")" : ""}`;
-            pill.className = "status-pill status-pill-done integ-state";
-            pill.textContent = "🟢 CONNECTED";
-            showToast(`${p.name} terhubung.`);
-            updatePublishAvailability(true);
-          } else {
-            connectBtn.textContent = `Connect ${p.name}`;
-            showToast("Otorisasi belum selesai / dibatalkan.");
-          }
-        } catch (err) {
-          showToast(err.message || "Connect gagal.");
-        } finally {
-          connectBtn.disabled = false;
-        }
-      });
-      actions.appendChild(connectBtn);
-    } else if (connected && soc) {
+    if (soc && soc.connected) {
       anyConnected = true;
       const infoBtn = document.createElement("button");
       infoBtn.type = "button";
@@ -6429,19 +6399,68 @@ async function loadIntegrations() {
           sub.textContent = r.ok ? `${d.account.accountName}${d.account.username ? " (" + d.account.username + ")" : ""}` : (d.error || "Sesi berakhir.");
         } catch {}
       });
-      const discBtn = document.createElement("button");
-      discBtn.type = "button";
-      discBtn.className = "ghost-button compact danger-btn";
-      discBtn.textContent = "Disconnect";
-      discBtn.addEventListener("click", async () => {
-        if (!confirm(`Putuskan koneksi ${p.name}? (hanya autentikasi — konten lokal aman)`)) return;
+      actions.appendChild(infoBtn);
+    }
+
+    // Toggle menghubungkan: ON = mulai OAuth resmi, OFF = putuskan koneksi.
+    const toggleWrap = document.createElement("label");
+    toggleWrap.className = "integ-toggle";
+    const toggleInput = document.createElement("input");
+    toggleInput.type = "checkbox";
+    toggleInput.setAttribute("aria-label", `Hubungkan ${p.name}`);
+    toggleInput.checked = Boolean(soc && soc.connected);
+    if (!soc) {
+      toggleInput.disabled = true;
+      toggleWrap.title = "Modul OAuth belum tersedia untuk platform ini.";
+    }
+    toggleInput.addEventListener("change", async () => {
+      if (toggleInput.checked) {
+        toggleInput.disabled = true;
+        try {
+          const r = await fetch(`/api/social/connect/${p.id}`);
+          const d = await r.json();
+          if (!r.ok || !d.url) throw new Error(d.error || "Gagal membuat URL otorisasi.");
+          window.open(d.url, "_blank");
+          sub.textContent = "Menunggu otorisasi di browser…";
+          const result = await pollSocialConnected(p.id);
+          if (result && result.account) {
+            sub.textContent = `${result.account.accountName}${result.account.username ? " (" + result.account.username + ")" : ""}`;
+            pill.className = "status-pill status-pill-done integ-state";
+            pill.textContent = "🟢 CONNECTED";
+            showToast(`${p.name} terhubung.`);
+            updatePublishAvailability(true);
+            loadIntegrations();
+          } else {
+            toggleInput.checked = false;
+            sub.textContent = "Otorisasi belum selesai / dibatalkan.";
+            showToast("Otorisasi belum selesai / dibatalkan.");
+          }
+        } catch (err) {
+          toggleInput.checked = false;
+          sub.textContent = connected ? sub.textContent : "Belum terhubung — aktifkan toggle untuk otorisasi resmi.";
+          showToast(err.message || "Connect gagal.");
+        } finally {
+          toggleInput.disabled = false;
+        }
+      } else {
+        if (!confirm(`Putuskan koneksi ${p.name}? (hanya autentikasi — konten lokal aman)`)) {
+          toggleInput.checked = true;
+          return;
+        }
         try { await fetch(`/api/social/disconnect/${p.id}`, { method: "POST" }); } catch {}
+        sub.textContent = "Belum terhubung — aktifkan toggle untuk otorisasi resmi.";
+        pill.className = "status-pill status-pill-queued integ-state";
+        pill.textContent = "⚪ NOT CONNECTED";
+        updatePublishAvailability(false);
         loadIntegrations();
         showToast(`${p.name} diputus.`);
-      });
-      actions.appendChild(infoBtn);
-      actions.appendChild(discBtn);
-    }
+      }
+    });
+    const sliderEl = document.createElement("span");
+    sliderEl.className = "integ-slider";
+    toggleWrap.appendChild(toggleInput);
+    toggleWrap.appendChild(sliderEl);
+    actions.appendChild(toggleWrap);
 
     card.appendChild(main);
     card.appendChild(pill);
@@ -6467,6 +6486,83 @@ function updatePublishAvailability(anyConnected) {
 }
 
 $("#integRefreshBtn").addEventListener("click", () => loadIntegrations());
+
+// ---- BYO credentials: form kredensial OAuth milik user (disimpan lokal) ----
+let integCredsBuilt = false;
+async function loadIntegrationsConfig() {
+  const form = document.getElementById("integCredsForm");
+  if (!form) return;
+  try {
+    const r = await fetch("/api/integrations/config");
+    const d = await r.json();
+    if (!r.ok || !Array.isArray(d.keys)) throw new Error(d.error || "Gagal memuat konfigurasi.");
+    if (!integCredsBuilt) {
+      const groups = {};
+      for (const k of d.keys) (groups[k.platform] = groups[k.platform] || []).push(k);
+      for (const [plat, keys] of Object.entries(groups)) {
+        const h = document.createElement("div");
+        h.className = "integ-creds-group";
+        h.textContent = plat;
+        form.appendChild(h);
+        for (const k of keys) {
+          const row = document.createElement("label");
+          row.className = "integ-creds-row";
+          const span = document.createElement("span");
+          span.textContent = k.label;
+          const input = document.createElement("input");
+          input.type = k.secret ? "password" : "text";
+          input.dataset.key = k.key;
+          input.placeholder = k.configured ? "••••••••  (terisi — kosongkan untuk mempertahankan)" : "belum diisi";
+          row.append(span, input);
+          form.appendChild(row);
+        }
+      }
+      integCredsBuilt = true;
+    } else {
+      for (const k of d.keys) {
+        const input = form.querySelector(`input[data-key="${k.key}"]`);
+        if (input && !input.value) input.placeholder = k.configured ? "••••••••  (terisi — kosongkan untuk mempertahankan)" : "belum diisi";
+      }
+    }
+    const filled = d.keys.filter((k) => k.configured).length;
+    const hint = document.getElementById("integCredsHint");
+    if (hint) hint.textContent = `${filled}/${d.keys.length} kredensial terisi${d.file ? " · " + d.file : ""}`;
+  } catch (err) {
+    console.error("[integrations-config]", err);
+  }
+}
+
+(async () => {
+  const saveBtn = document.getElementById("integCredsSaveBtn");
+  if (!saveBtn) return;
+  saveBtn.addEventListener("click", async () => {
+    const form = document.getElementById("integCredsForm");
+    if (!form) return;
+    const payloadKeys = {};
+    let changed = 0;
+    for (const input of form.querySelectorAll("input[data-key]")) {
+      if (input.value.trim()) { payloadKeys[input.dataset.key] = input.value.trim(); changed++; }
+    }
+    if (!changed) { showToast("Isi minimal satu kredensial baru. Kolom kosong mempertahankan nilai lama."); return; }
+    saveBtn.disabled = true;
+    try {
+      const r = await fetch("/api/integrations/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys: payloadKeys })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Gagal menyimpan kredensial.");
+      showToast("Kredensial tersimpan lokal (file 0600).");
+      for (const input of form.querySelectorAll("input[data-key]")) input.value = "";
+      loadIntegrations();
+    } catch (err) {
+      showToast(err.message || "Gagal menyimpan kredensial.");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+})();
 
 // Publishing → SCHEDULE (local plan): pindah ke Calendar dengan export terpilih
 $("#pubScheduleBtn").addEventListener("click", () => {

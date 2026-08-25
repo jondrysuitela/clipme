@@ -1,18 +1,16 @@
 // Meta provider (Facebook Pages — video Reels/upload via Graph API).
 // Kredensial: FB_APP_ID/FB_APP_SECRET (atau FACEBOOK_*).
-const path = require("path");
 const tokenManager = require("../token-manager");
+const credentials = require("../credentials");
 
 const V = "v19.0";
 const AUTH = `https://www.facebook.com/${V}/dialog/oauth`;
 const SCOPES = ["pages_show_list", "pages_manage_posts", "pages_read_engagement"];
 
 function creds() {
-  let file = {};
-  try { file = JSON.parse(require("fs").readFileSync(path.join(process.cwd(), "integrations.json"), "utf8")); } catch {}
   return {
-    id: process.env.FB_APP_ID || file.FB_APP_ID || process.env.FACEBOOK_APP_ID || "",
-    secret: process.env.FB_APP_SECRET || file.FB_APP_SECRET || process.env.FACEBOOK_APP_SECRET || ""
+    id: credentials.get("FB_APP_ID") || credentials.get("FACEBOOK_APP_ID"),
+    secret: credentials.get("FB_APP_SECRET") || credentials.get("FACEBOOK_APP_SECRET")
   };
 }
 
