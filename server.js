@@ -151,6 +151,12 @@ function ensureDirectorInit() {
   }
 }
 
+// AI Camera Director (Wayin-style reframe) — lampiran module, tidak mengubah engine.
+const clipmeCameraDirector = (() => {
+  try { return require(path.join(ROOT, "clipme-camera-director.js")); }
+  catch (e) { console.error("Gagal memuat clipme-camera-director.js:", e.message); return null; }
+})();
+
 const CLIPME_DEEP_TITLE_ENGINE_MODULE = path.join(ROOT, "clipme-deep-title-engine.js");
 
 function loadClipmeDeepTitleEngine() {
@@ -4020,6 +4026,51 @@ function writeExportInfo(outputDir, outputName, payload, manifest) {
   } catch {}
 }
 
+// AI REFRAME (Wayin-style): camera path dari face timeline → satu filter crop
+// dengan ekspresi nested if(between(t,...)) — koordinat dalam space sumber,
+// jadi harus berjalan SEBELUM debar/scale/crop.
+function detectCameraSubjects(faceTimeline) {
+  const detections = [];
+  if (!Array.isArray(faceTimeline)) return detections;
+  for (const fr of faceTimeline) {
+    if (!Array.isArray(fr.faces) || !fr.faces.length) continue;
+    const best = fr.faces.reduce((a, b) => {
+      const score = (s) => (Number(s.w) * Number(s.h) * (Number(s.confidence) || 0.7));
+      return score(b) > score(a) ? b : a;
+    }, null);
+    if (best) detections.push({
+      t: Number(fr.t_ms) / 1000,
+      x: Number(best.x) || 0, y: Number(best.y) || 0,
+      w: Number(best.w) || 0.2, h: Number(best.h) || 0.25,
+      confidence: Number(best.confidence) || 0.7
+    });
+  }
+  return detections;
+}
+
+function buildReframeCropFilter(cameraPath, srcW, srcH) {
+  if (!clipmeCameraDirector || !Array.isArray(cameraPath) || cameraPath.length < 2) return null;
+  // cropFilter → "crop=W:H:X:Y"
+  const parse = (p) => { const c = clipmeCameraDirector.cropFilter(p, srcW, srcH, srcW, srcH); return c.match(/^crop=(\d+):(\d+):(-?\d+):(-?\d+)/); };
+  const w = parse(cameraPath[0])[1];
+  const h = parse(cameraPath[0])[2];
+  let xExpr = `(in_w-${w})/2`;
+  let yExpr = `(in_h-${h})/2`;
+  for (let i = cameraPath.length - 1; i >= 0; i--) {
+    const a = i > 0 ? cameraPath[i - 1].t : cameraPath[i].t - 0.5;
+    const b = cameraPath[i].t;
+    if (b <= a) continue;
+    const m = parse(cameraPath[i]);
+    if (!m) continue;
+    xExpr = `if(between(t,${a.toFixed(3)},${b.toFixed(3)}),${m[3]},${xExpr})`;
+    yExpr = `if(between(t,${a.toFixed(3)},${b.toFixed(3)}),${m[4]},${yExpr})`;
+  }
+  const lastM = parse(cameraPath[cameraPath.length - 1]);
+  xExpr = `if(gte(t,${(cameraPath[cameraPath.length - 1].t - 0.4).toFixed(3)}),${lastM[3]},${xExpr})`;
+  yExpr = `if(gte(t,${(cameraPath[cameraPath.length - 1].t - 0.4).toFixed(3)}),${lastM[4]},${yExpr})`;
+  return `crop=${w}:${h}:'${xExpr}':'${yExpr}'`;
+}
+
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   // Sanitasi terpusat — berlaku untuk semua jalur (single/batch/combined).
   payload.language = ["Indonesia", "English", "Mixed"].includes(payload.language) ? payload.language : "Indonesia";
@@ -4028,6 +4079,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   payload.captionColor = sanitizeColor(payload.captionColor);
   payload.speakerCut = !!payload.speakerCut;
   payload.faceTrack = !!payload.faceTrack;
+  payload.reframe = !!payload.reframe;
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
   // Caption "off" atau segmen sudah dikirim client → tidak perlu STT sama sekali.
@@ -4068,9 +4120,10 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const cutDuration = end - start;
   payload.duration = cutDuration;
 
-  // Speaker Cut / Cut-to-Face analysis (if enabled).
+  // Speaker Cut / AI Reframe / Cut-to-Face analysis (if enabled).
   let speakerCutFilter = null;
-  if (payload.speakerCut && localAIModule) {
+  let reframeFilter = null;
+  if ((payload.speakerCut || payload.reframe) && localAIModule) {
     const videoFilePath = sourcePath;
     if (!videoFilePath) {
       throw new Error("Speaker Cut: Source video tidak ditemukan.");
@@ -4103,7 +4156,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
       audioPath: audioAnalysisPath, videoPath: videoFilePath, pythonPath: VENV_PYTHON,
       speakerScript: SPEAKER_DETECT_PY, faceScript: FACE_DETECT_PY, ffmpegPath: FFMPEG, modelsRoot: MODELS_ROOT,
       sampleFps: 3, minSegmentMs: 300, noiseDb: -35,
-      enableFaceTracking: payload.faceTrack, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
+      enableFaceTracking: payload.faceTrack || payload.reframe, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
       targetAspect: resolveRatio(payload.ratio),
       faceStartSeconds: analysisSourceIsClipSection ? 0 : originalStart,
       faceDurationSeconds: cutDuration
@@ -4144,6 +4197,19 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
         sourceVideoHeight
       );
     }
+
+    // AI REFRAME: camera path dari face timeline (subject tracking) → crop dinamis.
+    if (payload.reframe && analyzeResult) {
+      const subjects = detectCameraSubjects(analyzeResult.faceTimeline);
+      if (subjects.length && clipmeCameraDirector) {
+        const path = clipmeCameraDirector.generatePath(
+          subjects,
+          { width: sourceVideoWidth, height: sourceVideoHeight },
+          RATIO_PRESETS[resolveRatio(payload.ratio)]
+        );
+        reframeFilter = buildReframeCropFilter(path, sourceVideoWidth, sourceVideoHeight);
+      }
+    }
   }
 
   // Detect & remove baked-in black bars from the source window before cropping.
@@ -4180,7 +4246,10 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   }
 
   let filter;
-  if (speakerCutFilter) {
+  if (reframeFilter) {
+    // AI Reframe crop berada di space sumber → sebelum debar/scale/crop.
+    filterParts.pre = [reframeFilter, ...filterParts.debar, filterParts.scale, filterParts.crop];
+  } else if (speakerCutFilter) {
     // Face coordinates are measured in the original source coordinate space,
     // therefore this crop must run before any black-bar/content crop.
     filterParts.pre = [speakerCutFilter, ...filterParts.debar, filterParts.scale, filterParts.crop];

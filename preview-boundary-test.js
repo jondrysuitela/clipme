@@ -435,6 +435,20 @@ test("create-workspace: ClipProfit flow — mode, ceiling, template library, tan
   }
 });
 
+test("reframe: AI reframe (Wayin-style) terhubung ke export — camera path → crop dinamis", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(html.includes('id="reframeToggle"'), "AI Reframe toggle exists in editor settings");
+  const rb = server.indexOf("function buildReframeCropFilter");
+  const r = server.slice(rb, rb + 900);
+  assert.ok(r.includes('c.match(/^crop='), "buildReframeCropFilter parses crop=W:H:X:Y");
+  assert.match(server, /payload\.reframe = !!payload\.reframe/, "export honors reframe flag");
+  assert.match(server, /enableFaceTracking: payload\.faceTrack \|\| payload\.reframe/, "reframe forces face analysis");
+  assert.match(server, /reframeFilter = buildReframeCropFilter/, "camera path built into export filter");
+  assert.match(server, /filterParts\.pre = \[reframeFilter,/, "reframe filter runs before scale/crop");
+  const s = script.slice(script.indexOf("function exportClipPayloadFor"), script.indexOf("function exportClipPayloadFor") + 900);
+  assert.ok(s.includes("reframe: !!document.getElementById(\"reframeToggle\")?.checked,"), "client export payload sends reframe");
+});
+
 test("metadata: generator server-side + copy buttons pakai nilai aktual (bukan placeholder)", () => {
   const metaSlice = server.slice(server.indexOf("function composeClipMetadata"), server.indexOf("async function handleAnalyzeHook"));
   assert.match(metaSlice, /deepTitle/, "title dari deep title engine");

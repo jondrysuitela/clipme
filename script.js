@@ -1053,6 +1053,7 @@ async function analyzeSpeakerForClip() {
         noiseDb: -35,
         speakerCut: true,
         faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
         sourceW: previewVideo.videoWidth || 0,
         sourceH: previewVideo.videoHeight || 0,
         targetAspect: window.ClipmeCutToFace
@@ -2087,6 +2088,7 @@ async function exportSelectedClip() {
       audioBitrate: Number(state.audioBitrate) || 128,
       speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
       faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
       ratio: exportRatio,
       segments: exportSegments
     };
@@ -3966,6 +3968,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
           audioBitrate: Number(state.audioBitrate) || 128,
           speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
           faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -4043,6 +4046,7 @@ function exportClipPayloadFor(clip) {
     audioBitrate: Number(state.audioBitrate) || 128,
     speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
     faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
     segments: captionSegmentsForClip(clip)
   };
 }
@@ -6459,6 +6463,7 @@ async function startBatch() {
           audioBitrate: Number(state.audioBitrate) || 128,
           speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
           faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -7761,6 +7766,7 @@ function collectSettings() {
     captionPosition: state.captionPosition || 0.76,
     speakerCut: !!$("#speakerCutToggle")?.checked,
     faceTrack: !!$("#faceTrackToggle")?.checked,
+    reframe: !!$("#reframeToggle")?.checked,
     autoCaption: autoCaptionEnabled(),
     captionTemplateId: state.captionTemplateId || "",
     genMode: generationMode(),
@@ -7785,6 +7791,7 @@ function loadSettings() {
   if (data.captionPosition != null) state.captionPosition = Number(data.captionPosition);
   state.speakerCut = !!data.speakerCut;
   state.faceTrack = !!data.faceTrack;
+  state.reframe = !!data.reframe;
 
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
@@ -7793,6 +7800,8 @@ function loadSettings() {
   if (sct) sct.checked = state.speakerCut;
   const ftt = document.getElementById("faceTrackToggle");
   if (ftt) ftt.checked = state.faceTrack;
+  const rft = document.getElementById("reframeToggle");
+  if (rft) rft.checked = state.reframe;
   const act = $("#autoCaptionToggle");
   if (act && data.autoCaption != null) act.checked = !!data.autoCaption;
   syncAutoCaptionToggle();
@@ -7848,6 +7857,7 @@ const settingsControls = [
   ["input", "#captionPosition"],
   ["change", "#speakerCutToggle"],
   ["change", "#faceTrackToggle"],
+  ["change", "#reframeToggle"],
   ["change", "#autoCaptionToggle"],
   ["change", "#durationModeSelect"],
   ["input", "#fixedDurationInput"]
