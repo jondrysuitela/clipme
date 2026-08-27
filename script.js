@@ -2394,6 +2394,26 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  // Caption timeline shortcuts (J/K/L like professional NLEs)
+  if (timelineVisible && (event.code === "KeyJ" || event.code === "KeyK" || event.code === "KeyL")) {
+    event.preventDefault();
+    const activeVid = capActiveVideo();
+    if (event.code === "KeyK") {
+      // K = play/pause (same as Space)
+      if (activeVid.paused) activeVid.play().catch(() => {});
+      else activeVid.pause();
+    } else if (event.code === "KeyJ") {
+      // J = back 1 second
+      activeVid.currentTime = Math.max(0, activeVid.currentTime - 1);
+      updateCaptionPlayhead();
+    } else if (event.code === "KeyL") {
+      // L = forward 1 second
+      activeVid.currentTime = Math.min(activeVid.duration || 0, activeVid.currentTime + 1);
+      updateCaptionPlayhead();
+    }
+    return;
+  }
+
   if (event.ctrlKey || event.metaKey) {
     if (event.code === "KeyS") {
       event.preventDefault();
@@ -2447,6 +2467,26 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     setRatio(ratio);
     showToast(`Layout: ${ratio}`);
+  }
+
+  // Caption timeline: ArrowLeft/Right = ±5s (standard video player behavior)
+  if (timelineVisible && (key === "ArrowLeft" || key === "ArrowRight")) {
+    const activeVid = capActiveVideo();
+    event.preventDefault();
+    activeVid.currentTime = Math.max(0, Math.min(activeVid.duration || 0, activeVid.currentTime + (key === "ArrowRight" ? 5 : -5)));
+    updateCaptionPlayhead();
+    return;
+  }
+
+  // Results view toggle shortcut
+  if (event.code === "KeyV" && document.querySelector('[data-view-panel="results"].active')) {
+    event.preventDefault();
+    const list = document.getElementById("resultsClipList");
+    if (list) {
+      list.classList.toggle("horizontal-mode");
+      const toggle = document.getElementById("resViewToggle");
+      if (toggle) toggle.textContent = list.classList.contains("horizontal-mode") ? "\u2630 Grid" : "\u2630 List";
+    }
   }
 });
 
@@ -6269,6 +6309,15 @@ $("#resClearSelBtn").addEventListener("click", () => {
   updateResSelectionBar();
   applyResView();
 });
+if ($("#resViewToggle")) {
+  $("#resViewToggle").addEventListener("click", () => {
+    const list = document.getElementById("resultsClipList");
+    if (!list) return;
+    list.classList.toggle("horizontal-mode");
+    const btn = $("#resViewToggle");
+    if (btn) btn.textContent = list.classList.contains("horizontal-mode") ? "\u2630 Grid" : "\u2630 List";
+  });
+}
 
 // ---- Batch modal ----
 let batchRatio = "portrait";
