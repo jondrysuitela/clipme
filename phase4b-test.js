@@ -155,6 +155,10 @@ let projectId = null;
   });
 
   if (srv) {
+    // Cleanup: hapus project test agar tidak mencemari daftar proyek pengguna.
+    if (projectId) {
+      try { await fetch(`http://127.0.0.1:${srv.port}/api/projects/${projectId}`, { method: "DELETE" }); } catch {}
+    }
     try { srv.server.closeAllConnections && srv.server.closeAllConnections(); } catch {}
     await new Promise((r) => { srv.server.close(() => r()); setTimeout(r, 2500); });
   }

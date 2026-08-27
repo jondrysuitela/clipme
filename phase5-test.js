@@ -121,6 +121,10 @@ let srv = null;
     if (r.status === "FAIL") fail++;
   }
   console.log(`\n${results.length - fail}/${results.length} PASS`);
-  if (srv) { try { srv.server.close(); } catch {} }
+  if (srv) {
+    // Export pakai projectId palsu menciptakan dir cache sections — bersihkan.
+    try { await fetch(`http://127.0.0.1:${srv.port}/api/projects/00000000-0000-4000-8000-000000000000`, { method: "DELETE" }); } catch {}
+    try { srv.server.close(); } catch {}
+  }
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

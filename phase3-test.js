@@ -70,6 +70,7 @@ function postMultipartRaw(port, body, boundary) {
 }
 
 let srv;
+let uploadProjectId = null;
 (async () => {
   // ---------- syntax ----------
   for (const f of ["server.js", "script.js", "electron/main.js"]) {
@@ -151,6 +152,7 @@ let srv;
     const res = await postMultipartRaw(srv.port, body, "clipforge-test-boundary");
     if (res.status !== 200) throw new Error("upload status " + res.status + " body: " + res.body.slice(0, 400));
     if (!res.json || !res.json.id) throw new Error("missing id in response");
+    uploadProjectId = res.json.id;
     if (res.json.clips.length < 1) throw new Error("no clips built");
   });
 
@@ -297,6 +299,11 @@ let srv;
   }
   console.log(`\n${results.length - fails}/${results.length} passed`);
   if (srv) {
+    if (uploadProjectId) {
+      try { await fetch(`http://127.0.0.1:${srv.port}/api/projects/${uploadProjectId}`, { method: "DELETE" }); } catch {}
+    }
+    // Export pakai projectId palsu menciptakan dir cache sections kosong — bersihkan via API.
+    try { await fetch(`http://127.0.0.1:${srv.port}/api/projects/00000000-0000-4000-8000-000000000000`, { method: "DELETE" }); } catch {}
     try { srv.server.closeAllConnections?.(); } catch {}
     try { await new Promise((r) => { srv.server.close(() => r()); setTimeout(r, 3000); }); } catch {}
   }
