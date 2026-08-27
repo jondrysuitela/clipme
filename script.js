@@ -5614,12 +5614,13 @@ function applyResView() {
       card.appendChild(imgWrap);
     }
 
-    // Prominent title in horizontal mode
+    // Title (primary text, satu baris sumber)
     const titleEl = document.createElement("p");
     titleEl.className = "rc-title";
     titleEl.textContent = clip.deepTitle || clip.recommendedHook || clip.hook || `Clip ${String(clip.id).padStart(2, "0")}`;
     card.appendChild(titleEl);
 
+    // Meta: selector + CLIP xx + skor
     const head = document.createElement("div");
     head.className = "rc-head";
     const sel = document.createElement("label");
@@ -5643,7 +5644,7 @@ function applyResView() {
     scoreEl.className = "rc-score";
     const tierOfClip = scoreTierOf(clip.score);
     if (tierOfClip) scoreEl.classList.add(`tier-${tierOfClip.key.split(" ")[0].toLowerCase()}`);
-    scoreEl.textContent = clip.score != null ? String(Math.round(Number(clip.score))) : "—";
+    scoreEl.textContent = clip.score != null ? `★${Math.round(Number(clip.score))}` : "—";
     head.appendChild(idEl);
     head.appendChild(scoreEl);
     card.appendChild(head);
@@ -5653,59 +5654,33 @@ function applyResView() {
     time.textContent = `${formatTime(clip.start)} → ${formatTime(clip.end)} · ${dur}s`;
     card.appendChild(time);
 
-    const quoteText = clip.recommendedHook || clip.hook || clip.caption || "";
-    const quote = document.createElement("p");
-    quote.className = "rc-quote";
-    quote.textContent = quoteText ? `"${quoteText}"` : "—";
-    card.appendChild(quote);
-
-    if (clip.deepTitle && clip.deepTitle !== quoteText) {
-      const sub = document.createElement("p");
-      sub.className = "rc-title-sub";
-      sub.textContent = clip.deepTitle;
-      card.appendChild(sub);
-    }
-
-    if (analyzed || clip.hookType || clip.hookScore != null) {
-      const scores = document.createElement("div");
-      scores.className = "rc-scores";
-      const viral = document.createElement("span");
-      viral.innerHTML = `VIRAL<b>${clip.score != null ? Math.round(Number(clip.score)) : "—"}</b>`;
-      const hookS = document.createElement("span");
-      hookS.innerHTML = `HOOK<b>${clip.hookScore != null ? Math.round(Number(clip.hookScore)) : "—"}</b>`;
-      scores.appendChild(viral);
-      scores.appendChild(hookS);
-      card.appendChild(scores);
-    }
-
-    if (clip.hookType) {
-      const badges = document.createElement("div");
-      badges.className = "rc-badges";
-      const b = document.createElement("span");
-      b.className = "intel-badge";
-      b.textContent = `Hook: ${clip.hookType}`;
-      badges.appendChild(b);
-      card.appendChild(badges);
+    // Hook quote — hanya bila berbeda dari judul (hindari duplikat teks)
+    const quoteText = clip.recommendedHook || clip.hook || "";
+    if (quoteText && quoteText !== titleEl.textContent.trim()) {
+      const quote = document.createElement("p");
+      quote.className = "rc-quote";
+      quote.textContent = quoteText;
+      card.appendChild(quote);
     }
 
     if (clip.id === resultsState.analyzingClipId) {
       const st = document.createElement("p");
-      st.className = "rc-analyzing rc-title-sub";
+      st.className = "rc-analyzing";
       st.textContent = "ANALYZING…";
       card.appendChild(st);
     }
 
     const actions = document.createElement("div");
     actions.className = "rc-actions";
-    const prevBtn = document.createElement("button");
-    prevBtn.type = "button";
-    prevBtn.className = "primary-button compact";
-    prevBtn.textContent = "PREVIEW";
-    prevBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(true); });
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "primary-button compact";
+    playBtn.textContent = "PLAY";
+    playBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(true); });
     const studioBtn = document.createElement("button");
     studioBtn.type = "button";
-    studioBtn.className = "secondary-button compact";
-    studioBtn.textContent = "STUDIO";
+    studioBtn.className = "ghost-button compact";
+    studioBtn.textContent = "EDIT";
     studioBtn.addEventListener("click", (e) => { e.stopPropagation(); resultsState.selectedClipId = clip.id; handoffToStudio(false); });
     const pubBtn = document.createElement("button");
     pubBtn.type = "button";
@@ -5713,32 +5688,37 @@ function applyResView() {
     pubBtn.textContent = "PUBLISH";
     pubBtn.title = "Siapkan metadata publish dari intel clip ini";
     pubBtn.addEventListener("click", (e) => { e.stopPropagation(); openPublishForClip(clip); });
-    actions.appendChild(prevBtn);
+    actions.appendChild(playBtn);
     actions.appendChild(studioBtn);
     actions.appendChild(pubBtn);
     card.appendChild(actions);
 
-    // Inline copy buttons for metadata (visible in horizontal mode)
-    if (clip.deepTitle) {
+    // Copy button metadata (title + hashtags) — dipisah rapi dari action utama
+    const hasTags = Array.isArray(clip.analysis && clip.analysis.hashtags) && clip.analysis.hashtags.length;
+    if (clip.deepTitle || hasTags) {
       const metaRow = document.createElement("div");
       metaRow.className = "rc-meta-row";
-      const copyTitle = document.createElement("button");
-      copyTitle.type = "button";
-      copyTitle.className = "rc-copy-sm";
-      copyTitle.textContent = "Copy Title";
-      copyTitle.addEventListener("click", (e) => { e.stopPropagation(); copyToClipboard(clip.deepTitle, "title"); });
-      const copyTags = document.createElement("button");
-      copyTags.type = "button";
-      copyTags.className = "rc-copy-sm";
-      copyTags.textContent = "Copy Tags";
-      copyTags.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const tags = clip.analysis && clip.analysis.hashtags;
-        const text = Array.isArray(tags) ? tags.map((t) => String(t).startsWith("#") ? t : `#${t}`).join(" ") : "";
-        copyToClipboard(text, "hashtags");
-      });
-      metaRow.appendChild(copyTitle);
-      metaRow.appendChild(copyTags);
+      if (clip.deepTitle) {
+        const copyTitle = document.createElement("button");
+        copyTitle.type = "button";
+        copyTitle.className = "rc-copy-sm";
+        copyTitle.textContent = "Copy Title";
+        copyTitle.addEventListener("click", (e) => { e.stopPropagation(); copyToClipboard(clip.deepTitle, "title"); });
+        metaRow.appendChild(copyTitle);
+      }
+      if (hasTags) {
+        const copyTags = document.createElement("button");
+        copyTags.type = "button";
+        copyTags.className = "rc-copy-sm";
+        copyTags.textContent = "Copy Tags";
+        copyTags.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const tags = clip.analysis.hashtags;
+          const text = tags.map((t) => String(t).startsWith("#") ? t : `#${t}`).join(" ");
+          copyToClipboard(text, "hashtags");
+        });
+        metaRow.appendChild(copyTags);
+      }
       card.appendChild(metaRow);
     }
 
@@ -6023,10 +6003,11 @@ $("#resRetryBtn").addEventListener("click", () => {
   $("#resErrorBox").hidden = true;
   analyzeAllClips();
 });
-$("#riAnalyzeBtn").addEventListener("click", async () => {
+// "EXPORT & PUBLISH" — buka alur publish dengan metadata clip terpilih.
+$("#riAnalyzeBtn").addEventListener("click", () => {
   const clip = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
   if (!clip) { showToast("Pilih clip dulu."); return; }
-  await analyzeResultClip(clip);
+  openPublishForClip(clip);
 });
 $("#riPreviewBtn").addEventListener("click", () => handoffToStudio(true));
 $("#riStudioBtn").addEventListener("click", () => handoffToStudio(false));

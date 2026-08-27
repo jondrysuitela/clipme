@@ -2863,21 +2863,6 @@ textarea:focus-visible {
   gap: 4px;
   margin-top: auto;
 }
-.res-clip-list.horizontal-mode .rc-copy-sm {
-  flex: 1;
-  padding: 4px 0;
-  font-size: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: .12s;
-}
-.res-clip-list.horizontal-mode .rc-copy-sm:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
 .rc-card {
   border-bottom: 1px solid var(--line);
   padding: 14px 18px;
@@ -2899,12 +2884,31 @@ textarea:focus-visible {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
-.rc-title-sub { margin-top: 3px; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rc-scores { display: flex; gap: 18px; margin-top: 10px; font-size: 11px; color: var(--muted-dim); letter-spacing: .06em; }
-.rc-scores b { color: var(--text); font-size: 13px; margin-left: 6px; }
-.rc-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.rc-actions { display: flex; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+.rc-meta-row { display: flex; gap: 6px; margin-top: 8px; }
+.rc-copy-sm {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 10.5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: .12s;
+}
+.rc-copy-sm:hover { border-color: var(--accent); color: var(--text); }
+.rc-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .rc-analyzing { animation: dashPulse 1.3s ease-in-out infinite; color: var(--accent); }
+.rc-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 8px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 
 .res-intel-panel { position: sticky; top: 14px; }
 .ri-grid {
@@ -3263,7 +3267,9 @@ textarea:focus-visible {
   border-radius: 14px;
   margin-bottom: 14px;
 }
-#resVideoMount .video-stage { padding: 12px 0; }
+#resVideoMount .video-stage { padding: 14px 0; }
+#resVideoMount .phone-frame { width: min(48%, 420px); }
+#resVideoMount .phone-frame.wide { width: min(80%, 760px); }
 #resVideoMount .transport-row {
   flex-wrap: wrap;
   gap: 8px;
