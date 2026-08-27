@@ -5586,6 +5586,18 @@ function applyResView() {
         badge.textContent = clip.hookType;
         imgWrap.appendChild(badge);
       }
+      // Direct play overlay — klik thumbnail langsung putar video clip
+      const playOverlay = document.createElement("button");
+      playOverlay.type = "button";
+      playOverlay.className = "rc-play-overlay";
+      playOverlay.setAttribute("aria-label", `Play clip ${clip.id}`);
+      playOverlay.innerHTML = "&#9654;";
+      playOverlay.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resultsState.selectedClipId = clip.id;
+        handoffToStudio(true);
+      });
+      imgWrap.appendChild(playOverlay);
       card.appendChild(imgWrap);
     }
 

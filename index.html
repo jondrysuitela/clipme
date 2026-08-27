@@ -920,37 +920,15 @@
 
         <aside class="panel res-intel-panel" aria-label="Clip intelligence">
           <div class="panel-heading">
-            <h2>CLIP INTELLIGENCE</h2>
+            <h2>CLIP DETAILS</h2>
             <span class="status-pill" id="resIntelProvider" hidden></span>
           </div>
-          <div id="resIntelEmpty" class="empty-state">Select a clip to see its intelligence.</div>
+          <div id="resIntelEmpty" class="empty-state">Select a clip to see its details.</div>
           <div id="resIntelBody" hidden>
-            <div class="res-timeline" aria-label="Source timeline position of this clip">
-              <div class="rt-track"><span class="rt-region" id="rtRegion"></span></div>
-              <div class="rt-labels"><span id="rtStart">00:00</span><span id="rtEnd">00:00</span></div>
-            </div>
-            <dl class="ri-grid">
-              <dt>Timing</dt><dd id="riTiming">&mdash;</dd>
-              <dt>Duration</dt><dd id="riDuration">&mdash;</dd>
-              <dt>Viral score</dt><dd id="riScore">&mdash;</dd>
-              <dt>Hook score</dt><dd id="riHookScore">&mdash;</dd>
-              <dt>Hook type</dt><dd id="riHookType">&mdash;</dd>
-              <dt>Optimal duration</dt><dd id="riOptimal">&mdash;</dd>
-            </dl>
-            <p class="field-label">HOOK</p>
-            <div class="intel-block" id="riHook">&mdash;</div>
-            <p class="field-label">SUGGESTED TITLE</p>
-            <div class="intel-block" id="riTitle">No title generated yet.</div>
-            <p class="field-label">ALTERNATIVES</p>
-            <div class="intel-block" id="riAltTitles">&mdash;</div>
-            <p class="field-label">KEY MESSAGE</p>
-            <div class="intel-block" id="riKeyMessage">&mdash;</div>
-            <p class="field-label">TRANSCRIPT</p>
-            <div class="res-transcript" id="riTranscript"><div class="empty-state">Jalankan ANALYZE pada clip ini untuk mendapat baris transkrip bertimestamp.</div></div>
-            <p class="field-label">METADATA</p>
+            <!-- PRIMARY: Metadata (title / description / hashtags) -->
             <div class="meta-card" id="riMetaCard">
               <div class="meta-row"><span>Title</span><div class="meta-actions"><button class="ghost-button compact" id="riMetaTitleCopy" type="button">COPY TITLE</button><button class="ghost-button compact" id="riMetaRegen" type="button" title="Generate ulang title/description/hashtags dari konten clip">REGENERATE</button></div></div>
-              <div class="intel-block" id="riMetaTitle">&mdash;</div>
+              <div class="intel-block intel-block-title" id="riMetaTitle">&mdash;</div>
               <div class="meta-row"><span>Description</span><button class="ghost-button compact" id="riMetaDescCopy" type="button">COPY DESCRIPTION</button></div>
               <div class="intel-block" id="riMetaDesc">&mdash;</div>
               <div class="meta-row"><span>Hashtags</span><button class="ghost-button compact" id="riMetaTagsCopy" type="button">COPY HASHTAGS</button></div>
@@ -960,9 +938,37 @@
             <div class="res-intel-actions">
               <button class="primary-button compact" id="riPreviewBtn" type="button">PREVIEW</button>
               <button class="secondary-button compact" id="riStudioBtn" type="button">OPEN IN STUDIO</button>
-              <button class="ghost-button compact" id="riAnalyzeBtn" type="button">ANALYZE CLIP</button>
+              <button class="ghost-button compact" id="riAnalyzeBtn" type="button">EXPORT &amp; PUBLISH</button>
               <span class="caption-status" id="riStatus"></span>
             </div>
+            <!-- Analysis details (collapsed by default — real data, low clutter) -->
+            <details class="accordion-section" id="resIntelDetails" style="margin-top:10px">
+              <summary class="accordion-header"><h3>Analysis Details</h3><span class="accordion-icon">&#9660;</span></summary>
+              <div class="accordion-body">
+                <div class="res-timeline" aria-label="Source timeline position of this clip">
+                  <div class="rt-track"><span class="rt-region" id="rtRegion"></span></div>
+                  <div class="rt-labels"><span id="rtStart">00:00</span><span id="rtEnd">00:00</span></div>
+                </div>
+                <dl class="ri-grid">
+                  <dt>Timing</dt><dd id="riTiming">&mdash;</dd>
+                  <dt>Duration</dt><dd id="riDuration">&mdash;</dd>
+                  <dt>Viral score</dt><dd id="riScore">&mdash;</dd>
+                  <dt>Hook score</dt><dd id="riHookScore">&mdash;</dd>
+                  <dt>Hook type</dt><dd id="riHookType">&mdash;</dd>
+                  <dt>Optimal duration</dt><dd id="riOptimal">&mdash;</dd>
+                </dl>
+                <p class="field-label">HOOK</p>
+                <div class="intel-block" id="riHook">&mdash;</div>
+                <p class="field-label">SUGGESTED TITLE</p>
+                <div class="intel-block" id="riTitle">No title generated yet.</div>
+                <p class="field-label">ALTERNATIVES</p>
+                <div class="intel-block" id="riAltTitles">&mdash;</div>
+                <p class="field-label">KEY MESSAGE</p>
+                <div class="intel-block" id="riKeyMessage">&mdash;</div>
+                <p class="field-label">TRANSCRIPT</p>
+                <div class="res-transcript" id="riTranscript"><div class="empty-state">Jalankan ANALYZE pada clip ini untuk mendapat baris transkrip bertimestamp.</div></div>
+              </div>
+            </details>
           </div>
         </aside>
       </div>
