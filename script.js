@@ -1340,6 +1340,13 @@ function mountWorkspaces() {
   const capPanel = document.getElementById("captionTimelinePanel");
   const capMount = document.getElementById("capTimelineMount");
   if (capPanel && capMount && capPanel.parentElement !== capMount) capMount.appendChild(capPanel);
+  // Studio preview dipindah ke RESULTS — studio murni editor teks (tanpa video).
+  // ID semua tetap, jadi tidak ada regresi; preview utama ada di Results + Captions.
+  const previewPanel = document.querySelector(".preview-panel");
+  const resVideoMount = document.getElementById("resVideoMount");
+  if (previewPanel && resVideoMount && previewPanel.parentElement !== resVideoMount) {
+    resVideoMount.appendChild(previewPanel);
+  }
   // SEMUA kontrol auto-caption terkonsolidasi di Caption Workspace.
   const controlsMount = document.getElementById("capControlsMount");
   if (controlsMount) {
@@ -5992,10 +5999,16 @@ async function handoffToStudio(autoplay) {
     const liveClip = await ensureResultsProjectInStudio();
     if (!liveClip) throw new Error("Clip tidak ditemukan di project.");
     selectClip(liveClip);
-    showView("studio");
-    if (autoplay) playSelectedClip();
+    // Studio tidak memiliki preview lagi — preview hidup di RESULTS (video) &
+    // Captions (caption rate). Autoplay membuka Results dengan video terpilih.
+    if (autoplay) {
+      showView("results");
+      playSelectedClip();
+    } else {
+      showView("studio");
+    }
   } catch (err) {
-    showToast(err.message || "Gagal membuka Studio.");
+    showToast(err.message || "Gagal membuka preview.");
   }
 }
 

@@ -371,7 +371,7 @@ button {
 
 .studio-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.45fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(280px, 0.95fr) minmax(300px, 1fr);
   grid-template-rows: auto auto;
   gap: 16px;
   align-items: start;
@@ -3256,6 +3256,20 @@ textarea:focus-visible {
 .cap-lib-panel { max-height: 70vh; overflow-y: auto; }
 .tpl-grid-flat { max-height: 52vh; }
 .cap-preview-panel { min-height: 420px; display: flex; flex-direction: column; }
+
+/* Preview player di Results workspace (studio preview dihapus) */
+#resVideoMount { margin-top: 0; }
+#resVideoMount .preview-panel {
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+#resVideoMount .video-stage { padding: 12px 0; }
+#resVideoMount .transport-row {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
 .cap-stage { position: relative; flex: 1; padding: 18px; }
 .cap-frame {
   position: relative; width: min(300px, 80%); aspect-ratio: 9 / 16;
