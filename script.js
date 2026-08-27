@@ -2127,7 +2127,7 @@ async function exportSelectedClip() {
 $("#videoInput").addEventListener("change", (event) => attachFile(event.target.files[0]));
 
 // ---- Create workspace: satu pintu masuk — view studio (tanpa modal duplikat) ----
-$("#newProjectBtn").addEventListener("click", openCreateWorkspace);
+// newProjectBtn removed from topbar — sidebar is primary CTA
 
 $("#dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -6689,7 +6689,7 @@ $("#copyAllBtn").addEventListener("click", () => {
   const desc = $("#pubDesc").value.trim();
   const tags = $("#pubHashtags").value.trim();
   if (!title && !desc && !tags) {
-    showToast("Metadata masih kosong — klik ⚡ GENERATE METADATA dulu.");
+    showToast("Metadata masih kosong — klik Generate Metadata dulu.");
     return;
   }
   const blocks = [];
@@ -6804,7 +6804,7 @@ if ($("#pubExportBtn")) {
       showToast(err.message || "Export gagal.");
     } finally {
       btn.disabled = false;
-      btn.textContent = "⚡ EXPORT + SIAPKAN PUBLISH";
+      btn.textContent = "Export + Prepare for Publish";
     }
   });
 }

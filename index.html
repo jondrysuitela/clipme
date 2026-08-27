@@ -127,7 +127,6 @@
         <span class="status-pill status-pill-cancelled" id="studioDirtyPill" hidden title="Ada perubahan clip yang belum disimpan ke server">UNSAVED CHANGES</span>
         <button class="secondary-button" id="backToResultsBtn" type="button" hidden>BACK TO RESULTS</button>
         <button class="ghost-button" id="saveProjectBtn" type="button" hidden>SAVE</button>
-        <button class="primary-button" id="newProjectBtn" type="button">+ CREATE</button>
       </div>
     </div>
 
@@ -152,7 +151,6 @@
           <h1 id="dashGreeting">Good morning</h1>
           <p class="dash-sub">Turn long-form video into high-potential short-form clips.</p>
         </div>
-        <button class="primary-button" id="dashNewProjectBtn" type="button">+ CREATE</button>
         <div class="dash-quick">
           <button class="ghost-button compact" data-qview="exports" type="button">Exports</button>
           <button class="ghost-button compact" data-qview="calendar" type="button">Calendar</button>
@@ -308,12 +306,12 @@
               <span class="dz-size" id="dzFileSize"></span>
             </div>
           </div>
-          <button class="wide-button primary-button" id="analyzeHookBtn" type="button" style="width:100%; margin-top:8px; font-weight:800; letter-spacing:.06em" title="AI menganalisis video: STT transkrip penuh lalu AI Clip Director menemukan hook, struktur cerita, dan kandidat clip terbaik">
-            ⚡ GENERATE BEST CLIPS
+          <button class="wide-button primary-button" id="analyzeHookBtn" type="button" title="AI analyzes video: full STT transcript then AI Clip Director finds hooks, story structure, and best clip candidates">
+            Generate Best Clips
           </button>
           <div class="field-label" style="margin-top:10px">Project name (opsional)</div>
           <input class="inspector-input" id="projectNameInput" type="text" maxlength="80" placeholder="Nama project — kosongkan untuk otomatis">
-          <div class="settings-grid">
+          <div class="settings-grid" style="display:none">
             <label>Processing profile
               <select id="processingProfileSelect" title="AUTO memakai pipeline default yang ada. FAST/QUALITY menyusul di fase berikutnya.">
                 <option value="auto" selected>AUTO — pipeline default</option>
@@ -364,39 +362,45 @@
                 <option value="controversy">Controversy</option>
               </select>
             </label>
-            <input class="inspector-input" id="focusInput" type="text" maxlength="120" placeholder="Focus topik (opsional) — mis: margin bisnis">
+            <input class="inspector-input" id="focusInput" type="text" maxlength="120" placeholder="Content focus (optional) — e.g. business growth">
           </div>
-          <div class="field-label" style="margin-top:12px">GENERATION MODE</div>
-          <div class="segmented" id="genModeSegmented">
-            <button class="active" data-genmode="ai" type="button" title="AI menentukan konfigurasi dan batas clip terbaik">AI Recommended</button>
-            <button data-genmode="hybrid" type="button" title="Kamu kasih batas, AI tentukan batas awal/akhir clip">Hybrid</button>
-            <button data-genmode="manual" type="button" title="Durasi dikunci persis sesuai angka kamu">Manual</button>
-          </div>
-          <div class="settings-grid">
-            <label id="maxCeilingLabel">Max clip duration (detik)
-              <input class="inspector-input" id="maxCeilingInput" type="number" min="15" max="180" step="5" value="90" title="Batas KERAS durasi clip — bukan target. AI boleh memotong lebih pendek saat ending alami ditemukan.">
-            </label>
-            <label>Number of clips
-              <select id="maxClipsSelect" title="Jumlah clip final setelah ranking (kandidat pool selalu lebih besar)">
-                <option value="4">4</option>
-                <option value="6" selected>6</option>
-                <option value="8">8</option>
-                <option value="10">10</option>
-              </select>
-            </label>
-          </div>
-          <button class="secondary-button wide-button" id="templateGalleryBtn" type="button" style="width:100%; margin-top:8px" title="44+ template caption dengan preview nyata">
-            🎨 CAPTION TEMPLATE LIBRARY
-          </button>
-          <div class="field-label" style="margin-top:12px">AUTO CAPTION</div>
-          <div class="cap-config-grid" id="createCapConfig">
-            <span class="cap-slot" id="slotAutoCaption"></span>
-            <span class="cap-slot" id="slotFiller"></span>
-          </div>
-          <div class="proc-actions" style="gap:8px; margin-top:6px">
-            <button class="ghost-button compact" id="createTranslateBtn" type="button" title="Terjemahkan caption clip aktif (Indonesia ↔ English, offline)">🌐 TRANSLATE CAPTION</button>
-            <span class="caption-status" id="createTplName"></span>
-          </div>
+          <details class="accordion-section" open>
+            <summary class="accordion-header"><h3>Generation Mode</h3><span class="accordion-icon">&#9660;</span></summary>
+            <div class="accordion-body">
+              <div class="segmented" id="genModeSegmented">
+                <button class="active" data-genmode="ai" type="button" title="AI determines optimal clip configuration">AI Recommended</button>
+                <button data-genmode="hybrid" type="button" title="You set constraints, AI determines boundaries">Hybrid</button>
+                <button data-genmode="manual" type="button" title="Duration locked exactly to your value">Manual</button>
+              </div>
+              <div class="settings-grid" style="margin-top:10px">
+                <label id="maxCeilingLabel">Max clip duration (sec)
+                  <input class="inspector-input" id="maxCeilingInput" type="number" min="15" max="180" step="5" value="90" title="Hard ceiling — AI may produce shorter clips when natural ending is found">
+                </label>
+                <label>Number of clips
+                  <select id="maxClipsSelect" title="Final clip count after ranking">
+                    <option value="4">4</option>
+                    <option value="6" selected>6</option>
+                    <option value="8">8</option>
+                    <option value="10">10</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </details>
+          <details class="accordion-section" open>
+            <summary class="accordion-header"><h3>Auto Caption</h3><span class="accordion-icon">&#9660;</span></summary>
+            <div class="accordion-body">
+              <div class="cap-config-grid" id="createCapConfig">
+                <span class="cap-slot" id="slotAutoCaption"></span>
+                <span class="cap-slot" id="slotFiller"></span>
+              </div>
+              <div class="proc-actions" style="gap:8px; margin-top:6px">
+                <button class="secondary-button compact" id="templateGalleryBtn" type="button" title="44 real caption templates with preview">Caption Template Library</button>
+                <button class="ghost-button compact" id="createTranslateBtn" type="button" title="Translate caption segments offline (Indonesia ↔ English)">Translate Caption</button>
+                <span class="caption-status" id="createTplName"></span>
+              </div>
+            </div>
+          </details>
           <button class="wide-button primary-button" id="generateButton" type="button" disabled style="margin-top:8px">Generate clips</button>
         </div>
 
@@ -716,7 +720,7 @@
         <div class="panel-heading">
           <h2>Projects</h2>
           <div>
-            <button class="primary-button compact" id="libNewProjectBtn" type="button">+ NEW PROJECT</button>
+            <button class="ghost-button compact" id="libNewProjectBtn" type="button">+ New Project</button>
             <button class="ghost-button compact" id="clearLibrary" type="button">Clear</button>
           </div>
         </div>
@@ -810,7 +814,7 @@
               <select class="inspector-input" id="pubClipSelect" aria-label="Candidate clip"><option value="">Pilih clip…</option></select>
             </div>
             <div class="proc-actions" style="margin:8px 0">
-              <button class="primary-button compact" id="pubExportBtn" type="button">⚡ EXPORT + SIAPKAN PUBLISH</button>
+              <button class="primary-button compact" id="pubExportBtn" type="button">Export + Prepare for Publish</button>
               <span class="caption-status" id="pubExportStatus"></span>
             </div>
             <p class="field-label">ATAU PAKE FILE EXPORT LAMA</p>
@@ -837,7 +841,7 @@
             <p class="field-label">HASHTAGS</p>
             <input class="inspector-input" id="pubHashtags" type="text" placeholder="#shorts #podcast">
             <div class="proc-actions">
-              <button class="secondary-button compact" id="pubGenMetaBtn" type="button" title="Generate ulang title/description/hashtags dari konten clip via AI">⚡ GENERATE METADATA</button>
+              <button class="secondary-button compact" id="pubGenMetaBtn" type="button" title="Regenerate title/description/hashtags from clip content via AI">Generate Metadata</button>
               <button class="ghost-button compact" id="copyTitleBtn" type="button">COPY TITLE</button>
               <button class="ghost-button compact" id="copyDescBtn" type="button">COPY DESCRIPTION</button>
               <button class="ghost-button compact" id="copyTagsBtn" type="button">COPY HASHTAGS</button>
@@ -847,9 +851,7 @@
             <p class="field-label" style="margin-top:10px">PUBLISH / SCHEDULE</p>
             <div class="proc-actions">
               <button class="secondary-button compact" id="pubScheduleBtn" type="button" title="Simpan rencana tayang lokal ke Calendar">SCHEDULE (LOCAL PLAN)</button>
-              <button class="primary-button compact" id="pubPublishNowBtn" type="button" disabled>PUBLISH NOW</button>
             </div>
-            <div class="caption-hint" id="pubPublishHint">PUBLISH NOW butuh integrasi platform terhubung (lihat tab Integrations). Tidak ada simulasi upload.</div>
           </div>
         </aside>
       </div>
@@ -1242,7 +1244,7 @@
           <div class="panel-heading"><h2>SHORTCUTS</h2></div>
           <div class="res-intel-actions" style="padding:12px">
             <button class="secondary-button compact" id="setOpenIntegrations" type="button">SOCIAL INTEGRATIONS</button>
-            <button class="secondary-button compact" id="setOpenTemplates" type="button">CAPTION TEMPLATE LIBRARY</button>
+            <button class="secondary-button compact" id="setOpenTemplates" type="button">Caption Template Library</button>
           </div>
           <p class="caption-hint" style="padding:0 12px 12px">Preset engine (STT model, runtime AUTO/CPU/GPU) tetap dikonfigurasi per-project dari workspace masing-masing.</p>
         </section>

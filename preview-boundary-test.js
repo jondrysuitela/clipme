@@ -411,7 +411,7 @@ test("create-workspace: ClipProfit flow — mode, ceiling, template library, tan
   for (const id of ["genModeSegmented", "maxCeilingInput", "maxClipsSelect", "templateGalleryBtn", "hookStrategySelect", "focusInput"]) {
     assert.ok(html.includes(`id="${id}"`), `create workspace part ${id} must exist`);
   }
-  assert.match(html, /GENERATE BEST CLIPS/, "primary CTA present");
+  assert.match(html, /Generate Best Clips/i, "primary CTA present");
   assert.match(html, /id="templateGalleryModal"/, "caption template gallery exists");
   const block = script.slice(script.indexOf("function generationMode()"), script.indexOf("function formatBytes"));
   // Generation modes harus nyata: mengubah payload durationMode/maxDuration
@@ -827,13 +827,10 @@ test("phase6: calendar entries treat persisted labels as text, not HTML", () => 
   assert.match(block, /chip\.append\(` \$\{String\(e\.platform \|\| ""\)\}`\)/, "platform is appended as text");
 });
 
-test("phase6: PUBLISH NOW terkunci sampai integrasi nyata terhubung", () => {
+test("phase6: dead PUBLISH NOW button removed — publish flow uses direct export", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  const btnPos = html.indexOf('id="pubPublishNowBtn"');
-  assert.ok(html.slice(btnPos - 40, btnPos + 80).includes("disabled"), "PUBLISH NOW starts disabled");
-  const fn = script.slice(script.indexOf("function updatePublishAvailability"), script.indexOf('$("#integRefreshBtn")'));
-  assert.match(fn, /btn\.disabled = true/, "PUBLISH NOW locked — no upload engine exists yet");
-  assert.match(fn, /anyConnected/, "connection state still evaluated for messaging");
+  assert.ok(!html.includes('id="pubPublishNowBtn"'), "dead PUBLISH NOW button removed from DOM");
+  assert.ok(html.includes('id="pubExportBtn"'), "replaced by Export + Prepare for Publish");
 });
 
 test("phase6: production insights dari data export asli — tanpa klaim AI/prediksi", () => {
