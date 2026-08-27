@@ -5598,6 +5598,7 @@ function composeClipMetadata(clip, sentences) {
   let title = String(clip.deepTitle || analysis.deepTitle || "").trim();
   if (!title && analysis.recommendedHook) title = String(analysis.recommendedHook).trim();
   if (!title && analysis.originalHook) title = String(analysis.originalHook).trim();
+  if (!title && clip.title) title = String(clip.title).trim();
   if (!title && Array.isArray(sentences) && sentences.length) {
     const best = sentences.reduce((a, b) => (String(b.text || "").length > String(a.text || "").length ? b : a), sentences[0]);
     title = String(best.text || "").trim().slice(0, 90);
