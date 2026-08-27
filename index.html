@@ -611,6 +611,15 @@
               <label class="audio-opt" style="margin-bottom:6px" title="Subject tracking otomatis — kamera virtual mengikuti wajah dengan smoothing (Wayin-style)">
                 <input type="checkbox" id="reframeToggle"> AI Reframe (subject tracking auto-crop)
               </label>
+              <label class="audio-opt" style="margin-bottom:6px; width:100%" title="Komposisi multi-subjek (butuh deteksi wajah; tanpa caption burn di mode ini)">
+                Layout
+                <select id="reframeLayoutSelect" class="inspector-input" style="margin-left:8px">
+                  <option value="AUTO" selected>AUTO (AI detects)</option>
+                  <option value="SPLIT_2">Split 2</option>
+                  <option value="PIP">PIP (inset)</option>
+                  <option value="GRID_4">Grid 4</option>
+                </select>
+              </label>
               <div class="ai-status-rows">
                 <div class="ai-status-row"><span>Speaker</span><span id="localaiSpeaker" class="ai-status-val">—</span></div>
                 <div class="ai-status-row"><span>Face</span><span id="localaiFace" class="ai-status-val">—</span></div>

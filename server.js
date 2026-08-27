@@ -4071,6 +4071,52 @@ function buildReframeCropFilter(cameraPath, srcW, srcH) {
   return `crop=${w}:${h}:'${xExpr}':'${yExpr}'`;
 }
 
+// ---- LAYOUT RENDER (Wayin multi-subject composition) ----
+// windows: [{x,y,w,h}] normalized (0..1) dalam space SUMBER.
+// Dukung SPLIT_2 (hstack), PIP/SCREEN_FIRST (overlay), GRID_4 (2x2).
+function layoutWindowCrop(win, srcW, srcH) {
+  const w = Math.max(8, Math.round(win.w * srcW));
+  const h = Math.max(8, Math.round(win.h * srcH));
+  const x = Math.max(0, Math.min(srcW - w, Math.round(win.x * srcW)));
+  const y = Math.max(0, Math.min(srcH - h, Math.round(win.y * srcH)));
+  return `crop=${w}:${h}:${x}:${y}`;
+}
+
+function buildLayoutFilterComplex(layout, windows, srcW, srcH, outW, outH) {
+  if (!Array.isArray(windows) || !windows.length) return null;
+  const ev = (n) => (n % 2 ? n + 1 : n);
+  const oW = ev(outW), oH = ev(outH);
+  const stackW = layout === "GRID_4" ? ev(oW / 2) : (layout === "SPLIT_2" ? ev(oW / 2) : oW);
+  const stackH = layout === "PIP" || layout === "SCREEN_FIRST" ? oH : ev(oH / 2);
+  const pipW = ev(Math.round(oW * 0.26)), pipH = ev(Math.round(oH * 0.185));
+  const parts = [];
+  windows.slice(0, layout === "SPLIT_2" || layout === "PIP" || layout === "SCREEN_FIRST" ? 2 : 4).forEach((win, i) => {
+    const c = layoutWindowCrop(win, srcW, srcH);
+    let scale;
+    if (layout === "PIP" || layout === "SCREEN_FIRST") {
+      scale = i === 0
+        ? `${oW}:${oH}:force_original_aspect_ratio=decrease,pad=${oW}:${oH}:(ow-iw)/2:(oh-ih)/2`
+        : `${pipW}:${pipH}:force_original_aspect_ratio=decrease`;
+    } else {
+      // cell eksak (genap) — pad mencegah dimensi ganjil (libx264 butuh even)
+      scale = `${stackW}:${stackH}:force_original_aspect_ratio=decrease,pad=${stackW}:${stackH}:(ow-iw)/2:(oh-ih)/2`;
+    }
+    parts.push(`[v${i}]${c},scale=${scale}[c${i}]`);
+  });
+
+  let composed;
+  if (layout === "SPLIT_2") {
+    composed = `[c0][c1]xstack=inputs=2:layout=0_0|w0_0[outv]`;
+  } else if (layout === "GRID_4") {
+    composed = `[c0][c1][c2][c3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[outv]`;
+  } else if (layout === "PIP" || layout === "SCREEN_FIRST") {
+    composed = `[c0][c1]overlay=W-w-${Math.round(oW * 0.02)}:${Math.round(oH * 0.02)}[outv]`;
+  } else {
+    return null;
+  }
+  return { filterComplex: parts.join(";") + ";" + composed, mapSpecs: ["[outv]"] };
+}
+
 async function exportClip(payload, setProgress = () => {}, children = null, options = {}) {
   // Sanitasi terpusat — berlaku untuk semua jalur (single/batch/combined).
   payload.language = ["Indonesia", "English", "Mixed"].includes(payload.language) ? payload.language : "Indonesia";
@@ -4080,6 +4126,8 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   payload.speakerCut = !!payload.speakerCut;
   payload.faceTrack = !!payload.faceTrack;
   payload.reframe = !!payload.reframe;
+  payload.layout = String(payload.layout || "AUTO").toUpperCase();
+  const layoutRequested = ["SPLIT_2", "GRID_4", "PIP", "SCREEN_FIRST"].includes(payload.layout);
   const projectDir = path.join(UPLOAD_DIR, payload.projectId || "");
   const manifest = readProjectManifest(projectDir);
   // Caption "off" atau segmen sudah dikirim client → tidak perlu STT sama sekali.
@@ -4120,10 +4168,11 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const cutDuration = end - start;
   payload.duration = cutDuration;
 
-  // Speaker Cut / AI Reframe / Cut-to-Face analysis (if enabled).
+  // Speaker Cut / AI Reframe / Layout / Cut-to-Face analysis (if enabled).
   let speakerCutFilter = null;
   let reframeFilter = null;
-  if ((payload.speakerCut || payload.reframe) && localAIModule) {
+  let reframeSubjects = [];
+  if ((payload.speakerCut || payload.reframe || layoutRequested) && localAIModule) {
     const videoFilePath = sourcePath;
     if (!videoFilePath) {
       throw new Error("Speaker Cut: Source video tidak ditemukan.");
@@ -4156,7 +4205,7 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
       audioPath: audioAnalysisPath, videoPath: videoFilePath, pythonPath: VENV_PYTHON,
       speakerScript: SPEAKER_DETECT_PY, faceScript: FACE_DETECT_PY, ffmpegPath: FFMPEG, modelsRoot: MODELS_ROOT,
       sampleFps: 3, minSegmentMs: 300, noiseDb: -35,
-      enableFaceTracking: payload.faceTrack || payload.reframe, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
+      enableFaceTracking: payload.faceTrack || payload.reframe || layoutRequested, sourceW: sourceVideoWidth, sourceH: sourceVideoHeight,
       targetAspect: resolveRatio(payload.ratio),
       faceStartSeconds: analysisSourceIsClipSection ? 0 : originalStart,
       faceDurationSeconds: cutDuration
@@ -4199,11 +4248,11 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
     }
 
     // AI REFRAME: camera path dari face timeline (subject tracking) → crop dinamis.
-    if (payload.reframe && analyzeResult) {
-      const subjects = detectCameraSubjects(analyzeResult.faceTimeline);
-      if (subjects.length && clipmeCameraDirector) {
+    if ((payload.reframe || layoutRequested) && analyzeResult) {
+      reframeSubjects = detectCameraSubjects(analyzeResult.faceTimeline);
+      if (reframeSubjects.length && clipmeCameraDirector && payload.reframe) {
         const path = clipmeCameraDirector.generatePath(
-          subjects,
+          reframeSubjects,
           { width: sourceVideoWidth, height: sourceVideoHeight },
           RATIO_PRESETS[resolveRatio(payload.ratio)]
         );
@@ -4277,11 +4326,32 @@ async function exportClip(payload, setProgress = () => {}, children = null, opti
   const watermark = buildWatermarkFilter(payload, filterParts.size);
   if (watermark) filter = [filter, watermark].join(",");
 
+  // ---- LAYOUT COMPOSITING (multi-subject: SPLIT_2 / GRID_4 / PIP / SCREEN_FIRST) ----
+  // v1: layout rend không membakar caption (dicatat); kapabilitas didorong via UI.
+  let layoutComplex = null;
+  let layoutName = "FULL";
+  if (clipmeCameraDirector && reframeSubjects.length && (layoutRequested || payload.reframe)) {
+    const dec = clipmeCameraDirector.layoutDecision(reframeSubjects);
+    const wanted = layoutRequested ? payload.layout : "AUTO";
+    const chosen = layoutRequested ? { layout: wanted, subjects: reframeSubjects } : dec;
+    const multi = ["SPLIT_2", "GRID_4", "PIP", "SCREEN_FIRST"].includes(chosen.layout);
+    if (multi) {
+      const wins = clipmeCameraDirector.layoutWindows(chosen.layout, chosen.subjects);
+      const built = buildLayoutFilterComplex(chosen.layout, wins, sourceVideoWidth, sourceVideoHeight, targetSize.width, targetSize.height);
+      if (built) { layoutComplex = built; layoutName = chosen.layout; }
+    }
+  }
+
   await runFilteredEncodeWithFallback({
     input: sourcePath,
     start,
     duration: cutDuration,
-    filterGraph: filter,
+    ...(layoutComplex
+      ? {
+          filterComplex: layoutComplex.filterComplex,
+          mapSpecs: layoutComplex.mapSpecs.concat(srcProbe && srcProbe.hasAudio ? ["0:a"] : [])
+        }
+      : { filterGraph: filter }),
     outputPath,
     preset: sanitizePreset(payload.preset),
     crf: String(sanitizeCrf(payload.crf)),

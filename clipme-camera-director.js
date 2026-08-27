@@ -171,5 +171,98 @@
     return clamp(Math.round((avgConf * 0.6 + smoothness * 0.4) * 100), 0, 100);
   }
 
-  return { DEFAULT, generatePath, sampleAt, cropFilter, zoomFilter, analyze };
+  // ---- LAYOUT ENGINE (Wayin-style multi-subject composition) ----
+  // Layout untuk bingkai: group mana yang "relevan" (conf ≥ minConfidence &
+  // ukuran cukup), lalu pilih layout sesuai jumlah & sebaran.
+  function layoutsForRatio(ratio) {
+    const base = ["AUTO", "FULL", "SPLIT_2", "PIP", "SCREEN_FIRST"];
+    if (ratio === "square") return ["AUTO", "FULL", "SPLIT_2", "GRID_4"];
+    if (ratio === "four5") return ["AUTO", "FULL", "SPLIT_2", "PIP"];
+    return base; // 9:16 & 16:9
+  }
+
+  // subjects: [{x,y,w,h,confidence,t}] — pilih layout untuk momen ini.
+  function layoutDecision(subjects, opts = {}) {
+    const o = { ...DEFAULT, ...opts };
+    const relevant = (Array.isArray(subjects) ? subjects : [])
+      .filter((s) => (Number(s.confidence) || 0) >= o.minConfidence)
+      .sort((a, b) => Number(b.confidence) - Number(a.confidence));
+    if (!relevant.length) return { layout: "FULL", subjects: [], reason: "none-detected" };
+
+    // Jarak antar 2 subjek paling relevan (normalized).
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    if (relevant.length === 1) return { layout: "SINGLE", subjects: [relevant[0]], reason: "single-subject" };
+
+    const pair = dist(relevant[0], relevant[1]);
+    const bothSmall = relevant.slice(0, 2).every((s) => (Number(s.w) * Number(s.h)) < 0.08);
+    if (relevant.length >= 4) {
+      return { layout: "GRID_4", subjects: relevant.slice(0, 4), reason: "four-or-more-subjects", pairDistance: pair };
+    }
+    if (relevant.length === 3) {
+      return pair > 0.3 && bothSmall ? { layout: "GRID_4", subjects: relevant.slice(0, 3), reason: "trio-spread" }
+        : { layout: "SPLIT_2", subjects: relevant.slice(0, 2), reason: "trio-compact" };
+    }
+    if (pair > 0.34) {
+      return { layout: "SPLIT_2", subjects: relevant.slice(0, 2), reason: "two-distant" };
+    }
+    // Dua subjek dekat = pinggir layar (presenter + konten) atau grup.
+    return { layout: "PIP", subjects: relevant.slice(0, 2), reason: "close-pair", pairDistance: pair };
+  }
+
+  // Jendela crop STABIL per scene: hitung dari subjek (normalized, dalam sumber).
+  // window: {x,y,w,h} dengan penjagaan safeMargin. return [w1, w2, ...] sesuai layout.
+  function layoutWindows(layout, subjects, opts = {}) {
+    const o = { ...DEFAULT, ...opts };
+    const safe = o.safeMargin;
+    const n = subjects.length;
+    const w = (s, pad = 0.06) => Math.min(0.95, Math.max(0.14, (Number(s.w) || 0.2) + pad));
+    const boundsCenter = (s) => ({
+      cx: clamp((Number(s.x) || 0.5) + (Number(s.w) || 0.2) / 2, 0.02, 0.98),
+      cy: clamp((Number(s.y) || 0.5) + (Number(s.h) || 0.3) / 2, 0.02, 0.98)
+    });
+
+    if (layout === "FULL" || !n) return [{ x: safe + 0.1, y: safe, w: 0.8, h: 0.9 }];
+    if (layout === "SINGLE" || n === 1) {
+      const c = boundsCenter(subjects[0]);
+      const cw = w(subjects[0]);
+      const ch = Math.min(0.9, cw * (16 / 9));
+      return [{ x: clamp(c.cx - cw / 2, safe, 1 - safe - cw), y: clamp(c.cy - ch / 2, safe, 1 - safe - ch), w: cw, h: ch }];
+    }
+    if (layout === "SPLIT_2") {
+      const c1 = boundsCenter(subjects[0]);
+      const c2 = boundsCenter(subjects[1]);
+      const half = (1 - 2 * safe) / 2; // dua kolom utuh + margin, tidak overflow
+      const wk = half, hk = Math.min(0.7, half * (16 / 9));
+      return [
+        { x: clamp(c1.cx - wk / 2, safe, safe + half - wk), y: clamp(c1.cy - hk / 2, safe, 1 - safe - hk), w: wk, h: hk },
+        { x: clamp(c2.cx - wk / 2, 1 - safe - half, 1 - safe - wk), y: clamp(c2.cy - hk / 2, safe, 1 - safe - hk), w: wk, h: hk }
+      ];
+    }
+    if (layout === "PIP") {
+      const main = boundsCenter(subjects[0]);
+      const mainW = Math.max(0.62, 1 - 2 * safe);
+      const mainH = Math.min(0.85, mainW * (16 / 9));
+      return [
+        { x: clamp(main.cx - mainW / 2, safe, 1 - safe - mainW), y: clamp(main.cy - mainH / 2, safe, 1 - safe - mainH), w: mainW, h: mainH },
+        { x: 1 - safe - 0.26, y: safe, w: 0.26, h: 0.19 } // pip kecil pojok kanan atas
+      ];
+    }
+    if (layout === "GRID_4") {
+      const half = 0.5 - safe * 0.5;
+      const cells = [
+        { x: safe, y: safe }, { x: safe + half, y: safe },
+        { x: safe, y: safe + half }, { x: safe + half, y: safe + half }
+      ];
+      return cells.slice(0, Math.min(4, n)).map((c, i) => {
+        const s = subjects[i] || { x: 0.5, y: 0.5, w: 0.3, h: 0.4, confidence: 1 };
+        const cxy = boundsCenter(s);
+        const dx = clamp(cxy.cx - (c.x + half / 2), -half * 0.25, half * 0.25);
+        const dy = clamp(cxy.cy - (c.y + half / 2), -half * 0.25, half * 0.25);
+        return { x: c.x + dx, y: c.y + dy, w: half, h: half };
+      });
+    }
+    return [{ x: safe, y: safe, w: 1 - 2 * safe, h: 1 - 2 * safe }];
+  }
+
+  return { DEFAULT, generatePath, sampleAt, cropFilter, zoomFilter, analyze, layoutDecision, layoutWindows, layoutsForRatio };
 });

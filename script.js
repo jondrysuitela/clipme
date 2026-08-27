@@ -1054,6 +1054,7 @@ async function analyzeSpeakerForClip() {
         speakerCut: true,
         faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
         sourceW: previewVideo.videoWidth || 0,
         sourceH: previewVideo.videoHeight || 0,
         targetAspect: window.ClipmeCutToFace
@@ -2089,6 +2090,7 @@ async function exportSelectedClip() {
       speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
       faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
       ratio: exportRatio,
       segments: exportSegments
     };
@@ -3969,6 +3971,7 @@ $("#exportAllBtn").addEventListener("click", async () => {
           speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
           faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -4047,6 +4050,7 @@ function exportClipPayloadFor(clip) {
     speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
     faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
     segments: captionSegmentsForClip(clip)
   };
 }
@@ -6464,6 +6468,7 @@ async function startBatch() {
           speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
           faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
     reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
           segments: captionSegmentsForClip(clip)
         }))
       })
@@ -7767,6 +7772,7 @@ function collectSettings() {
     speakerCut: !!$("#speakerCutToggle")?.checked,
     faceTrack: !!$("#faceTrackToggle")?.checked,
     reframe: !!$("#reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO",
     autoCaption: autoCaptionEnabled(),
     captionTemplateId: state.captionTemplateId || "",
     genMode: generationMode(),
@@ -7792,6 +7798,7 @@ function loadSettings() {
   state.speakerCut = !!data.speakerCut;
   state.faceTrack = !!data.faceTrack;
   state.reframe = !!data.reframe;
+  state.layout = data.layout || "AUTO";
 
   if ($("#captionStyleSelect")) $("#captionStyleSelect").value = data.captionStyle || "bold";
   if (Number(data.captionSize)) captionSize.value = String(data.captionSize);
@@ -7802,6 +7809,8 @@ function loadSettings() {
   if (ftt) ftt.checked = state.faceTrack;
   const rft = document.getElementById("reframeToggle");
   if (rft) rft.checked = state.reframe;
+  const lyt = document.getElementById("reframeLayoutSelect");
+  if (lyt && data.layout) lyt.value = data.layout;
   const act = $("#autoCaptionToggle");
   if (act && data.autoCaption != null) act.checked = !!data.autoCaption;
   syncAutoCaptionToggle();
@@ -7858,6 +7867,7 @@ const settingsControls = [
   ["change", "#speakerCutToggle"],
   ["change", "#faceTrackToggle"],
   ["change", "#reframeToggle"],
+  ["change", "#reframeLayoutSelect"],
   ["change", "#autoCaptionToggle"],
   ["change", "#durationModeSelect"],
   ["input", "#fixedDurationInput"]

@@ -447,6 +447,16 @@ test("reframe: AI reframe (Wayin-style) terhubung ke export — camera path → 
   assert.match(server, /filterParts\.pre = \[reframeFilter,/, "reframe filter runs before scale/crop");
   const s = script.slice(script.indexOf("function exportClipPayloadFor"), script.indexOf("function exportClipPayloadFor") + 900);
   assert.ok(s.includes("reframe: !!document.getElementById(\"reframeToggle\")?.checked,"), "client export payload sends reframe");
+  // Layout engine + render path
+  assert.match(server, /function buildLayoutFilterComplex/, "layout filter_complex builder exists");
+  assert.match(server, /xstack=\|/ && /layout=/, "compositing via xstack");
+  assert.match(server, /layoutComplex.*filterComplex|filterComplex: layoutComplex/, "layout wired into encode run");
+  const le = fs.readFileSync("clipme-camera-director.js", "utf8");
+  assert.match(le, /function layoutDecision/, "layout decision engine exists");
+  assert.match(le, /SPLIT_2/, "split-2 layout supported");
+  assert.match(le, /GRID_4/, "grid-4 layout supported");
+  assert.match(le, /PIP/, "pip layout supported");
+  assert.ok(html.includes('id="reframeLayoutSelect"'), "Layout select exists");
 });
 
 test("metadata: generator server-side + copy buttons pakai nilai aktual (bukan placeholder)", () => {
