@@ -319,8 +319,12 @@ function setRatio(token) {
   previewFrame.classList.remove("portrait", "square", "wide", "four5");
   previewFrame.classList.add(ratio);
   previewFrame.dataset.layout = ratio;
-  $$(".segmented button").forEach((item) => {
+  // Sync semua pilihan rasio (preview panel + create workspace) — satu sumber.
+  $$(".segmented button[data-ratio]").forEach((item) => {
     item.classList.toggle("active", item.dataset.ratio === ratio);
+  });
+  $$(".segmented button[data-cratio]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.cratio === ratio);
   });
   updatePreviewFaceTransform();
   updateFinalPreviewStrip();
@@ -3488,7 +3492,9 @@ if (captionColorInput) {
   });
 }
 
-$$(".segmented button").forEach((button) => {
+// Hanya tombol rasio (data-ratio) yang memicu setRatio — klik pada segmented
+// lain (genMode/batch/platform) TIDAK boleh mengubah aspek rasio.
+$$(".segmented button[data-ratio]").forEach((button) => {
   button.addEventListener("click", () => {
     setRatio(button.dataset.ratio);
   });
@@ -6269,21 +6275,12 @@ if ($("#capLibSearch")) {
     renderCaptionsWorkspace();
   });
 }
-
 $$("#createRatioSegmented button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    $$("#createRatioSegmented button").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
     setRatio(btn.dataset.cratio);
     saveSettingsDebounced();
   });
 });
-document.addEventListener("click", (event) => {
-  const rb = event.target.closest && event.target.closest("#previewPanel .segmented [data-ratio]");
-  if (!rb) {
-    document.querySelectorAll("#createRatioSegmented button").forEach((b) => b.classList.toggle("active", b.dataset.cratio === currentRatio()));
-  }
-}, true);
 
 // ---- Project create-config persistence ----
 async function persistCreateConfig() {
