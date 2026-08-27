@@ -5579,8 +5579,21 @@ function applyResView() {
       img.src = thumbUrlFor(resultsState.projectId, clip.id);
       img.addEventListener("error", () => imgWrap.remove());
       imgWrap.appendChild(img);
+      // Hook type badge overlay on thumbnail
+      if (clip.hookType) {
+        const badge = document.createElement("span");
+        badge.className = "rc-hook-badge";
+        badge.textContent = clip.hookType;
+        imgWrap.appendChild(badge);
+      }
       card.appendChild(imgWrap);
     }
+
+    // Prominent title in horizontal mode
+    const titleEl = document.createElement("p");
+    titleEl.className = "rc-title";
+    titleEl.textContent = clip.deepTitle || clip.recommendedHook || clip.hook || `Clip ${String(clip.id).padStart(2, "0")}`;
+    card.appendChild(titleEl);
 
     const head = document.createElement("div");
     head.className = "rc-head";
@@ -5679,6 +5692,30 @@ function applyResView() {
     actions.appendChild(studioBtn);
     actions.appendChild(pubBtn);
     card.appendChild(actions);
+
+    // Inline copy buttons for metadata (visible in horizontal mode)
+    if (clip.deepTitle) {
+      const metaRow = document.createElement("div");
+      metaRow.className = "rc-meta-row";
+      const copyTitle = document.createElement("button");
+      copyTitle.type = "button";
+      copyTitle.className = "rc-copy-sm";
+      copyTitle.textContent = "Copy Title";
+      copyTitle.addEventListener("click", (e) => { e.stopPropagation(); copyToClipboard(clip.deepTitle, "title"); });
+      const copyTags = document.createElement("button");
+      copyTags.type = "button";
+      copyTags.className = "rc-copy-sm";
+      copyTags.textContent = "Copy Tags";
+      copyTags.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const tags = clip.analysis && clip.analysis.hashtags;
+        const text = Array.isArray(tags) ? tags.map((t) => String(t).startsWith("#") ? t : `#${t}`).join(" ") : "";
+        copyToClipboard(text, "hashtags");
+      });
+      metaRow.appendChild(copyTitle);
+      metaRow.appendChild(copyTags);
+      card.appendChild(metaRow);
+    }
 
     card.addEventListener("click", () => {
       resultsState.selectedClipId = clip.id;
