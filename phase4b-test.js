@@ -123,7 +123,7 @@ let projectId = null;
 
   await t("M-10/M-07: POST /api/export-batch with bad ratio -> 400", async () => {
     if (!srv) srv = await startServer(0, "127.0.0.1");
-    const body = JSON.stringify({ projectId, clips: [{ clipId: 1, start: 0, end: 10, ratio: "square" }] });
+    const body = JSON.stringify({ projectId, clips: [{ clipId: 1, start: 0, end: 10, ratio: "banana" }] });
     const r = await post(srv.port, "/api/export-batch", body, "application/json");
     if (r.status !== 400) throw new Error("expected 400, got " + r.status + " " + JSON.stringify(r.json));
   });

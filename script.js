@@ -312,11 +312,11 @@ function applyTrim(opts = {}) {
   showToast(`Clip dipangkas: ${formatTime(start)} - ${formatTime(end)}`);
 }
 
-const RATIO_PRESETS = ["portrait", "wide", "four5"];
+const RATIO_PRESETS = ["portrait", "square", "wide", "four5"];
 
 function setRatio(token) {
   const ratio = RATIO_PRESETS.includes(token) ? token : "portrait";
-  previewFrame.classList.remove("portrait", "wide", "four5");
+  previewFrame.classList.remove("portrait", "square", "wide", "four5");
   previewFrame.classList.add(ratio);
   previewFrame.dataset.layout = ratio;
   $$(".segmented button").forEach((item) => {
@@ -1309,9 +1309,11 @@ function renderExports() {
 }
 
 function showView(view) {
+  const prevPanel = document.querySelector(".app-view.active");
   $$(".app-view").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.viewPanel === view);
   });
+  if (prevPanel && prevPanel.dataset.viewPanel === "captions" && view !== "captions") capPlayStop();
   $$(".nav-item").forEach((item) => {
     const active = item.dataset.view === view;
     item.classList.toggle("active", active);
@@ -1322,7 +1324,11 @@ function showView(view) {
   if (backBtn) backBtn.hidden = !(view === "studio" && resultsState.projectId);
   const saveBtn = document.getElementById("saveProjectBtn");
   if (saveBtn) saveBtn.hidden = !(view === "studio" && state.projectId);
-  if (view === "captions") renderCaptionsWorkspace();
+  if (view === "captions") {
+    const capPanel = document.getElementById("captionTimelinePanel");
+    if (capPanel && state.projectId) capPanel.style.display = "";
+    renderCaptionsWorkspace();
+  }
   if (view === "settings") fillSettingsView();
 }
 
@@ -1334,6 +1340,36 @@ function mountWorkspaces() {
   const capPanel = document.getElementById("captionTimelinePanel");
   const capMount = document.getElementById("capTimelineMount");
   if (capPanel && capMount && capPanel.parentElement !== capMount) capMount.appendChild(capPanel);
+  // SEMUA kontrol auto-caption terkonsolidasi di Caption Workspace.
+  const controlsMount = document.getElementById("capControlsMount");
+  if (controlsMount) {
+    for (const id of ["captionStyleSelect", "captionFontSelect", "captionColor", "captionSize", "captionPosition"]) {
+      const el = document.getElementById(id);
+      if (!el || el.parentElement === controlsMount) continue;
+      const prev = el.previousElementSibling;
+      const label = prev && prev.nodeType === 1 && prev.classList && prev.classList.contains("field-label")
+        ? prev : null;
+      if (label) controlsMount.appendChild(label);
+      controlsMount.appendChild(el);
+      if (id === "captionPosition") {
+        const presets = document.querySelector(".pos-presets");
+        if (presets) controlsMount.appendChild(presets);
+      }
+    }
+    const act = document.getElementById("autoCaptionToggle");
+    const slotAct = document.getElementById("slotAutoCaption");
+    if (act) slotAct.appendChild(act.closest("label") || act); else if (slotAct) slotAct.remove();
+    const filler = document.getElementById("fillerModeSelect");
+    const slotFiller = document.getElementById("slotFiller");
+    if (filler) {
+      const fp = filler.previousElementSibling;
+      const flabel = filler.closest(".cap-slot") ? null : (fp && fp.nodeType === 1 && fp.classList && fp.classList.contains("field-label") ? fp : null);
+      if (flabel) controlsMount.appendChild(flabel);
+      controlsMount.appendChild(filler);
+    } else if (slotFiller) slotFiller.remove();
+    const grid = document.getElementById("createCapConfig");
+    if (grid && !grid.querySelector("input,select")) grid.remove();
+  }
 }
 
 function setLocalPreview(file) {
@@ -2263,6 +2299,15 @@ previewVideo.addEventListener("ended", () => {
 });
 previewVideo.addEventListener("seeked", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
 previewVideo.addEventListener("timeupdate", () => { if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead(); });
+// Caption Workspace: playhead timeline mengikuti player caption (capPreviewVideo).
+const capPreviewVideoEl = document.getElementById("capPreviewVideo");
+if (capPreviewVideoEl) {
+  const syncCapTimeline = () => {
+    if (captionTimelinePanel && captionTimelinePanel.style.display !== "none") updateCaptionPlayhead();
+  };
+  capPreviewVideoEl.addEventListener("seeked", syncCapTimeline);
+  capPreviewVideoEl.addEventListener("timeupdate", syncCapTimeline);
+}
 
 if (typeof ResizeObserver === "function") {
   const facePreviewResizeObserver = new ResizeObserver(() => updatePreviewFaceTransform());
@@ -2325,7 +2370,10 @@ if (captionTlScroller) {
     const start = Number(state.activeClip ? state.activeClip.start : 0) || 0;
     const end = Number(state.activeClip ? state.activeClip.end : 0) || start + 30;
     const target = state.liveOffset + clampPlayheadTime(t, end - start);
-    previewVideo.currentTime = target;
+    // Timeline = transport: seek (dan play) di player aktif sesuai view.
+    const av = capActiveVideo();
+    av.currentTime = Math.max(0, target);
+    if (av !== previewVideo && av.paused) av.play().catch(() => {});
     if (state.liveActive) updateLiveCaption();
     updateCaptionPlayhead();
   });
@@ -2542,10 +2590,27 @@ function textSimilarity(a, b) {
   for (const w of ta) if (setB.has(w)) hits += 1;
   return hits / Math.max(ta.length, tb.length);
 }
-$("#translateBtn").addEventListener("click", async () => {
-  if (!state.activeClip) { showToast("Pilih clip dulu."); return; }
-  const segs = state.captionSegments || [];
-  if (!segs.length) { showToast("Tidak ada segmen untuk diterjemahkan."); return; }
+$("#translateBtn").addEventListener("click", () => translateCaptionSegments());
+
+async function translateCaptionSegments() {
+  if (!state.activeClip) { showToast("Pilih clip dulu (dari Results atau Studio)."); return; }
+  let segs = state.captionSegments || [];
+  // Sesi baru? Muat segmen caption persisten dari server sebelum menyerah.
+  if (!segs.length && state.projectId) {
+    try {
+      const q = new URLSearchParams({ start: Number(state.activeClip.start) || 0, end: Number(state.activeClip.end) || 0 });
+      const r = await fetch(`/api/projects/${state.projectId}/captions/${state.activeClip.id}?${q}`);
+      const d = await r.json();
+      if (r.ok && Array.isArray(d.segments) && d.segments.length) {
+        state.captionSegments = d.segments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+        state.liveSegments = state.captionSegments.map((s) => ({ ...s, words: Array.isArray(s.words) ? s.words.slice() : [] }));
+        captionTimelinePanel.style.display = "block";
+        loadCaptionTimeline(state.liveSegments);
+        segs = state.captionSegments;
+      }
+    } catch {}
+  }
+  if (!segs.length) { showToast("Belum ada caption untuk clip ini — jalankan Auto Caption dulu."); return; }
   const targetTag = clipmeLangTag(CAPTION_LANG);
   if (!targetTag || targetTag === "mix") { showToast("Bahasa target harus Indonesia atau English."); return; }
   const fromSel = $("#translateFrom") ? $("#translateFrom").value : "auto";
@@ -2567,10 +2632,10 @@ $("#translateBtn").addEventListener("click", async () => {
     return;
   }
 
-  const btn = $("#translateBtn");
-  const old = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Menerjemahkan...";
+  const btn = $("#translateBtn") || $("#createTranslateBtn");
+  const old = btn ? btn.textContent : "";
+  if (btn) btn.disabled = true;
+  if (btn) btn.textContent = "Menerjemahkan...";
   showJobProgress("Menerjemahkan caption", { indeterminate: true });
   try {
     const res = await fetch("/api/stt/translate", {
@@ -2636,10 +2701,9 @@ $("#translateBtn").addEventListener("click", async () => {
     settleJobProgress("error", err.message || "Terjemahan gagal.");
     showToast(err.message || "Terjemahan gagal.");
   } finally {
-    btn.disabled = false;
-    btn.textContent = old;
+    if (btn) { btn.disabled = false; btn.textContent = old; }
   }
-});
+}
 
 function parseSrtVtt(text) {
   const cleaned = String(text || "")
@@ -3079,7 +3143,7 @@ function updateCaptionEditor() {
 function updateCaptionPlayhead() {
   if (!captionPlayhead || !state.activeClip) return;
   const dur = Math.max(1, state.activeClip.end - state.activeClip.start);
-  const t = previewVideo.currentTime - state.liveOffset;
+  const t = capActiveVideo().currentTime - state.liveOffset;
   const clamped = clampPlayheadTime(t, dur);
   const pxPerSec = captionPxPerSec(state.timelineZoom);
   const headLeft = clamped * pxPerSec;
@@ -3898,7 +3962,7 @@ $$(".nav-item").forEach((button) => {
     if (button.dataset.view === "dashboard") loadDashboardData();
     if (button.dataset.view === "studio") checkEngineReadiness(false);
     if (button.dataset.view === "results" && resultsState.projectId) renderResultsAll();
-    if (button.dataset.view === "publish") { populatePubSources(); pubChecklistUpdate(); }
+    if (button.dataset.view === "publish") { populatePubSources(); pubChecklistUpdate(); ensurePublishMetadata(); populatePubProjects(); }
     if (button.dataset.view === "calendar") { populateCalSources(); renderCalendar(); }
     if (button.dataset.view === "integrations") loadIntegrations();
     if (button.dataset.view === "analytics") { loadIntegrations(); loadAnalytics(); }
@@ -4060,20 +4124,9 @@ function renderCaptionsWorkspace() {
 
 function renderCaptionPreview(templateId) {
   const tpl = window.ClipmeCaptionTemplates && window.ClipmeCaptionTemplates.getById(templateId);
-  const wrap = document.getElementById("capPreviewLines");
   const nameEl = document.getElementById("capPreviewName");
-  if (!wrap || !tpl) return;
+  if (!tpl) return;
   if (nameEl) nameEl.textContent = tpl.name;
-  wrap.innerHTML = "";
-  for (const line of ["This hook stops the scroll instantly", "kata kedua untuk timing karaoke"]) {
-    const el = document.createElement("span");
-    el.className = "cap-line";
-    Object.assign(el.style, window.ClipmeCaptionTemplates.swatchStyle(tpl));
-    el.style.fontSize = `${Math.round(26 * (tpl.sizeScale || 1))}px`;
-    el.textContent = line;
-    wrap.appendChild(el);
-  }
-  wrap.style.bottom = `${Math.round((1 - (tpl.position || 0.76)) * 100)}%`;
   const props = document.getElementById("capProps");
   if (props) {
     props.innerHTML = "";
@@ -4088,7 +4141,168 @@ function renderCaptionPreview(templateId) {
       props.append(dt, dd);
     }
   }
+  capPlayEnsureVideo();
+  renderCapFrameAt(capPlay.t || 0);
 }
+
+// ---- CAPTION PLAY: pemutar preview caption dengan timing kata asli ----
+const capPlay = { raf: 0, t: 0, playing: false, lastTs: 0 };
+const CAP_DEMO_WORDS = ["Ini", "hook", "pembuka", "yang", "menahan", "scroll", "dan", "kata", "kunci", "highlight", "muncul", "di", "sini"];
+
+function capSegmentsForPlay() {
+  if (Array.isArray(state.captionSegments) && state.captionSegments.length) return state.captionSegments;
+  const words = CAP_DEMO_WORDS.map((w, i) => ({ text: w, start: i * 0.32, end: i * 0.32 + 0.3 }));
+  const segs = [];
+  for (let i = 0; i < words.length; i += 5) {
+    const grp = words.slice(i, i + 5);
+    segs.push({ start: grp[0].start, end: grp[grp.length - 1].end + 0.15, text: grp.map((w) => w.text).join(" "), words: grp });
+  }
+  return segs;
+}
+
+function capTemplateNow() {
+  return (window.ClipmeCaptionTemplates && window.ClipmeCaptionTemplates.getById(state.captionTemplateId))
+    || (window.ClipmeCaptionTemplates ? window.ClipmeCaptionTemplates.getById(window.ClipmeCaptionTemplates.DEFAULT_TEMPLATE_ID) : null);
+}
+
+function capPlayDuration() {
+  const segs = capSegmentsForPlay();
+  const fromSegs = segs.length ? Number(segs[segs.length - 1].end) || 0 : 0;
+  const vid = document.getElementById("capPreviewVideo");
+  const fromVid = vid && vid.duration && Number.isFinite(vid.duration) ? vid.duration : 0;
+  return Math.max(fromSegs, fromVid, 1);
+}
+
+function renderCapFrameAt(t) {
+  const tpl = capTemplateNow();
+  const wrap = document.getElementById("capPreviewLines");
+  if (!wrap || !tpl) return;
+  const style = window.ClipmeCaptionTemplates.swatchStyle(tpl);
+  const segs = capSegmentsForPlay();
+  const active = segs.find((s) => t >= Number(s.start) && t < Number(s.end)) || null;
+  wrap.innerHTML = "";
+  wrap.style.bottom = `${Math.round((1 - (tpl.position || 0.76)) * 100)}%`;
+  if (!active) { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  const words = Array.isArray(active.words) && active.words.length
+    ? active.words.map((w) => ({ text: String(w.text), start: Number(w.start), end: Number(w.end) }))
+    : String(active.text || "").split(/\s+/).filter(Boolean).map((w, i, arr) => ({ text: w, start: Number(active.start) + i * ((Number(active.end) - Number(active.start)) / Math.max(arr.length, 1)), end: 0 }));
+  const perLine = 5;
+  for (let i = 0; i < words.length; i += perLine) {
+    const line = document.createElement("div");
+    line.className = "cap-line";
+    Object.assign(line.style, style);
+    line.style.fontSize = `${Math.round(24 * (tpl.sizeScale || 1))}px`;
+    line.style.display = "inline-block";
+    line.style.margin = "2px";
+    for (const w of words.slice(i, i + perLine)) {
+      const span = document.createElement("span");
+      span.textContent = `${w.text} `;
+      if (tpl.style === "karaoke" && t >= w.start && t < w.end) {
+        span.style.color = tpl.color || "#00FFFF";
+        span.style.textShadow = "0 0 10px currentColor";
+      } else if (t >= w.start && t < w.end && tpl.style !== "karaoke") {
+        span.style.filter = "brightness(1.25)";
+      }
+      line.appendChild(span);
+    }
+    wrap.appendChild(line);
+  }
+}
+
+function capPlayTick(ts) {
+  if (!capPlay.playing) return;
+  const vid = document.getElementById("capPreviewVideo");
+  const videoDriven = vid && vid.src && vid.readyState > 1;
+  if (videoDriven) {
+    capPlay.t = vid.currentTime;
+    if (vid.ended) { capPlayStop(); renderCapFrameAt(capPlayDuration()); return; }
+  } else {
+    const dt = capPlay.lastTs ? (ts - capPlay.lastTs) / 1000 : 0;
+    capPlay.t += dt;
+    const dur = capPlayDuration();
+    if (capPlay.t >= dur) { capPlay.t = dur; capPlayStop(); }
+  }
+  capPlay.lastTs = ts;
+  renderCapFrameAt(capPlay.t);
+  const fill = document.getElementById("capPlayFill");
+  const timeEl = document.getElementById("capPlayTime");
+  const pct = Math.min(100, (capPlay.t / capPlayDuration()) * 100);
+  if (fill) fill.style.width = `${pct}%`;
+  if (timeEl) timeEl.textContent = `${capPlay.t.toFixed(1)}s / ${capPlayDuration().toFixed(1)}s`;
+  capPlay.raf = requestAnimationFrame(capPlayTick);
+}
+
+// Player aktif untuk sinkronisasi caption: di Caption Workspace pakai capPreviewVideo,
+// di tempat lain tetap video editor studio.
+function capActiveVideo() {
+  const activeView = document.querySelector(".app-view.active");
+  if (activeView && activeView.dataset.viewPanel === "captions") {
+    const v = document.getElementById("capPreviewVideo");
+    if (v && v.src && v.readyState > 0) return v;
+  }
+  return previewVideo;
+}
+
+function capPlayStart() {
+  if (capPlay.playing) return;
+  capPlay.playing = true;
+  capPlay.lastTs = 0;
+  const btn = document.getElementById("capPlayBtn");
+  if (btn) btn.innerHTML = "&#10074;&#10074; PAUSE";
+  const vid = document.getElementById("capPreviewVideo");
+  if (vid && vid.src && vid.readyState > 1) vid.play().catch(() => {});
+  capPlay.raf = requestAnimationFrame(capPlayTick);
+}
+
+function capPlayStop() {
+  capPlay.playing = false;
+  cancelAnimationFrame(capPlay.raf);
+  const btn = document.getElementById("capPlayBtn");
+  if (btn) btn.innerHTML = "&#9654; PLAY CAPTIONS";
+  const vid = document.getElementById("capPreviewVideo");
+  if (vid && !vid.paused) vid.pause();
+}
+
+function capPlayToggle() {
+  if (capPlay.playing) capPlayStop();
+  else capPlayStart();
+}
+
+function capPlayEnsureVideo() {
+  const vid = document.getElementById("capPreviewVideo");
+  if (!vid) return;
+  const wantSrc = state.projectId && !state.noDownload ? `/media/${state.projectId}` : "";
+  if (wantSrc && (!vid.src || !vid.src.endsWith(wantSrc))) {
+    vid.src = wantSrc;
+    vid.currentTime = 0;
+    capPlay.t = 0;
+  } else if (!wantSrc && vid.src) {
+    vid.removeAttribute("src");
+    vid.load();
+    capPlay.t = 0;
+  }
+}
+
+if ($("#capPlayBtn")) $("#capPlayBtn").addEventListener("click", capPlayToggle);
+if ($("#createTranslateBtn")) {
+  $("#createTranslateBtn").addEventListener("click", () => translateCaptionSegments());
+}
+if ($("#capPlayBar")) {
+  $("#capPlayBar").addEventListener("click", (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    capPlay.t = pct * capPlayDuration();
+    const vid = document.getElementById("capPreviewVideo");
+    if (vid && vid.src && vid.readyState > 1) vid.currentTime = capPlay.t;
+    renderCapFrameAt(capPlay.t);
+    const fill = document.getElementById("capPlayFill");
+    if (fill) fill.style.width = `${pct * 100}%`;
+  });
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && capPlay.playing) capPlayStop();
+});
 
 // ---- SETTINGS view ----
 let settingsLoadedOnce = false;
@@ -5859,6 +6073,8 @@ function applyCaptionTemplate(t, opts = {}) {
   if (sizeIn && t.sizeScale) sizeIn.value = Math.round(23 * t.sizeScale);
   if (posIn && t.position) posIn.value = Math.round(t.position * 100);
   state.captionTemplateId = t.id;
+  const tplNameEl = document.getElementById("createTplName");
+  if (tplNameEl) tplNameEl.textContent = `Template aktif: ${t.name}`;
   for (const el of [styleSel, fontSel, colorIn, sizeIn, posIn]) {
     if (el) el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
   }
@@ -6314,7 +6530,53 @@ const _origRenderResHeader = renderResHeader;
 renderResHeader = function () { _origRenderResHeader(); updateResExportsLine(); };
 
 // ---- Publishing workspace: metadata prep + copy (TANPA auto-upload) ----
-const publishState = { platform: "YouTube Shorts" };
+const publishState = { platform: "YouTube Shorts", clipRef: null };
+
+function pubFillFields(meta) {
+  if (!meta) return;
+  if (meta.title) $("#pubTitle").value = meta.title;
+  if (meta.description) $("#pubDesc").value = meta.description;
+  if (Array.isArray(meta.hashtags) && meta.hashtags.length) {
+    $("#pubHashtags").value = meta.hashtags.map((t) => (String(t).startsWith("#") ? t : `#${t}`)).join(" ");
+  }
+  pubChecklistUpdate();
+}
+
+// Auto-isi title/description/hashtags dari analisis AI clip terkait export yang dipilih.
+async function ensurePublishMetadata(opts = {}) {
+  const selEl = $("#pubSourceSelect");
+  if (!selEl || !selEl.value) return;
+  const entry = state.exports[Number(selEl.value)];
+  let projectId = publishState.clipRef && publishState.clipRef.projectId;
+  let clipId = publishState.clipRef && publishState.clipRef.clipId;
+  if ((!projectId || !clipId) && entry) {
+    clipId = clipId || entry.clipId || "";
+    const byName = state.projects.find((p) => p.name === entry.project);
+    projectId = projectId || (byName && byName.id) || "";
+  }
+  if (!projectId) { showToast("Project sumber tidak dikenal — jalankan PUBLISH dari tab Results."); return; }
+  try {
+    const pr = await fetch(`/api/projects/${projectId}`);
+    const data = await pr.json();
+    if (!pr.ok || !Array.isArray(data.clips)) throw new Error(data.error || "Project tidak terbaca.");
+    const target = (clipId && data.clips.find((c) => String(c.id) === String(clipId)))
+      || data.clips.find((c) => c.analysis || c.metadata)
+      || null;
+    if (!target) throw new Error("Clip hasil analisis tidak ditemukan di project ini.");
+    if (!opts.regenerate && target.metadata) { pubFillFields(target.metadata); showToast("Metadata dimuat dari analisis AI."); return; }
+    const mr = await fetch(`/api/projects/${projectId}/metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clipId: target.id, regenerate: !!opts.regenerate })
+    });
+    const md = await mr.json();
+    if (!mr.ok) throw new Error(md.error || "Gagal generate metadata.");
+    pubFillFields(md.metadata);
+    showToast(opts.regenerate ? "Metadata di-generate ulang dari konten clip." : "Title/description/hashtags terisi otomatis dari analisis AI.");
+  } catch (err) {
+    showToast(err.message || "Auto-metadata gagal.");
+  }
+}
 
 function populatePubSources() {
   const selEl = $("#pubSourceSelect");
@@ -6419,23 +6681,159 @@ $$(".pub-platform button").forEach((btn) => {
   $("#pubHashtags").addEventListener(ev, pubChecklistUpdate);
 });
 
-$("#copyTitleBtn").addEventListener("click", () => copyToClipboard($("#pubTitle").value.trim() || "—", "title"));
-$("#copyDescBtn").addEventListener("click", () => copyToClipboard($("#pubDesc").value.trim() || "—", "description"));
-$("#copyTagsBtn").addEventListener("click", () => copyToClipboard($("#pubHashtags").value.trim() || "—", "hashtags"));
+$("#copyTitleBtn").addEventListener("click", () => copyToClipboard($("#pubTitle").value.trim(), "title"));
+$("#copyDescBtn").addEventListener("click", () => copyToClipboard($("#pubDesc").value.trim(), "description"));
+$("#copyTagsBtn").addEventListener("click", () => copyToClipboard($("#pubHashtags").value.trim(), "hashtags"));
 $("#copyAllBtn").addEventListener("click", () => {
-  const text = [
-    `Target: ${publishState.platform}`,
-    `Title: ${$("#pubTitle").value.trim() || "—"}`,
-    `Description: ${$("#pubDesc").value.trim() || "—"}`,
-    `Hashtags: ${$("#pubHashtags").value.trim() || "—"}`
-  ].join("\n");
-  copyToClipboard(text, "semua metadata");
+  const title = $("#pubTitle").value.trim();
+  const desc = $("#pubDesc").value.trim();
+  const tags = $("#pubHashtags").value.trim();
+  if (!title && !desc && !tags) {
+    showToast("Metadata masih kosong — klik ⚡ GENERATE METADATA dulu.");
+    return;
+  }
+  const blocks = [];
+  if (title) blocks.push(`TITLE\n${title}`);
+  if (desc) blocks.push(`DESCRIPTION\n${desc}`);
+  if (tags) blocks.push(`HASHTAGS\n${tags}`);
+  copyToClipboard(blocks.join("\n\n"), "semua metadata");
 });
+if ($("#pubGenMetaBtn")) {
+  $("#pubGenMetaBtn").addEventListener("click", () => ensurePublishMetadata({ regenerate: true }));
+}
+if ($("#pubSourceSelect")) {
+  $("#pubSourceSelect").addEventListener("change", () => {
+    publishState.clipRef = null;
+    $("#pubTitle").value = "";
+    $("#pubDesc").value = "";
+    $("#pubHashtags").value = "";
+    pubChecklistUpdate();
+    ensurePublishMetadata();
+  });
+}
+
+// ---- EXPORT LANGSUNG DARI PUBLISH: project → candidate → render → siap publish ----
+async function populatePubProjects() {
+  const sel = $("#pubProjSelect");
+  if (!sel) return;
+  await loadProjects();
+  sel.innerHTML = '<option value="">Pilih project…</option>';
+  for (const p of state.projects) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = `${p.name} (${p.clips} clip)`;
+    sel.appendChild(opt);
+  }
+}
+
+if ($("#pubProjSelect")) {
+  $("#pubProjSelect").addEventListener("change", async () => {
+    const clipSel = $("#pubClipSelect");
+    clipSel.innerHTML = '<option value="">Pilih clip…</option>';
+    if (!$("#pubProjSelect").value) return;
+    try {
+      const r = await fetch(`/api/projects/${$("#pubProjSelect").value}`);
+      const d = await r.json();
+      if (!r.ok || !Array.isArray(d.clips)) throw new Error(d.error || "Project gagal dibuka.");
+      for (const c of d.clips) {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        const scoreTxt = c.score != null ? ` ★${Math.round(c.score)}` : "";
+        const dur = Math.max(0, Math.round((c.end || 0) - (c.start || 0)));
+        opt.textContent = `#${String(c.id).padStart(2, "0")} ${dur}s${scoreTxt} — ${(c.title || "").slice(0, 40)}`;
+        clipSel.appendChild(opt);
+      }
+    } catch (err) {
+      showToast(err.message || "Gagal memuat clip.");
+    }
+  });
+}
+
+if ($("#pubExportBtn")) {
+  $("#pubExportBtn").addEventListener("click", async () => {
+    const projectId = $("#pubProjSelect") && $("#pubProjSelect").value;
+    const clipId = $("#pubClipSelect") && $("#pubClipSelect").value;
+    const statusEl = $("#pubExportStatus");
+    if (!projectId || !clipId) { showToast("Pilih project dan candidate clip dulu."); return; }
+    let clip = null;
+    try {
+      const r = await fetch(`/api/projects/${projectId}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Project gagal dibuka.");
+      clip = (d.clips || []).find((c) => String(c.id) === String(clipId));
+      if (!clip) throw new Error("Clip tidak ditemukan.");
+    } catch (err) {
+      showToast(err.message); return;
+    }
+    const btn = $("#pubExportBtn");
+    btn.disabled = true;
+    btn.textContent = "MENGEXPORT…";
+    if (statusEl) statusEl.textContent = "Render berjalan di queue…";
+    try {
+      const payload = {
+        projectId,
+        clipId,
+        start: Number(clip.start) || 0,
+        end: Number(clip.end) || 0,
+        language: "Indonesia",
+        ratio: currentRatio(),
+        captionStyle: effectiveCaptionStyle(),
+        fontFamily: ($("#captionFontSelect") && $("#captionFontSelect").value) || "Arial",
+        captionColor: ($("#captionColor") && $("#captionColor").value) || "#FFFFFF",
+        captionSize: Number(captionSize.value) || 23,
+        captionPosition: state.captionPosition || 0.76,
+        speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+        faceTrack: !!document.getElementById("faceTrackToggle")?.checked
+      };
+      const res = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Export gagal dimulai.");
+      showJobProgress(JOB_LABELS["export"], { indeterminate: true });
+      const result = await waitForJob(data.jobId, { onUpdate: renderProcessingTick });
+      settleJobProgress("success", result && result.filename ? result.filename : "");
+      await loadExports();
+      populatePubSources();
+      // Auto-pilih file baru + isi metadata dari clip sumbernya.
+      const idx = state.exports.findIndex((e) => e.filename === result.filename);
+      if (idx >= 0) { $("#pubSourceSelect").value = String(idx); publishState.clipRef = { projectId, clipId }; }
+      pubFillFieldsFromClip(clip);
+      ensurePublishMetadata();
+      showToast("Export selesai — metadata siap, tinggal COPY / schedule.");
+    } catch (err) {
+      settleJobProgress("error", err.message);
+      showToast(err.message || "Export gagal.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "⚡ EXPORT + SIAPKAN PUBLISH";
+    }
+  });
+}
+
+function pubFillFieldsFromClip(clip) {
+  if (!clip) return;
+  if (clip.metadata) pubFillFields(clip.metadata);
+  else {
+    if (clip.deepTitle) $("#pubTitle").value = clip.deepTitle;
+    const km = clip.analysis && clip.analysis.keyMessage;
+    if (km && !$("#pubDesc").value.trim()) $("#pubDesc").value = String(km).trim();
+    const tags = clip.analysis && clip.analysis.hashtags;
+    if (Array.isArray(tags) && tags.length && !$("#pubHashtags").value.trim()) {
+      $("#pubHashtags").value = tags.map((t) => (String(t).startsWith("#") ? t : `#${t}`)).join(" ");
+    }
+    pubChecklistUpdate();
+  }
+}
 
 // Buka Publishing dengan metadata intel dari clip Results (judul/alternatif/hashtags)
 function openPublishForClip(clip) {
   showView("publish");
+  publishState.clipRef = { projectId: resultsState.projectId, clipId: clip.id };
   populatePubSources();
+  if (clip.metadata) pubFillFields(clip.metadata);
+  else if (!clip.deepTitle && !(clip.analysis && clip.analysis.hashtags)) {
+    // Clip belum punya metadata — generate otomatis dari konten.
+    ensurePublishMetadata();
+  }
   $("#pubMetaSource").hidden = !(clip.deepTitle || (clip.analysis && clip.analysis.hashtags));
   if (clip.deepTitle) $("#pubTitle").value = clip.deepTitle;
   if (Array.isArray(clip.deepTitleAlternatives) && clip.deepTitleAlternatives.length) {
@@ -6463,6 +6861,9 @@ function openPublishForClip(clip) {
     $("#pubHashtags").value = tags.map((t) => (String(t).startsWith("#") ? t : `#${t}`)).join(" ");
   } else if (typeof tags === "string" && tags.trim()) {
     $("#pubHashtags").value = tags.trim();
+  }
+  if (!$("#pubDesc").value.trim() && clip.analysis && clip.analysis.keyMessage) {
+    $("#pubDesc").value = String(clip.analysis.keyMessage).trim();
   }
   pubChecklistUpdate();
   showToast("Metadata siap — review lalu COPY ALL / download video.");

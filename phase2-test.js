@@ -79,8 +79,9 @@ async function runWaitForJobScenario({ statuses }) {
 
   enqueue("C-01 setRatio canonical tokens", () => {
     const tokens = scriptSrc.match(/RATIO_PRESETS = \[[^\]]*\]/)[0];
-    if (!tokens.includes("portrait") || !tokens.includes("wide") || !tokens.includes("four5")) throw new Error("missing canonical token");
-    if (tokens.includes("square")) throw new Error("square should not be canonical");
+    for (const t of ["portrait", "square", "wide", "four5"]) {
+      if (!tokens.includes(t)) throw new Error(`missing canonical token: ${t}`);
+    }
   });
 
   enqueue("C-01 ratio picker only via segmented buttons (no layoutSelect)", () => {
@@ -88,9 +89,9 @@ async function runWaitForJobScenario({ statuses }) {
     if (!/class="segmented"[^>]*>/.test(htmlSrc)) throw new Error("segmented ratio buttons missing");
   });
 
-  enqueue("C-01 backend ratios resolve to same three tokens", () => {
+  enqueue("C-01 backend ratios resolve to same four tokens", () => {
     const presets = serverSrc.match(/const RATIO_PRESETS = \{[\s\S]*?\n\};/)[0];
-    for (const k of ["portrait", "wide", "four5"]) {
+    for (const k of ["portrait", "square", "wide", "four5"]) {
       if (!presets.includes(`${k}:`)) throw new Error(`preset ${k} missing`);
     }
   });
@@ -104,9 +105,9 @@ async function runWaitForJobScenario({ statuses }) {
     `);
     const ok = (v) => fn(v);
     if (!ok("portrait").isSupported) throw new Error("portrait not supported");
+    if (!ok("square").isSupported) throw new Error("square not supported");
     if (!ok("wide").isSupported) throw new Error("wide not supported");
     if (!ok("four5").isSupported) throw new Error("four5 not supported");
-    if (ok("square").isSupported) throw new Error("square wrongly accepted");
     if (ok("banana").isSupported) throw new Error("banana wrongly accepted");
     if (ok(undefined).resolved !== "portrait") throw new Error("undefined should default to portrait");
   });

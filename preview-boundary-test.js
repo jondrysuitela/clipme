@@ -364,10 +364,15 @@ test("phase3: ANALYZE ALL berjalan SEQUENTIAL (tanpa flood concurrency)", () => 
   assert.match(block, /PARTIAL RESULTS/, "partial state on failures");
 });
 
-test("phase3: PREVIEW/STUDIO reuse infrastruktur existing — TANPA player kedua", () => {
+test("phase3: PREVIEW/STUDIO reuse infrastruktur existing — player ter-inventarisasi, tanpa duplikasi liar", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  const videoTags = (html.match(/<video/g) || []).length;
-  assert.strictEqual(videoTags, 1, "single preview player in whole app (reuse, not duplicate)");
+  const videoTags = (html.match(/<video\b[^>]*\bid="([^"]+)"/g) || []).length;
+  const ids = [...html.matchAll(/<video\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+  // Dua player resmi: editor (studio) + caption-play preview. Duplikasi lain tetap terlarang.
+  assert.deepStrictEqual(ids.sort(), ["capPreviewVideo", "previewVideo"], "only the two inventoried players may exist");
+  assert.strictEqual(videoTags, 2, "no untracked third player");
+  const capVid = html.slice(html.indexOf('id="capPreviewVideo"') - 80, html.indexOf('id="capPreviewVideo"') + 120);
+  assert.match(capVid, /playsinline/, "caption preview is muted-inline scoped, not a competing editor");
   const block = script.slice(script.indexOf("// ================= RESULTS WORKSPACE"), script.indexOf("const SETTINGS_KEY"));
   assert.match(block, /selectClip\(liveClip\)/, "handoff selects the exact clip in Studio");
   assert.match(block, /showView\("studio"\)/, "handoff opens existing Studio view");

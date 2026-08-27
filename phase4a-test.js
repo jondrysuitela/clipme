@@ -97,7 +97,7 @@ for (const [label, input, expected] of durationCases) {
 
   // ---------- M-03 serveStatic ----------
   await t("M-03: allowlist exists and contains only web assets", () => {
-    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js", "\/clipme-cut-to-face.js", "\/clipme-active-speaker.js", "\/clipme-caption-templates.js", "\/build\/icon.png"\]\)/.test(serverSrc)) {
+    if (!/PUBLIC_WEB_FILES = new Set\(\["\/index.html", "\/styles.css", "\/script.js", "\/clipme-cut-to-face.js", "\/clipme-active-speaker.js", "\/clipme-caption-templates.js", "\/clipme-camera-director.js", "\/build\/icon.png"\]\)/.test(serverSrc)) {
       throw new Error("PUBLIC_WEB_FILES allowlist mismatch");
     }
   });

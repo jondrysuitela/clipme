@@ -2636,6 +2636,7 @@ function ffmpegText(value) {
 
 const RATIO_PRESETS = {
   portrait: { width: 1080, height: 1920 },
+  square: { width: 1080, height: 1080 },
   wide: { width: 1920, height: 1080 },
   four5: { width: 864, height: 1080 }
 };
@@ -5565,6 +5566,30 @@ function handleGenerateClips(req, res, params) {
 
 // Tombol "Analyze Hook Viral": analisis ulang project AKTIF via job — progres
 // persen dipoll klien lewat /api/jobs/:id. Worker sama dengan jalur upload.
+// Segmen caption persisten untuk sebuah clip (edited > transcript > cache).
+// Dipakai renderer export DAN Caption Workspace (translate/preview lintas sesi).
+async function handleClipCaptionsGet(req, res, params) {
+  const projectId = params.projectId || "";
+  if (!isValidUUID(projectId)) { sendJson(res, 400, { error: "Invalid project ID" }); return; }
+  const projectDir = path.join(UPLOAD_DIR, projectId);
+  const manifest = readProjectManifest(projectDir);
+  if (!manifest) { sendJson(res, 404, { error: "Project tidak ditemukan." }); return; }
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const payload = {
+    clipId: params.clipId || "",
+    start: Number(url.searchParams.get("start")) || 0,
+    end: Number(url.searchParams.get("end")) || 0,
+    language: url.searchParams.get("language") || "Indonesia"
+  };
+  if (!payload.clipId || payload.end <= payload.start) { sendJson(res, 400, { error: "clipId/start/end wajib." }); return; }
+  try {
+    const segments = getClipTranscriptSegments(projectDir, manifest, payload);
+    sendJson(res, 200, { segments });
+  } catch (err) {
+    sendJson(res, 500, { error: err.message });
+  }
+}
+
 // AI METADATA GENERATOR — title/description/hashtags dari konten clip nyata.
 // Deterministik dari transkrip + analysis (deepTitle/hook/hashtags engine).
 // Tanpa kalimat karangan: semua kalimat description diambil verbatim dari clip.
@@ -6869,7 +6894,7 @@ async function handleSttModels(req, res) {
 
 // Only these exact web assets are served from the project root.
 // Media (upload/preview/output) is served through dedicated /media/, /sections/, /outputs/ routes.
-const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/clipme-active-speaker.js", "/clipme-caption-templates.js", "/build/icon.png"]);
+const PUBLIC_WEB_FILES = new Set(["/index.html", "/styles.css", "/script.js", "/clipme-cut-to-face.js", "/clipme-active-speaker.js", "/clipme-caption-templates.js", "/clipme-camera-director.js", "/build/icon.png"]);
 
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -6917,6 +6942,7 @@ router
   .add("PATCH", "/api/projects/:projectId", handleUpdateProject)
   .add("POST", "/api/projects/:projectId/generate", handleGenerateClips)
   .add("POST", "/api/projects/:projectId/metadata", handleClipMetadata)
+  .add("GET", "/api/projects/:projectId/captions/:clipId", handleClipCaptionsGet)
   .add("POST", "/api/projects/:projectId/config", handleProjectConfig)
   .add("POST", "/api/projects/:projectId/analyze-hook", handleAnalyzeHook)
   .add("POST", "/api/projects/:projectId/rerank", handleRerank)

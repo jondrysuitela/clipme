@@ -1093,6 +1093,11 @@ input[type="range"] {
   aspect-ratio: 4 / 5;
   max-height: min(90vh, 700px);
 }
+.phone-frame.square {
+  width: min(72%, 330px);
+  aspect-ratio: 1 / 1;
+  border-radius: 22px;
+}
 
 .preview-video {
   position: absolute;
@@ -3152,8 +3157,29 @@ textarea:focus-visible {
   margin: 0 auto; background: linear-gradient(160deg, #17222b, #0c1013 60%, #131c23);
   border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
 }
-.cap-lines { position: absolute; left: 8%; right: 8%; display: flex; flex-direction: column; gap: 6px; text-align: center; }
+.cap-frame video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; background: transparent;
+}
+.cap-lines { position: absolute; left: 8%; right: 8%; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; text-align: center; }
 .cap-line { line-height: 1.25; word-break: break-word; }
+.cap-controls {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px; padding: 0 4px;
+}
+.cap-playbar {
+  flex: 1; height: 8px; border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+  border: 1px solid var(--line); overflow: hidden;
+}
+.cap-playbar span { display: block; height: 100%; width: 0%; background: var(--accent); }
+
+/* Create workspace: konfigurasi auto caption */
+.cap-config-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.cap-config-grid .cap-slot { display: inline-flex; align-items: center; gap: 6px; }
+/* Publish: export langsung */
+.pub-direct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+@media (max-width: 700px) { .pub-direct-grid { grid-template-columns: 1fr; } }
 
 /* ---- Settings ---- */
 .settings-duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }

@@ -292,6 +292,7 @@
             <span class="field-label" style="margin:0">ASPECT RATIO</span>
             <div class="segmented" id="createRatioSegmented">
               <button class="active" data-cratio="portrait" type="button">9:16</button>
+              <button data-cratio="square" type="button">1:1</button>
               <button data-cratio="four5" type="button">4:5</button>
               <button data-cratio="wide" type="button">16:9</button>
             </div>
@@ -384,9 +385,18 @@
               </select>
             </label>
           </div>
-          <button class="secondary-button wide-button" id="templateGalleryBtn" type="button" style="width:100%; margin-top:8px" title="43+ template caption dengan preview nyata">
+          <button class="secondary-button wide-button" id="templateGalleryBtn" type="button" style="width:100%; margin-top:8px" title="44+ template caption dengan preview nyata">
             🎨 CAPTION TEMPLATE LIBRARY
           </button>
+          <div class="field-label" style="margin-top:12px">AUTO CAPTION</div>
+          <div class="cap-config-grid" id="createCapConfig">
+            <span class="cap-slot" id="slotAutoCaption"></span>
+            <span class="cap-slot" id="slotFiller"></span>
+          </div>
+          <div class="proc-actions" style="gap:8px; margin-top:6px">
+            <button class="ghost-button compact" id="createTranslateBtn" type="button" title="Terjemahkan caption clip aktif (Indonesia ↔ English, offline)">🌐 TRANSLATE CAPTION</button>
+            <span class="caption-status" id="createTplName"></span>
+          </div>
           <button class="wide-button primary-button" id="generateButton" type="button" disabled style="margin-top:8px">Generate clips</button>
         </div>
 
@@ -414,6 +424,7 @@
             <h2 id="previewTitle">Clip 01 - Select a clip</h2>
             <div class="segmented">
               <button class="active" data-ratio="portrait" type="button">9:16</button>
+              <button data-ratio="square" type="button">1:1</button>
               <button data-ratio="wide" type="button">16:9</button>
               <button data-ratio="four5" type="button">4:5</button>
             </div>
@@ -793,6 +804,16 @@
           <div class="panel-heading"><h2>SOURCE EXPORT</h2></div>
           <div style="padding: 14px 18px;">
             <p class="field-label">Pilih file export</p>
+            <p class="field-label">EXPORT LANGSUNG DARI CANDIDATE</p>
+            <div class="pub-direct-grid">
+              <select class="inspector-input" id="pubProjSelect" aria-label="Project sumber"><option value="">Pilih project…</option></select>
+              <select class="inspector-input" id="pubClipSelect" aria-label="Candidate clip"><option value="">Pilih clip…</option></select>
+            </div>
+            <div class="proc-actions" style="margin:8px 0">
+              <button class="primary-button compact" id="pubExportBtn" type="button">⚡ EXPORT + SIAPKAN PUBLISH</button>
+              <span class="caption-status" id="pubExportStatus"></span>
+            </div>
+            <p class="field-label">ATAU PAKE FILE EXPORT LAMA</p>
             <select class="inspector-input" id="pubSourceSelect" aria-label="Choose exported file"></select>
             <p class="field-label" style="margin-top:12px">TARGET PLATFORM</p>
             <div class="segmented pub-platform">
@@ -811,11 +832,12 @@
             <p class="field-label">TITLE</p>
             <input class="inspector-input" id="pubTitle" type="text" maxlength="140" placeholder="Judul video...">
             <div id="pubTitleOptions" class="pub-title-options" hidden></div>
-            <p class="field-label">DESCRIPTION <span class="caption-hint">(manual — bukan output AI)</span></p>
-            <textarea class="inspector-input" id="pubDesc" rows="4" placeholder="Tulis deskripsi..."></textarea>
+            <p class="field-label">DESCRIPTION <span class="caption-hint">(auto dari analisis AI — bisa diedit)</span></p>
+            <textarea class="inspector-input" id="pubDesc" rows="4" placeholder="Deskripsi otomatis dari transkrip clip..."></textarea>
             <p class="field-label">HASHTAGS</p>
             <input class="inspector-input" id="pubHashtags" type="text" placeholder="#shorts #podcast">
             <div class="proc-actions">
+              <button class="secondary-button compact" id="pubGenMetaBtn" type="button" title="Generate ulang title/description/hashtags dari konten clip via AI">⚡ GENERATE METADATA</button>
               <button class="ghost-button compact" id="copyTitleBtn" type="button">COPY TITLE</button>
               <button class="ghost-button compact" id="copyDescBtn" type="button">COPY DESCRIPTION</button>
               <button class="ghost-button compact" id="copyTagsBtn" type="button">COPY HASHTAGS</button>
@@ -1180,12 +1202,18 @@
           <div class="tpl-grid tpl-grid-flat" id="capLibList"></div>
         </section>
         <section class="panel cap-preview-panel">
-          <div class="panel-heading"><h2>PREVIEW</h2><span class="status-pill" id="capPreviewName">&mdash;</span></div>
+          <div class="panel-heading"><h2>CAPTION PLAY PREVIEW</h2><span class="status-pill" id="capPreviewName">&mdash;</span></div>
           <div class="cap-stage">
             <div class="cap-frame">
+              <video id="capPreviewVideo" playsinline preload="metadata"></video>
               <div class="cap-lines" id="capPreviewLines"></div>
             </div>
-            <p class="caption-hint">Contoh kalimat dirender dengan style template aktif &mdash; konfigurasi identik dipakai renderer FFmpeg saat export.</p>
+            <div class="cap-controls">
+              <button class="primary-button compact" id="capPlayBtn" type="button">&#9654; PLAY CAPTIONS</button>
+              <div class="cap-playbar" id="capPlayBar" title="Klik untuk seek"><span id="capPlayFill"></span></div>
+              <span class="tl-label" id="capPlayTime">0.0s</span>
+            </div>
+            <p class="caption-hint">Memutar caption dengan timing kata ASLI dari transkrip + konfigurasi template aktif (identik dengan renderer FFmpeg). Video tampil bila project punya sumber lokal.</p>
           </div>
         </section>
         <section class="panel cap-props-panel">
@@ -1263,6 +1291,7 @@
   </div>
 </div>
 <script src="clipme-caption-templates.js"></script>
+<script src="clipme-camera-director.js"></script>
 <script src="clipme-cut-to-face.js"></script>
 <script src="clipme-active-speaker.js"></script>
 <script src="script.js"></script>
