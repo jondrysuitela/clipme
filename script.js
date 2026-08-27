@@ -5526,6 +5526,11 @@ function setResPill(stateKey, text) {
   pill.textContent = text;
 }
 
+// Jumlah clip yang sudah dianalisis (skor/analysis ada) — dipakai header Results.
+function resAnalyzedCount() {
+  return resultsState.clips.filter(resIsAnalyzed).length;
+}
+
 function renderResultsAll() {
   renderResHeader();
   applyResView();

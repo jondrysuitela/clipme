@@ -340,9 +340,13 @@ test("phase3: results UI lengkap — header real metadata, filter, sort, search"
   for (const opt of ["top", "analyzed", "unanalyzed"]) {
     assert.ok(html.includes(`value="${opt}"`), `filter ${opt} exists`);
   }
-  for (const sortV of ["original", "scoreDesc", "scoreAsc", "duration"]) {
+for (const sortV of ["original", "scoreDesc", "scoreAsc", "duration"]) {
     assert.ok(html.includes(`value="${sortV}"`), `sort ${sortV} exists`);
   }
+  // REGRESSION GUARD: resAnalyzedCount dipakai renderResHeader — harus didefinisikan.
+  assert.match(script, /function resAnalyzedCount/, "resAnalyzedCount defined (formerly undefined → ReferenceError)");
+  const headerFn = script.slice(script.indexOf("function renderResHeader"), script.indexOf("function renderResHeader") + 800);
+  assert.match(headerFn, /resAnalyzedCount\(\)/, "renderResHeader uses resAnalyzedCount");
 });
 
 test("phase3: tanpa mock — skor dari backend, missing = '—', tanpa Math.random/setTimeout fake", () => {
