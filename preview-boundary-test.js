@@ -436,8 +436,16 @@ test("metadata: generator server-side + copy buttons pakai nilai aktual (bukan p
   assert.match(copyFn, /masih kosong/, "empty value refused, never copies placeholder");
   assert.doesNotMatch(copyFn, /\|\| "—"/, "no silent dash fallback");
   // Metadata card wired ke endpoint + regenerate
-  const metaUi = script.slice(script.indexOf("function renderClipMetadataCard"), script.indexOf("function updateWorkspaceMode"));
+  const metaUi = script.slice(script.indexOf("function renderClipMetadataCard"), script.indexOf("function renderResTranscript"));
   assert.match(metaUi, /\/api\/projects\/\$\{resultsState\.projectId\}\/metadata/, "card fetches real metadata");
+  // REGRESSION GUARD: deepTitleAlternatives adalah object {text,...} — tampilan
+  // & regenerate HARUS menormalisasi ke string, tidak boleh menampilkan [object Object].
+  const altFn = script.slice(script.indexOf("function altTitleText"), script.indexOf("function altTitleText") + 400);
+  assert.match(altFn, /t\.text/, "altTitleText mengekstrak .text dari alternatif object");
+  assert.match(metaUi, /typeof m\.title === "string"/, "metadata title dipastikan string sebelum ditampilkan");
+  const regenServer = server.slice(server.indexOf("if (body.regenerate)"), server.indexOf("delete meta._rot"));
+  assert.match(regenServer, /typeof a === \"string\"\s*\? a :/, "server normalize alternatif object → string sebelum dipakai sebagai title");
+  assert.doesNotMatch(script.slice(script.indexOf("$(\"#riAltTitles\")"), script.indexOf("$(\"#riAltTitles\")") + 160), /\$\{t\}/, "alternatives tidak di-stringify sebagai object");
   assert.match(script, /persistCreateConfig\(\)/, "create config persisted on generate");
   // NO PREVIEW RULE: setelah generate → langsung ke Results, bukan menumpuk clip di create workspace
   const analyzeFlow = script.slice(script.indexOf("async function startHookAnalysis"), script.indexOf("async function startHookAnalysis") + 3200);

@@ -5655,10 +5655,14 @@ async function handleClipMetadata(req, res, params) {
     if (body.regenerate) {
       const alts = Array.isArray(clip.deepTitleAlternatives) ? clip.deepTitleAlternatives.filter(Boolean) : [];
       if (alts.length) {
-        const pick = alts[meta._rot % alts.length] || alts[0];
-        meta.title = String(pick).slice(0, 140);
-        meta._rot = (meta._rot + 1) % Math.max(alts.length, 1);
-        meta.rotatedTitle = true;
+        // deepTitleAlternatives bisa berupa object {text, reason} — normalisasi ke string.
+        const altsText = alts.map((a) => typeof a === "string" ? a : (a && typeof a.text === "string" ? a.text : "")).filter(Boolean);
+        if (altsText.length) {
+          const pick = altsText[meta._rot % altsText.length] || altsText[0];
+          meta.title = String(pick).slice(0, 140);
+          meta._rot = (meta._rot + 1) % Math.max(altsText.length, 1);
+          meta.rotatedTitle = true;
+        }
       }
     }
     delete meta._rot;

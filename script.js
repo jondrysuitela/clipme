@@ -5745,7 +5745,7 @@ function fillResultIntel(clip) {
   $("#riHook").textContent = clip.recommendedHook || clip.hook || "—";
   $("#riTitle").textContent = clip.deepTitle || "No title generated yet.";
   $("#riAltTitles").textContent = Array.isArray(clip.deepTitleAlternatives) && clip.deepTitleAlternatives.length
-    ? clip.deepTitleAlternatives.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    ? clip.deepTitleAlternatives.map(altTitleText).filter(Boolean).map((t, i) => `${i + 1}. ${t}`).join("\n") || "—"
     : "—";
   $("#riKeyMessage").textContent = (clip.analysis && clip.analysis.keyMessage) || "—";
 
@@ -5826,10 +5826,17 @@ function metadataTextFor(clip) {
   const m = clip && clip.metadata;
   if (!m) return { title: "", description: "", hashtags: "" };
   return {
-    title: String(m.title || "").trim(),
-    description: String(m.description || "").trim(),
-    hashtags: Array.isArray(m.hashtags) ? m.hashtags.join(" ").trim() : ""
+    title: typeof m.title === "string" ? m.title.trim() : "",
+    description: typeof m.description === "string" ? m.description.trim() : "",
+    hashtags: Array.isArray(m.hashtags) ? m.hashtags.map(String).join(" ").trim() : ""
   };
+}
+
+// Normalisasi deepTitleAlternatives: object {text,...} → string.
+function altTitleText(t) {
+  if (typeof t === "string") return t;
+  if (t && typeof t === "object" && typeof t.text === "string") return t.text;
+  return "";
 }
 
 function renderResTranscript(clip) {
@@ -6926,7 +6933,9 @@ function openPublishForClip(clip) {
     const box = $("#pubTitleOptions");
     box.hidden = false;
     box.innerHTML = "";
-    for (const t of [clip.deepTitle, ...clip.deepTitleAlternatives].filter(Boolean)) {
+    for (const raw of [clip.deepTitle, ...clip.deepTitleAlternatives].filter(Boolean)) {
+      const t = typeof raw === "string" ? raw : altTitleText(raw);
+      if (!t) continue;
       const labelEl = document.createElement("label");
       const radio = document.createElement("input");
       radio.type = "radio";
