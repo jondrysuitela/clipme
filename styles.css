@@ -3266,8 +3266,15 @@ textarea:focus-visible {
 #resVideoMount .preview-panel {
   border-radius: 14px;
   margin-bottom: 14px;
+  /* Warisan .preview-panel{position:sticky} dari studio tersangkut — di Results
+     malah nutupin toolbar/tombol di bawahnya saat scroll. Normalisasi jadi blok. */
+  position: static;
+  grid-column: auto;
+  grid-row: auto;
+  top: auto;
+  align-self: auto;
 }
-#resVideoMount .video-stage { padding: 14px 0; }
+#resVideoMount .video-stage { min-height: 0; padding: 14px 0; }
 #resVideoMount .phone-frame { width: min(48%, 420px); }
 #resVideoMount .phone-frame.wide { width: min(80%, 760px); }
 #resVideoMount .transport-row {
@@ -3276,6 +3283,7 @@ textarea:focus-visible {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+#resVideoMount .caption-timeline-panel { margin-top: 10px; }
 .cap-stage { position: relative; flex: 1; padding: 18px; }
 .cap-frame {
   position: relative; width: min(300px, 80%); aspect-ratio: 9 / 16;

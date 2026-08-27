@@ -347,6 +347,12 @@ for (const sortV of ["original", "scoreDesc", "scoreAsc", "duration"]) {
   assert.match(script, /function resAnalyzedCount/, "resAnalyzedCount defined (formerly undefined → ReferenceError)");
   const headerFn = script.slice(script.indexOf("function renderResHeader"), script.indexOf("function renderResHeader") + 800);
   assert.match(headerFn, /resAnalyzedCount\(\)/, "renderResHeader uses resAnalyzedCount");
+  // REGRESSION GUARD: preview panel yang pindah ke Results TIDAK boleh sticky —
+  // kalau sticky, dia nutupin toolbar/tombol di bawah (klik jadi mati).
+  const css = fs.readFileSync("styles.css", "utf8");
+  const resMount = css.slice(css.indexOf("#resVideoMount .preview-panel"), css.indexOf("#resVideoMount .preview-panel") + 400);
+  assert.match(resMount, /position:\s*static/, "moved preview panel normalized to static (no sticky overlap)");
+  assert.match(resMount, /min-height:\s*0/, "video-stage not forcing 544px overlap in Results");
 });
 
 test("phase3: tanpa mock — skor dari backend, missing = '—', tanpa Math.random/setTimeout fake", () => {
