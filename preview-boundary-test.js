@@ -321,8 +321,7 @@ test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
   const coming = (html.match(/Coming next/g) || []).length;
   assert.strictEqual(coming, 0, "no future-placeholder panels remain");
   assert.ok(html.includes('data-view-panel="results"'), "results panel exists");
-  assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
-  assert.match(html, /Belum ada data performa/, "analytics honestly reports missing ledger data");
+assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
   assert.ok(!/<canvas/i.test(html), "no fake canvas charts");
   assert.doesNotMatch(script, /Chart\(/, "no chart library stubs");
 });
@@ -857,15 +856,17 @@ test("phase6: dead PUBLISH NOW button removed — publish flow uses direct expor
   assert.ok(html.includes('id="pubExportBtn"'), "replaced by Export + Prepare for Publish");
 });
 
-test("phase6: production insights dari data export asli — tanpa klaim AI/prediksi", () => {
+test("phase6: production analytics UI removed; real perf ledger & exports intake intact", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  assert.ok(html.includes('id="prodInsights"'), "insights container exists");
-  const fn = script.slice(script.indexOf("function computeProductionInsights"), script.indexOf("$$('[data-qview]')".replace(/'/g, '"')));
-  assert.match(fn, /state\.exports/, "computed from real exports");
-  assert.match(fn, /ratioCount|topRatio/, "format distribution observed");
-  assert.match(fn, /tanpa prediksi performa/, "no performance prediction claims");
-  assert.match(fn, /Belum cukup data/, "insufficient-data honesty");
-  assert.doesNotMatch(fn, /Math\.random|AI predicts|viral score predict/i, "no fabricated AI signals");
+  assert.ok(!html.includes('id="prodInsights"'), "production-insights presentation removed with Analytics");
+  assert.ok(!html.includes('data-view-panel="analytics"'), "analytics panel removed");
+  assert.ok(!script.includes("function loadAnalytics"), "analytics renderer removed");
+  // Perf capacity dipertahankan & dikonsumsi oleh EXPORTS (shared)
+  assert.ok(server.includes("handleGetPerf"), "perf API handler kept");
+  assert.ok(script.includes("renderPerfHistory") && script.includes("function engagementPct"), "shared perf/engagement consumers kept");
+  assert.ok(script.includes("/api/perf/"), "Exports reads real ledger snapshots");
+  // Kejujuran perf: tidak ada nilai karangan
+  assert.doesNotMatch(script.slice(script.indexOf("function renderPerfHistory"), script.indexOf("function renderPerfHistory") + 600), /Math\.random|estimated views/i, "no fabricated signal in perf display");
 });
 
 test("phase6: quick actions dashboard + nav baru (5 view, legacy removed)", () => {
@@ -996,25 +997,23 @@ test("p10-12: server membawa clipId dari info.txt — kunci join prediksi-vs-akt
   assert.match(perf, /body\.platform/, "platform stored per export sidecar");
 });
 
-test("p10-12: analytics logic — totals/top/platform/growth/velocity dari ledger", () => {
-  const fn = script.slice(script.indexOf("// ================= ANALYTICS + CONTENT DNA"), script.indexOf('$("#anRefreshBtn")'));
-  assert.match(fn, /\/api\/perf\//, "reads real ledger snapshots");
-  assert.match(fn, /api\/projects\/\$\{pid\}/, "joins engine intel via project detail");
-  assert.match(fn, /totalViews/, "empty until views exist (no fake)");
-  assert.match(fn, /snapshot pertama/, "growth anchored to first snapshot");
-  assert.match(fn, /views\/hari/, "velocity formula labeled");
-  assert.doesNotMatch(fn, /Math\.random|estimated views/i);
+test("p10-12: perf ledger viability — Export membaca snapshot nyata tanpa klaim", () => {
+  // UI analytics dihapus; kapabilitas perf dibuktikan lewat kontrak server + konsumen Exports
+  assert.ok(server.includes("handleGetPerf") && server.includes("perfPathFor"), "perf ledger API preserved");
+  const exp = script.slice(script.indexOf("function renderPerfHistory"), script.indexOf("function renderPerfHistory") + 1200);
+  assert.match(exp, /perf\.records/, "read real snapshot records");
+  assert.match(exp, /engagementPct\(rec\)/, "engagement computed from real data");
+  assert.doesNotMatch(exp, /Math\.random|estimated views/i, "no fabricated values");
 });
 
 test("p10-12: Content DNA presentation removed; /api/perf ledger & honesty preserved", () => {
   const html = fs.readFileSync("index.html", "utf8");
   assert.ok(!html.includes('id="anDNA"'), "Content DNA presentation removed");
   assert.ok(!html.includes('data-view-panel="dna"'), "dna panel removed");
-  assert.ok(!script.includes("const dna = document.getElementById(\"anDNA\")"), "anDNA renderer removed");
+  assert.ok(!script.includes("const dna = document.getElementById"), "anDNA renderer removed");
   // Shared capability dijaga: ledger & intel API tetap ada, tanpa presentasi palsu
   assert.ok(server.includes("handleGetPerf") && server.includes("perfPathFor"), "perf ledger API preserved");
-  assert.match(script, /computeProductionInsights\(\)/, "production insights kept (real evidence)");
-  assert.doesNotMatch(script.slice(script.indexOf("function computeProductionInsights"), script.indexOf("function computeProductionInsights") + 900), /Math\.random|AI recommends/i, "no fabricated signals");
+  assert.ok(server.includes("handleGetPerf"), "perf handler reachable");
 });
 
 // ── Core Intelligence STEP 7-9: integrasi pipeline nyata ─────────────────────
