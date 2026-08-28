@@ -3091,49 +3091,8 @@ textarea:focus-visible {
 .dash-recent-exports { margin-top: 14px; }
 
 /* ============================================================
-   PHASE 6 — CALENDAR + INTEGRATIONS
+   PHASE 6 — INTEGRATIONS
    ============================================================ */
-.cal-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-  padding: 14px 18px 18px;
-}
-.cal-dow {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .1em;
-  color: var(--muted-dim);
-  text-align: center;
-  text-transform: uppercase;
-}
-.cal-cell {
-  min-height: 74px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 6px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted-dim);
-  background: var(--panel-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.cal-cell.out { opacity: .35; }
-.cal-cell.today { border-color: var(--accent); }
-.cal-entry {
-  font-size: 10.5px;
-  line-height: 1.25;
-  background: rgba(198,242,74,.12);
-  border-left: 2px solid var(--accent);
-  border-radius: 5px;
-  padding: 3px 5px;
-  color: var(--text);
-  cursor: pointer;
-}
-.cal-entry b { color: var(--accent); font-variant-numeric: tabular-nums; }
-
 .integ-card {
   display: flex;
   align-items: center;

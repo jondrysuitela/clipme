@@ -1048,52 +1048,6 @@
     </div>
 
     <!-- CONTENT CALENDAR (Phase 6 — local planning plan, bukan jadwal platform) -->
-    <div class="app-view page-view" data-view-panel="calendar">
-      <section class="panel res-hero">
-        <div>
-          <p class="eyebrow">Content calendar</p>
-          <h2>Local publishing plan</h2>
-          <div class="pub-notice">PLAN LOKAL &mdash; belum ada integrasi platform, jadi ini rencana/reminder editorial. Tidak ada auto-post ke YouTube/TikTok/Instagram.</div>
-        </div>
-      </section>
-
-      <div class="res-grid">
-        <section class="panel" aria-label="Calendar month view">
-          <div class="panel-heading"><h2 id="calMonthLabel">&mdash;</h2>
-            <div>
-              <button class="ghost-button compact" id="calPrevBtn" type="button" aria-label="Previous month">&larr;</button>
-              <button class="ghost-button compact" id="calTodayBtn" type="button">Today</button>
-              <button class="ghost-button compact" id="calNextBtn" type="button" aria-label="Next month">&rarr;</button>
-            </div>
-          </div>
-          <div class="cal-grid" id="calGrid"></div>
-        </section>
-
-        <aside class="panel" aria-label="Add schedule and upcoming list">
-          <div class="panel-heading"><h2>NEW PLAN</h2><span class="status-pill" id="calCount">0</span></div>
-          <div style="padding:14px 18px; display:flex; flex-direction:column; gap:8px;">
-            <p class="field-label">Export</p>
-            <select class="inspector-input" id="calSourceSelect" aria-label="Choose exported file"></select>
-            <p class="field-label">Platform (target)</p>
-            <select class="inspector-input" id="calPlatform">
-              <option>YouTube Shorts</option>
-              <option>TikTok</option>
-              <option>Instagram Reels</option>
-              <option>Facebook</option>
-            </select>
-            <p class="field-label">Tanggal &amp; jam</p>
-            <input class="inspector-input" id="calWhen" type="datetime-local">
-            <div class="proc-actions">
-              <button class="primary-button compact" id="calAddBtn" type="button">ADD TO PLAN</button>
-            </div>
-            <span class="caption-status" id="calStatus"></span>
-          </div>
-          <div class="panel-heading" style="margin-top:8px"><h2>UPCOMING</h2></div>
-          <div class="table-list" id="calUpcoming"><div class="empty-state">Belum ada rencana.</div></div>
-        </aside>
-      </div>
-    </div>
-
     <!-- INTEGRATIONS (Phase 6 — status deteksi nyata, tanpa OAuth palsu) -->
     <div class="app-view page-view" data-view-panel="integrations">
       <section class="panel res-hero">

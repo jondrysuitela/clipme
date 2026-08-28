@@ -7124,166 +7124,6 @@ function renderRecentExportsDashboard() {
 // platform (tidak ada OAuth di build ini). Status integrasi dari deteksi
 // nyata /api/integrations. Insights dihitung dari data export asli.
 
-const CAL_KEY = "clipperStudio.calendar";
-
-function loadCalendar() {
-  try { return JSON.parse(localStorage.getItem(CAL_KEY) || "[]") || []; }
-  catch { return []; }
-}
-function saveCalendar(list) {
-  localStorage.setItem(CAL_KEY, JSON.stringify(list));
-}
-
-const calView = { year: new Date().getFullYear(), month: new Date().getMonth() };
-
-function populateCalSources() {
-  const selEl = $("#calSourceSelect");
-  if (!selEl) return;
-  selEl.innerHTML = "";
-  if (!state.exports.length) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "Belum ada export — render clip dulu";
-    selEl.appendChild(opt);
-    return;
-  }
-  state.exports.forEach((e, i) => {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = e.filename;
-    selEl.appendChild(opt);
-  });
-}
-
-function calDateKey(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function renderCalendar() {
-  const grid = document.getElementById("calGrid");
-  if (!grid) return;
-  const label = document.getElementById("calMonthLabel");
-  const monthName = new Date(calView.year, calView.month, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
-  if (label) label.textContent = monthName;
-
-  const entries = loadCalendar();
-  const byDay = {};
-  for (const e of entries) {
-    const d = new Date(e.at);
-    const key = calDateKey(d);
-    (byDay[key] = byDay[key] || []).push(e);
-  }
-
-  grid.innerHTML = "";
-  for (const dow of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
-    const h = document.createElement("span");
-    h.className = "cal-dow";
-    h.textContent = dow;
-    grid.appendChild(h);
-  }
-
-  const first = new Date(calView.year, calView.month, 1);
-  const startOffset = (first.getDay() + 6) % 7;
-  const todayKey = calDateKey(new Date());
-  for (let i = 0; i < 42; i++) {
-    const cellDate = new Date(calView.year, calView.month, 1 - startOffset + i);
-    const cell = document.createElement("div");
-    cell.className = "cal-cell" + (cellDate.getMonth() !== calView.month ? " out" : "") + (calDateKey(cellDate) === todayKey ? " today" : "");
-    const num = document.createElement("span");
-    num.textContent = String(cellDate.getDate());
-    cell.appendChild(num);
-    for (const e of byDay[calDateKey(cellDate)] || []) {
-      const chip = document.createElement("div");
-      chip.className = "cal-entry";
-      chip.title = `${e.filename} — ${e.platform} (klik untuk hapus dari plan)`;
-      const t = new Date(e.at);
-      const time = document.createElement("b");
-      time.textContent = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
-      chip.appendChild(time);
-      chip.append(` ${String(e.platform || "")}`);
-      chip.setAttribute("role", "button");
-      chip.setAttribute("tabindex", "0");
-      const removeEntry = () => {
-        if (!confirm(`Hapus rencana "${e.platform} — ${e.filename}"?`)) return;
-        saveCalendar(loadCalendar().filter((x) => x.id !== e.id));
-        renderCalendar();
-        renderUpcoming();
-        showToast("Rencana dihapus.");
-      };
-      chip.addEventListener("click", removeEntry);
-      chip.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); removeEntry(); } });
-      cell.appendChild(chip);
-    }
-    grid.appendChild(cell);
-  }
-  renderUpcoming();
-}
-
-function renderUpcoming() {
-  const wrap = document.getElementById("calUpcoming");
-  const count = document.getElementById("calCount");
-  if (!wrap) return;
-  const entries = loadCalendar().sort((a, b) => new Date(a.at) - new Date(b.at));
-  if (count) count.textContent = String(entries.length);
-  if (!entries.length) {
-    wrap.innerHTML = '<div class="empty-state">Belum ada rencana.</div>';
-    return;
-  }
-  wrap.innerHTML = "";
-  for (const e of entries) {
-    const row = document.createElement("div");
-    row.className = "table-row";
-    const main = document.createElement("div");
-    const nameEl = document.createElement("strong");
-    nameEl.textContent = e.filename;
-    const meta = document.createElement("span");
-    const t = new Date(e.at);
-    meta.textContent = `${t.toLocaleString()} · ${e.platform}`;
-    main.appendChild(nameEl);
-    main.appendChild(meta);
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "ghost-button compact danger-btn";
-    del.textContent = "Hapus";
-    del.addEventListener("click", () => {
-      saveCalendar(loadCalendar().filter((x) => x.id !== e.id));
-      renderCalendar();
-      showToast("Rencana dihapus.");
-    });
-    row.appendChild(main);
-    row.appendChild(del);
-    wrap.appendChild(row);
-  }
-}
-
-$("#calAddBtn").addEventListener("click", () => {
-  const idx = $("#calSourceSelect").value;
-  if (idx === "" || idx == null) { showToast("Belum ada file export untuk dipilih."); return; }
-  const whenVal = $("#calWhen").value;
-  if (!whenVal) { showToast("Pilih tanggal & jam dulu."); return; }
-  const when = new Date(whenVal);
-  if (Number.isNaN(when.getTime())) { showToast("Tanggal tidak valid."); return; }
-  if (when.getTime() < Date.now()) { showToast("Tidak bisa menjadwalkan waktu yang sudah lewat."); return; }
-  const entry = {
-    id: Date.now(),
-    filename: state.exports[Number(idx)].filename,
-    platform: $("#calPlatform").value,
-    at: when.toISOString()
-  };
-  const list = loadCalendar();
-  list.push(entry);
-  saveCalendar(list);
-  $("#calStatus").textContent = `Plan tersimpan lokal: ${entry.platform} @ ${when.toLocaleString()}`;
-  showToast("Rencana disimpan ke kalender lokal.");
-  renderCalendar();
-});
-$("#calPrevBtn").addEventListener("click", () => { calView.month--; if (calView.month < 0) { calView.month = 11; calView.year--; } renderCalendar(); });
-$("#calNextBtn").addEventListener("click", () => { calView.month++; if (calView.month > 11) { calView.month = 0; calView.year++; } renderCalendar(); });
-$("#calTodayBtn").addEventListener("click", () => { calView.year = new Date().getFullYear(); calView.month = new Date().getMonth(); renderCalendar(); });
-
 // ---- Integrations: deteksi nyata, tanpa OAuth palsu ----
 // PHASE 6 — Social Hub: OAuth accounts (utama) + fallback deteksi kredensial.
 const socialUi = { polling: {} };
@@ -7537,12 +7377,8 @@ async function loadIntegrationsConfig() {
 
 // Publishing → SCHEDULE (local plan): pindah ke Calendar dengan export terpilih
 $("#pubScheduleBtn").addEventListener("click", () => {
-  showView("calendar");
-  populateCalSources();
-  const pubIdx = $("#pubSourceSelect").value;
-  if (pubIdx) $("#calSourceSelect").value = pubIdx;
-  $("#calPlatform").value = publishState.platform;
-  showToast("Atur tanggal & jam lalu klik ADD TO PLAN.");
+  showView("exports");
+  showToast("Rencana tayang lokal dihapus — gunakan Export untuk hasil akhir.");
 });
 
 // ---- Production insights: observasi dari data nyata, tanpa klaim AI ----
@@ -7570,10 +7406,6 @@ function computeProductionInsights() {
     if (topProj && topProj[0] !== "unknown") {
       lines.push(`Project paling produktif: "${topProj[0]}" (${topProj[1]} export).`);
     }
-    const planned = loadCalendar().length;
-    lines.push(planned
-      ? `${planned} rencana tayang tersimpan di kalender lokal.`
-      : "Belum ada rencana tayang di kalender lokal.");
     lines.push("Observasi berbasis data lokal yang tersedia — tanpa prediksi performa.");
   } else {
     lines.push("Belum cukup data export untuk observasi (minimal 3 file).");
@@ -7592,8 +7424,6 @@ $$("[data-qview]").forEach((btn) => {
     const view = btn.dataset.qview;
     showView(view);
     if (view === "exports") loadExports();
-    if (view === "calendar") { populateCalSources(); renderCalendar(); }
-    if (view === "integrations") loadIntegrations();
   });
 });
 
@@ -7776,13 +7606,6 @@ function renderIntelRecommendations(data) {
       resultsState.projectId = intelState.projectId;
       openResultsForProject(intelState.projectId);
     }, "GO RESULTS"]);
-  }
-  if (!loadCalendar().length && state.exports.length) {
-    recs.push(["Ada export tapi kalender masih kosong — susun rencana tayang.", () => {
-      showView("calendar");
-      populateCalSources();
-      renderCalendar();
-    }, "OPEN CALENDAR"]);
   }
   if (!recs.length) recs.push(["Semua tahap utama sudah berjalan untuk project ini.", null, null]);
 

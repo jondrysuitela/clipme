@@ -841,21 +841,13 @@ test("phase6: UI integrasi jujur — NOT CONNECTED, tanpa OAuth simulasi", () =>
   assert.match(server, /\.add\("GET", "\/api\/integrations"/, "server detection endpoint kept");
 });
 
-test("phase6: kalender = local plan berlabel; tolak waktu lampau; tanpa auto-post", () => {
+test("phase6: calendar UI & scheduling layer removed (V2 axis Results/Export)", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  assert.ok(html.includes('data-view-panel="calendar"'), "calendar view exists");
-  assert.match(html, /PLAN LOKAL/i, "clear local-plan label");
-  const block = script.slice(script.indexOf("// ================= CALENDAR + INTEGRATIONS"), script.indexOf("const SETTINGS_KEY"));
-  assert.match(block, /localStorage\.setItem\(CAL_KEY/, "local persistence (planning layer)");
-  assert.match(block, /waktu yang sudah lewat/, "past-time rejected");
-  assert.match(block, /clipperStudio\.calendar/, "namespaced key");
-  assert.doesNotMatch(block, /publish.*platform|auto.?post/i.test("") ? /$^/ : /fetch\(.*(youtube|tiktok|instagram)/i, "no platform API calls");
-});
-
-test("phase6: calendar entries treat persisted labels as text, not HTML", () => {
-  const block = script.slice(script.indexOf("function renderCalendar"), script.indexOf("function renderUpcoming"));
-  assert.doesNotMatch(block, /chip\.innerHTML\s*=/, "calendar labels must not be injected as HTML");
-  assert.match(block, /chip\.append\(` \$\{String\(e\.platform \|\| ""\)\}`\)/, "platform is appended as text");
+  assert.ok(!html.includes('data-view-panel="calendar"'), "calendar panel removed");
+  assert.ok(!html.includes('id="calAddBtn"'), "calendar-specific controls removed");
+  assert.ok(!html.includes("data-qview=\"calendar\""), "calendar quick-action removed");
+  assert.ok(!script.includes("CAL_KEY"), "calendar localStorage state removed");
+assert.ok(!script.includes("function renderCalendar"), "calendar renderer removed");
 });
 
 test("phase6: dead PUBLISH NOW button removed — publish flow uses direct export", () => {
