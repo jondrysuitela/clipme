@@ -5527,9 +5527,9 @@ function applyResView() {
     const pubBtn = document.createElement("button");
     pubBtn.type = "button";
     pubBtn.className = "ghost-button compact";
-    pubBtn.textContent = "PUBLISH";
-    pubBtn.title = "Siapkan metadata publish dari intel clip ini";
-    pubBtn.addEventListener("click", (e) => { e.stopPropagation(); openPublishForClip(clip); });
+    pubBtn.textContent = "EXPORT";
+    pubBtn.title = "Export clip ini dengan konfigurasi aktif (caption/reframe/layout)";
+    pubBtn.addEventListener("click", (e) => { e.stopPropagation(); exportSelectedResultClip(clip); });
     actions.appendChild(playBtn);
     actions.appendChild(studioBtn);
     actions.appendChild(pubBtn);
@@ -5846,11 +5846,6 @@ $("#resRetryBtn").addEventListener("click", () => {
   analyzeAllClips();
 });
 // "EXPORT & PUBLISH" — buka alur publish dengan metadata clip terpilih.
-$("#riAnalyzeBtn").addEventListener("click", () => {
-  const clip = resultsState.clips.find((c) => c.id === resultsState.selectedClipId);
-  if (!clip) { showToast("Pilih clip dulu."); return; }
-  openPublishForClip(clip);
-});
 $("#riPreviewBtn").addEventListener("click", () => handoffToStudio(true));
 $("#riStudioBtn").addEventListener("click", () => handoffToStudio(false));
 $("#resSearch").addEventListener("input", applyResView);
@@ -6122,47 +6117,46 @@ if ($("#resTplBrowse")) $("#resTplBrowse").addEventListener("click", openTemplat
 $$("#resRatioSegmented button").forEach((btn) => {
   btn.addEventListener("click", () => setRatio(btn.dataset.rratio));
 });
+async function exportSelectedResultClip(clip) {
+  if (!clip || !resultsState.projectId) { showToast("Pilih clip dulu."); return; }
+  const payload = {
+    projectId: resultsState.projectId,
+    clipId: clip.id,
+    start: Number(clip.start) || 0,
+    end: Number(clip.end) || 0,
+    ratio: currentRatio(),
+    language: "Indonesia",
+    captionStyle: effectiveCaptionStyle(),
+    fontFamily: ($("#captionFontSelect") && $("#captionFontSelect").value) || "Arial",
+    captionColor: ($("#captionColor") && $("#captionColor").value) || "#FFFFFF",
+    captionSize: Number(captionSize.value) || 23,
+    captionPosition: state.captionPosition || 0.76,
+    speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+    faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+    reframe: !!document.getElementById("reframeToggle")?.checked,
+    layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO"
+  };
+  try {
+    const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Export gagal dimulai.");
+    showJobProgress(JOB_LABELS["export"], { indeterminate: true });
+    const result = await waitForJob(d.jobId, { onUpdate: renderProcessingTick });
+    settleJobProgress("success", result && result.filename ? result.filename : "");
+    showToast("Export selesai — buka tab Exports.");
+    loadExports();
+  } catch (err) {
+    settleJobProgress("error", err.message);
+    showToast(err.message || "Export gagal.");
+  }
+}
 if ($("#riExportBtn")) {
-  $("#riExportBtn").addEventListener("click", async () => {
-    const clip = currentMetaClip();
-    if (!clip || !resultsState.projectId) { showToast("Pilih clip dulu."); return; }
+  $("#riExportBtn").addEventListener("click", () => {
     const btn = $("#riExportBtn");
     btn.disabled = true;
     const old = btn.textContent;
     btn.textContent = "Rendering…";
-    try {
-      const payload = {
-        projectId: resultsState.projectId,
-        clipId: clip.id,
-        start: Number(clip.start) || 0,
-        end: Number(clip.end) || 0,
-        ratio: currentRatio(),
-        language: "Indonesia",
-        captionStyle: effectiveCaptionStyle(),
-        fontFamily: ($("#captionFontSelect") && $("#captionFontSelect").value) || "Arial",
-        captionColor: ($("#captionColor") && $("#captionColor").value) || "#FFFFFF",
-        captionSize: Number(captionSize.value) || 23,
-        captionPosition: state.captionPosition || 0.76,
-        speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
-        faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
-        reframe: !!document.getElementById("reframeToggle")?.checked,
-        layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO"
-      };
-      const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Export gagal dimulai.");
-      showJobProgress(JOB_LABELS["export"], { indeterminate: true });
-      const result = await waitForJob(d.jobId, { onUpdate: renderProcessingTick });
-      settleJobProgress("success", result && result.filename ? result.filename : "");
-      showToast("Export selesai — buka tab Exports.");
-      loadExports();
-    } catch (err) {
-      settleJobProgress("error", err.message);
-      showToast(err.message || "Export gagal.");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = old;
-    }
+    exportSelectedResultClip(currentMetaClip()).finally(() => { btn.disabled = false; btn.textContent = old; });
   });
 }
 // Sync controls saat clip dipilih
