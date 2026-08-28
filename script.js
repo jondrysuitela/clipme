@@ -4827,54 +4827,6 @@ async function loadAnalytics() {
     growth.appendChild(li);
   }
 
-  // 7) Content DNA — observed bests dari join ledger × intel
-  const dna = document.getElementById("anDNA");
-  dna.innerHTML = "";
-  const linked = ledger.filter((l) => l.clip && typeof l.clip.score === "number" && Number(l.rec.views) > 0);
-  const groupAvg = (keyFn) => {
-    const g = {};
-    for (const l of linked) {
-      const k = keyFn(l);
-      if (!k) continue;
-      (g[k] = g[k] || { sum: 0, n: 0 }).sum += Number(l.rec.views);
-      g[k].n += 1;
-    }
-    return Object.entries(g).map(([k, v]) => ({ k, avg: v.sum / v.n, n: v.n })).sort((a, b) => b.avg - a.avg);
-  };
-  const addDna = (text) => {
-    if (!text) return;
-    const li = document.createElement("li");
-    li.className = "ok";
-    li.textContent = text;
-    dna.appendChild(li);
-  };
-  const byHook = groupAvg((l) => l.clip.hookType);
-  if (byHook.length && byHook[0].n >= 1) addDna(`Hook type dengan views tertinggi (observed): ${byHook[0].k} — avg ${Math.round(byHook[0].avg).toLocaleString()} views.`);
-  const byDur = groupAvg((l) => {
-    const d = (Number(l.clip.end) || 0) - (Number(l.clip.start) || 0);
-    if (d < 30) return "<30s";
-    if (d < 45) return "30–45s";
-    if (d < 60) return "45–60s";
-    return "≥60s";
-  });
-  if (byDur.length) addDna(`Durasi dengan views tertinggi (observed): bucket ${byDur[0].k}.`);
-  const byRatio = groupAvg(() => "");
-  const ratioCount = {};
-  for (const l of ledger) { const k = l.item.ratio || ""; if (k) ratioCount[k] = (ratioCount[k] || 0) + 1; }
-  const topRatio = Object.entries(ratioCount).sort((a, b) => b[1] - a[1])[0];
-  if (topRatio) addDna(`Format paling sering diproduksi: ${topRatio[0]} (${topRatio[1]} file).`);
-  // Prediction vs actual (observational): apakah clip berskor tertinggi juga paling banyak dilihat?
-  const withBoth = linked.slice().sort((a, b) => b.clip.score - a.clip.score);
-  if (withBoth.length >= 2) {
-    const topScoredViewRank = withBoth.map((l) => Number(l.rec.views));
-    const isTopAlsoBest = Math.max(...topScoredViewRank) === topScoredViewRank[0];
-    addDna(isTopAlsoBest
-      ? "Clip dengan skor engine tertinggi juga yang paling banyak dilihat (observasi awal)."
-      : "Clip skor tertinggi BELUM menjadi yang paling banyak dilihat (observasi awal).");
-    addDna("Korelasi tidak disimpulkan sebagai sebab-akibat; data observasional.");
-  } else if (linked.length === 1) {
-    addDna("Butuh ≥2 clip ter-link untuk membandingkan prediksi vs aktual.");
-  }
   computeProductionInsights();
 }
 

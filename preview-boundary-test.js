@@ -317,10 +317,9 @@ test("dashboard: engine status real dari /api/system + localai + queue", () => {
 
 test("dashboard: placeholder intelligence tanpa chart/statistik palsu", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  // Phase 3: Results nyata; Phase 6: Analytics = honest unavailable + insights.
-  // Placeholder "Coming next" tersisa Content DNA saja.
+  // V2: placeholder "Coming next" dihapus seluruhnya — Results nyata, tanpa panel palsu.
   const coming = (html.match(/Coming next/g) || []).length;
-  assert.strictEqual(coming, 1, "only Content DNA remains a future placeholder");
+  assert.strictEqual(coming, 0, "no future-placeholder panels remain");
   assert.ok(html.includes('data-view-panel="results"'), "results panel exists");
   assert.ok(html.includes('id="resultsClipList"'), "results workspace is real, not placeholder");
   assert.match(html, /Belum ada data performa/, "analytics honestly reports missing ledger data");
@@ -1005,15 +1004,15 @@ test("p10-12: analytics logic — totals/top/platform/growth/velocity dari ledge
   assert.doesNotMatch(fn, /Math\.random|estimated views/i);
 });
 
-test("p10-12: Content DNA observed + prediction-vs-actual tanpa klaim kausal", () => {
+test("p10-12: Content DNA presentation removed; /api/perf ledger & honesty preserved", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  assert.ok(html.includes("CONTENT DNA"), "DNA panel exists");
-  assert.match(html, /observational/, "labeled observational");
-  const fn = script.slice(script.indexOf("// ================= ANALYTICS + CONTENT DNA"), script.indexOf('$("#anRefreshBtn")'));
-  assert.match(fn, /hookType/, "best hook type aggregation");
-  assert.match(fn, /bucket \$\{byDur\[0\]\.k\}/ || fn.includes("bucket "), "duration bucket aggregation");
-  assert.match(fn, /skor engine tertinggi/, "prediction vs actual comparison present");
-  assert.match(fn, /tidak disimpulkan sebagai sebab-akibat/, "no causal claim");
+  assert.ok(!html.includes('id="anDNA"'), "Content DNA presentation removed");
+  assert.ok(!html.includes('data-view-panel="dna"'), "dna panel removed");
+  assert.ok(!script.includes("const dna = document.getElementById(\"anDNA\")"), "anDNA renderer removed");
+  // Shared capability dijaga: ledger & intel API tetap ada, tanpa presentasi palsu
+  assert.ok(server.includes("handleGetPerf") && server.includes("perfPathFor"), "perf ledger API preserved");
+  assert.match(script, /computeProductionInsights\(\)/, "production insights kept (real evidence)");
+  assert.doesNotMatch(script.slice(script.indexOf("function computeProductionInsights"), script.indexOf("function computeProductionInsights") + 900), /Math\.random|AI recommends/i, "no fabricated signals");
 });
 
 // ── Core Intelligence STEP 7-9: integrasi pipeline nyata ─────────────────────
