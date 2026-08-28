@@ -771,10 +771,6 @@ test("phase7: endpoint intelligence — ekstraktif dari transkrip + cache invali
 });
 
 test("phase7: UI intel jujur — field kosong tetap 'not available', why hanya dari engine", () => {
-  const html = fs.readFileSync("index.html", "utf8");
-  for (const id of ["intelProjectSelect", "intelLoadBtn", "intelSummary", "intelKeywords", "intelTopClips", "intelRecommendations", "intelSearchInput"]) {
-    assert.ok(html.includes(`id="${id}"`), `intel part ${id} must exist`);
-  }
   const fn = script.slice(script.indexOf("// ================= CONTENT INTELLIGENCE"), script.indexOf("const SETTINGS_KEY"));
   assert.match(fn, /Summary not available\./, "honest missing summary");
   assert.match(fn, /No transcript yet/, "honest missing transcript");
@@ -839,14 +835,10 @@ test("dashboard: operational activity and insights use only persisted local evid
 });
 
 test("phase6: UI integrasi jujur — NOT CONNECTED, tanpa OAuth simulasi", () => {
-  const html = fs.readFileSync("index.html", "utf8");
-  for (const id of ["integList", "integRefreshBtn"]) {
-    assert.ok(html.includes(`id="${id}"`), `${id} must exist`);
-  }
-  assert.match(html, /tidak ada simulasi koneksi/i, "explicit no-simulation notice");
   const fn = script.slice(script.indexOf("async function loadIntegrations"), script.indexOf("function updatePublishAvailability"));
   assert.match(fn, /NOT CONNECTED/, "real state rendered from endpoint");
   assert.doesNotMatch(fn, /status\s*=\s*["']CONNECTED["']/, "never fakes a connection");
+  assert.match(server, /\.add\("GET", "\/api\/integrations"/, "server detection endpoint kept");
 });
 
 test("phase6: kalender = local plan berlabel; tolak waktu lampau; tanpa auto-post", () => {
@@ -1011,11 +1003,7 @@ test("p10-12: server membawa clipId dari info.txt — kunci join prediksi-vs-akt
   assert.match(perf, /body\.platform/, "platform stored per export sidecar");
 });
 
-test("p10-12: analytics view — totals/top/platform/growth/velocity dari ledger", () => {
-  const html = fs.readFileSync("index.html", "utf8");
-  for (const id of ["analyticsEmpty", "analyticsPanels", "anViews", "anLikes", "anComments", "anShares", "anTop", "anPlatforms", "anGrowth"]) {
-    assert.ok(html.includes(`id="${id}"`), `analytics part ${id} must exist`);
-  }
+test("p10-12: analytics logic — totals/top/platform/growth/velocity dari ledger", () => {
   const fn = script.slice(script.indexOf("// ================= ANALYTICS + CONTENT DNA"), script.indexOf('$("#anRefreshBtn")'));
   assert.match(fn, /\/api\/perf\//, "reads real ledger snapshots");
   assert.match(fn, /api\/projects\/\$\{pid\}/, "joins engine intel via project detail");

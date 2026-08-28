@@ -326,6 +326,9 @@ function setRatio(token) {
   $$(".segmented button[data-cratio]").forEach((item) => {
     item.classList.toggle("active", item.dataset.cratio === ratio);
   });
+  $$(".segmented button[data-rratio]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.rratio === ratio);
+  });
   updatePreviewFaceTransform();
   updateFinalPreviewStrip();
 }
@@ -1359,8 +1362,8 @@ function mountWorkspaces() {
   if (previewPanel && resVideoMount && previewPanel.parentElement !== resVideoMount) {
     resVideoMount.appendChild(previewPanel);
   }
-  // SEMUA kontrol auto-caption terkonsolidasi di Caption Workspace.
-  const controlsMount = document.getElementById("capControlsMount");
+  // V2: kontrol style caption pindah ke RESULTS inspector (bukan view captions).
+  const controlsMount = document.getElementById("resCaptionMount");
   if (controlsMount) {
     for (const id of ["captionStyleSelect", "captionFontSelect", "captionColor", "captionSize", "captionPosition"]) {
       const el = document.getElementById(id);
@@ -1375,19 +1378,32 @@ function mountWorkspaces() {
         if (presets) controlsMount.appendChild(presets);
       }
     }
+    // Auto-caption toggle & filler tetap di create workspace (single source).
     const act = document.getElementById("autoCaptionToggle");
     const slotAct = document.getElementById("slotAutoCaption");
-    if (act) slotAct.appendChild(act.closest("label") || act); else if (slotAct) slotAct.remove();
+    if (act) slotAct.appendChild(act.closest("label") || act);
     const filler = document.getElementById("fillerModeSelect");
     const slotFiller = document.getElementById("slotFiller");
-    if (filler) {
-      const fp = filler.previousElementSibling;
-      const flabel = filler.closest(".cap-slot") ? null : (fp && fp.nodeType === 1 && fp.classList && fp.classList.contains("field-label") ? fp : null);
-      if (flabel) controlsMount.appendChild(flabel);
-      controlsMount.appendChild(filler);
-    } else if (slotFiller) slotFiller.remove();
-    const grid = document.getElementById("createCapConfig");
-    if (grid && !grid.querySelector("input,select")) grid.remove();
+    if (filler && slotFiller) slotFiller.appendChild(filler);
+  }
+
+  // V2: Reframe kontrol pindah dari editor settings ke RESULTS inspector.
+  const reframeMount = document.getElementById("resReframeMount");
+  if (reframeMount) {
+    for (const id of ["reframeToggle", "reframeLayoutSelect"]) {
+      const el = document.getElementById(id);
+      if (!el || el.parentElement === reframeMount) continue;
+      const prev = el.previousElementSibling;
+      const label = prev && prev.nodeType === 1 && prev.classList && prev.classList.contains("audio-opt")
+        ? prev : null;
+      if (id === "reframeLayoutSelect") {
+        const wrap = el.closest("label");
+        if (wrap) reframeMount.appendChild(wrap); else reframeMount.appendChild(el);
+      } else if (id === "reframeToggle") {
+        const wrap = el.closest("label");
+        if (wrap) reframeMount.appendChild(wrap); else reframeMount.appendChild(el);
+      }
+    }
   }
 }
 
@@ -6253,6 +6269,96 @@ if ($("#riMetaTitleCopy")) {
     if (clip) generateClipMetadata(clip, { regenerate: true });
   });
 }
+
+// ---- V2: CAPTION + REFRAME + EXPORT INLINE di Results inspector ----
+function syncResultsCaptionControls() {
+  const tg = document.getElementById("resCaptionToggle");
+  if (tg) tg.checked = autoCaptionEnabled();
+  const tplSel = document.getElementById("resTplSelect");
+  if (tplSel && state.captionTemplateId) tplSel.value = state.captionTemplateId;
+}
+function populateResultsTplSelect() {
+  const sel = document.getElementById("resTplSelect");
+  if (!sel || !window.ClipmeCaptionTemplates) return;
+  sel.innerHTML = "";
+  for (const t of window.ClipmeCaptionTemplates.TEMPLATES) {
+    const opt = document.createElement("option");
+    opt.value = t.id;
+    opt.textContent = t.name;
+    sel.appendChild(opt);
+  }
+  if (state.captionTemplateId) sel.value = state.captionTemplateId;
+}
+if ($("#resCaptionToggle")) {
+  $("#resCaptionToggle").addEventListener("change", () => {
+    const act = document.getElementById("autoCaptionToggle");
+    if (act) act.checked = $("#resCaptionToggle").checked;
+    syncAutoCaptionToggle();
+    saveSettingsDebounced();
+  });
+}
+if ($("#resTplSelect")) {
+  populateResultsTplSelect();
+  $("#resTplSelect").addEventListener("change", () => {
+    const t = window.ClipmeCaptionTemplates && window.ClipmeCaptionTemplates.getById($("#resTplSelect").value);
+    if (t) applyCaptionTemplate(t);
+    syncResultsCaptionControls();
+  });
+}
+if ($("#resTplBrowse")) $("#resTplBrowse").addEventListener("click", openTemplateGallery);
+$$("#resRatioSegmented button").forEach((btn) => {
+  btn.addEventListener("click", () => setRatio(btn.dataset.rratio));
+});
+if ($("#riExportBtn")) {
+  $("#riExportBtn").addEventListener("click", async () => {
+    const clip = currentMetaClip();
+    if (!clip || !resultsState.projectId) { showToast("Pilih clip dulu."); return; }
+    const btn = $("#riExportBtn");
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = "Rendering…";
+    try {
+      const payload = {
+        projectId: resultsState.projectId,
+        clipId: clip.id,
+        start: Number(clip.start) || 0,
+        end: Number(clip.end) || 0,
+        ratio: currentRatio(),
+        language: "Indonesia",
+        captionStyle: effectiveCaptionStyle(),
+        fontFamily: ($("#captionFontSelect") && $("#captionFontSelect").value) || "Arial",
+        captionColor: ($("#captionColor") && $("#captionColor").value) || "#FFFFFF",
+        captionSize: Number(captionSize.value) || 23,
+        captionPosition: state.captionPosition || 0.76,
+        speakerCut: !!document.getElementById("speakerCutToggle")?.checked,
+        faceTrack: !!document.getElementById("faceTrackToggle")?.checked,
+        reframe: !!document.getElementById("reframeToggle")?.checked,
+        layout: ($("#reframeLayoutSelect") && $("#reframeLayoutSelect").value) || "AUTO"
+      };
+      const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Export gagal dimulai.");
+      showJobProgress(JOB_LABELS["export"], { indeterminate: true });
+      const result = await waitForJob(d.jobId, { onUpdate: renderProcessingTick });
+      settleJobProgress("success", result && result.filename ? result.filename : "");
+      showToast("Export selesai — buka tab Exports.");
+      loadExports();
+    } catch (err) {
+      settleJobProgress("error", err.message);
+      showToast(err.message || "Export gagal.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+}
+// Sync controls saat clip dipilih
+const _origFillResultIntel = fillResultIntel;
+fillResultIntel = function (clip) {
+  _origFillResultIntel(clip);
+  syncResultsCaptionControls();
+  document.querySelectorAll("#resRatioSegmented button").forEach((b) => b.classList.toggle("active", b.dataset.rratio === currentRatio()));
+};
 
 // ---- Create workspace: back-link + aspect ratio sync + workspace mode ----
 if ($("#backToProjectsBtn")) $("#backToProjectsBtn").addEventListener("click", () => showView("library"));

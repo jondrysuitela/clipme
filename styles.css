@@ -3313,6 +3313,23 @@ textarea:focus-visible {
 /* Publish: export langsung */
 .pub-direct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
 @media (max-width: 700px) { .pub-direct-grid { grid-template-columns: 1fr; } }
+
+/* V2: Caption & Reframe inline di Results inspector */
+.res-caption-mount,
+.res-reframe-mount {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.res-caption-mount .audio-opt,
+.res-reframe-mount .audio-opt {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.res-reframe-mount select { margin-left: 6px; }
 /* Collapsible accordion sections */
 .accordion-section { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
 .accordion-header {

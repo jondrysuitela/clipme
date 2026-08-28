@@ -926,10 +926,40 @@
               <div class="intel-block" id="riMetaTags">&mdash;</div>
               <button class="secondary-button compact" id="riMetaCopyAll" type="button" style="width:100%; margin-top:6px">COPY ALL</button>
             </div>
+
+            <!-- CAPTION — inline di Results (V2: bukan halaman terpisah) -->
+            <details class="accordion-section" id="resCaptionSection" open style="margin-top:10px">
+              <summary class="accordion-header"><h3>Caption</h3><span class="accordion-icon">&#9660;</span></summary>
+              <div class="accordion-body">
+                <div class="cap-config-grid">
+                  <span class="cap-slot"><label class="audio-opt"><input type="checkbox" id="resCaptionToggle" checked> Enabled</label></span>
+                  <select id="resTplSelect" class="inspector-input" aria-label="Caption template"></select>
+                  <button class="ghost-button compact" id="resTplBrowse" type="button">Template Library</button>
+                </div>
+                <div id="resCaptionMount" class="res-caption-mount"></div>
+              </div>
+            </details>
+
+            <!-- REFRAME — inline di Results (V2) -->
+            <details class="accordion-section" id="resReframeSection" open>
+              <summary class="accordion-header"><h3>Reframe</h3><span class="accordion-icon">&#9660;</span></summary>
+              <div class="accordion-body">
+                <div id="resReframeMount" class="res-reframe-mount"></div>
+                <p class="field-label">ASPECT RATIO</p>
+                <div class="segmented" id="resRatioSegmented">
+                  <button class="active" data-rratio="portrait" type="button">9:16</button>
+                  <button data-rratio="square" type="button">1:1</button>
+                  <button data-rratio="four5" type="button">4:5</button>
+                  <button data-rratio="wide" type="button">16:9</button>
+                </div>
+              </div>
+            </details>
+
             <div class="res-intel-actions">
               <button class="primary-button compact" id="riPreviewBtn" type="button">PREVIEW</button>
-              <button class="secondary-button compact" id="riStudioBtn" type="button">OPEN IN STUDIO</button>
-              <button class="ghost-button compact" id="riAnalyzeBtn" type="button">EXPORT &amp; PUBLISH</button>
+              <button class="primary-button compact" id="riExportBtn" type="button">EXPORT</button>
+              <button class="secondary-button compact" id="riStudioBtn" type="button">EDIT</button>
+              <button class="ghost-button compact" id="riAnalyzeBtn" type="button">PUBLISH</button>
               <span class="caption-status" id="riStatus"></span>
             </div>
             <!-- Analysis details (collapsed by default — real data, low clutter) -->
