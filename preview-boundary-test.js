@@ -252,32 +252,29 @@ test("settings: speakerCut & faceTrack benar-benar masuk analisis lokal server",
 });
 
 // ── Phase 1: Dashboard / command center ─────────────────────────────────────
-test("dashboard: nav lengkap (7 view) & dashboard jadi landing default", () => {
+test("dashboard: nav lengkap (5 view) & dashboard jadi landing default", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const v of ["dashboard", "library", "exports", "publish", "results", "analytics", "dna"]) {
+  // Nav baru (V2): Home/Projects/Results/Exports/Settings — legacy nav dihapus.
+  for (const v of ["dashboard", "library", "results", "exports", "settings"]) {
     assert.ok(html.includes(`data-view="${v}"`), `nav item ${v} must exist`);
     assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} must exist`);
   }
+  // Legacy nav TIDAK boleh ada di sidebar lagi
+  for (const v of ["publish", "calendar", "intel", "captions", "analytics", "dna", "integrations", "studio"]) {
+    assert.ok(!html.includes(`data-view="${v}"`), `legacy nav ${v} removed from sidebar`);
+  }
   assert.ok(html.includes('data-view-panel="studio"'), "editor panel (studio) still exists — reachable via OPEN IN STUDIO");
   assert.ok(html.includes('data-view-panel="newproject"'), "dedicated new-project workspace panel exists");
+  assert.ok(html.includes('data-view-panel="captions"'), "caption workspace panel exists (Reached via Results, not nav)");
   const dash = html.indexOf('data-view-panel="dashboard"');
   const studio = html.indexOf('data-view-panel="studio"');
   assert.ok(dash > -1 && studio > dash, "dashboard panel must precede studio");
   const active = html.slice(html.lastIndexOf("<div", dash), dash);
   assert.match(active, /class="app-view page-view active"/, "dashboard must be the initial active view");
-  // Sidebar IA final: Tools group + NEW PROJECT CTA; studio bukan nav sama sekali;
-  // workspace dedikasi: newproject / captions / settings
-  assert.ok(html.includes("Tools</p>"), "sidebar Tools group label");
   assert.ok(html.includes('id="sidebarNewProjectBtn"'), "primary NEW PROJECT CTA in sidebar");
-  assert.ok(!html.includes('data-view="studio"'), "old create nav item fully removed");
-  for (const v of ["captions", "settings"]) {
-    assert.ok(html.includes(`data-view="${v}"`), `nav ${v} exists`);
-    assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v} exists`);
-  }
   assert.ok(!html.includes('data-view="newproject"'), "newproject is an ACTION (button), not a sidebar destination");
   assert.ok(html.includes('data-view-panel="newproject"'), "newproject workspace panel exists");
-  assert.match(script, /mountWorkspaces\(\);/, "workspaces mounted at boot");
-  assert.match(script, /function renderCaptionsWorkspace/, "caption workspace renderer");
+  assert.match(script, /function renderCaptionsWorkspace/, "caption workspace renderer (inline in Results flow)");
 });
 
 test("dashboard: 4 KPI card & nilainya dari data nyata (anti-mock)", () => {
@@ -886,14 +883,18 @@ test("phase6: production insights dari data export asli — tanpa klaim AI/predi
   assert.doesNotMatch(fn, /Math\.random|AI predicts|viral score predict/i, "no fabricated AI signals");
 });
 
-test("phase6: quick actions dashboard + nav lengkap (10 view)", () => {
+test("phase6: quick actions dashboard + nav baru (5 view, legacy removed)", () => {
   const html = fs.readFileSync("index.html", "utf8");
-  for (const v of ["dashboard", "library", "exports", "publish", "calendar", "results", "intel", "analytics", "dna", "integrations", "captions", "settings"]) {
+  for (const v of ["dashboard", "library", "results", "exports", "settings"]) {
     assert.ok(html.includes(`data-view="${v}"`), `nav ${v}`);
     if (v !== "dashboard") assert.ok(html.includes(`data-view-panel="${v}"`), `panel ${v}`);
   }
+  for (const v of ["publish", "calendar", "intel", "captions", "analytics", "dna", "integrations"]) {
+    assert.ok(!html.includes(`data-view="${v}"`), `legacy nav ${v} removed`);
+  }
   assert.ok(html.includes("data-qview=\"exports\"".replace(/\\"/g, '"')), "quick action exports");
-  assert.ok(html.includes("data-qview=\"calendar\"".replace(/\\"/g, '"')), "quick action calendar");
+  assert.ok(!html.includes("data-qview=\"calendar\""), "legacy calendar quick action removed");
+  assert.ok(!html.includes("data-qview=\"integrations\""), "legacy integrations quick action removed");
 });
 
 // ── Poin #4/#5: per-engine status + analysis complete tiering ────────────────

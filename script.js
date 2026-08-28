@@ -1335,6 +1335,11 @@ function showView(view) {
     if (capPanel && state.projectId) capPanel.style.display = "";
     renderCaptionsWorkspace();
   }
+  if (view === "results" && state.projectId && state.activeClip) {
+    // V2: caption timeline INLINE di Results — tampilkan bila clip terpilih
+    const capPanel = document.getElementById("captionTimelinePanel");
+    if (capPanel) capPanel.style.display = state.captionSegments.length ? "" : "none";
+  }
   if (view === "settings") fillSettingsView();
 }
 
@@ -1344,7 +1349,8 @@ function mountWorkspaces() {
   const npMount = document.getElementById("npMount");
   if (uploadPanel && npMount && uploadPanel.parentElement !== npMount) npMount.appendChild(uploadPanel);
   const capPanel = document.getElementById("captionTimelinePanel");
-  const capMount = document.getElementById("capTimelineMount");
+  // V2: caption timeline INLINE di Results (bukan view terpisah) — sinkron dgn previewVideo
+  const capMount = document.getElementById("resTimelineMount");
   if (capPanel && capMount && capPanel.parentElement !== capMount) capMount.appendChild(capPanel);
   // Studio preview dipindah ke RESULTS — studio murni editor teks (tanpa video).
   // ID semua tetap, jadi tidak ada regresi; preview utama ada di Results + Captions.
@@ -4019,13 +4025,7 @@ $$(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     showView(button.dataset.view);
     if (button.dataset.view === "dashboard") loadDashboardData();
-    if (button.dataset.view === "studio") checkEngineReadiness(false);
     if (button.dataset.view === "results" && resultsState.projectId) renderResultsAll();
-    if (button.dataset.view === "publish") { populatePubSources(); pubChecklistUpdate(); ensurePublishMetadata(); populatePubProjects(); }
-    if (button.dataset.view === "calendar") { populateCalSources(); renderCalendar(); }
-    if (button.dataset.view === "integrations") loadIntegrations();
-    if (button.dataset.view === "analytics") { loadIntegrations(); loadAnalytics(); }
-    if (button.dataset.view === "intel") populateIntelProjects();
     if (button.dataset.view === "library") loadProjects();
     if (button.dataset.view === "exports") loadExports();
   });
