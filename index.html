@@ -1048,35 +1048,6 @@
     </div>
 
     <!-- CONTENT CALENDAR (Phase 6 — local planning plan, bukan jadwal platform) -->
-    <!-- INTEGRATIONS (Phase 6 — status deteksi nyata, tanpa OAuth palsu) -->
-    <div class="app-view page-view" data-view-panel="integrations">
-      <section class="panel res-hero">
-        <div>
-          <p class="eyebrow">Integrations</p>
-          <h2>Platform connections</h2>
-          <div class="pub-notice">Aplikasi ini sudah siap &mdash; tinggal aktifkan toggle untuk menghubungkan akun lewat otorisasi resmi di browser. Tidak ada simulasi koneksi.</div>
-        </div>
-        <button class="ghost-button compact" id="integRefreshBtn" type="button">REFRESH</button>
-      </section>
-      <section class="panel" id="integList" aria-label="Platforms">
-        <div class="empty-state">Memuat status integrasi&hellip;</div>
-      </section>
-
-      <details class="panel" id="integCredsPanel" style="margin-top:14px">
-        <summary>Lanjutan &mdash; pakai kredensial OAuth milikmu sendiri (opsional)</summary>
-        <div class="panel-heading">
-          <h2>KREDENSIAL API MILIKMU</h2>
-          <span class="status-pill status-pill-queued">BYO credentials</span>
-        </div>
-        <p class="dash-sub">Tempel kredensial OAuth milikmu sendiri (dibuat di Google Cloud Console / TikTok for Developers / Meta for Developers). Tersimpan lokal di komputermu (file 0600) &mdash; tidak pernah dikirim ke server mana pun selain platform tujuan saat otorisasi.</p>
-        <form id="integCredsForm" autocomplete="off"></form>
-        <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap">
-          <button class="primary-button compact" id="integCredsSaveBtn" type="button">SIMPAN KREDENSIAL</button>
-          <span class="dash-sub" id="integCredsHint"></span>
-        </div>
-      </details>
-    </div>
-
     <div class="app-view page-view" data-view-panel="analytics">
       <section class="panel res-hero">
         <div>
@@ -1212,8 +1183,7 @@
         <section class="panel">
           <div class="panel-heading"><h2>SHORTCUTS</h2></div>
           <div class="res-intel-actions" style="padding:12px">
-            <button class="secondary-button compact" id="setOpenIntegrations" type="button">SOCIAL INTEGRATIONS</button>
-            <button class="secondary-button compact" id="setOpenTemplates" type="button">Caption Template Library</button>
+<button class="secondary-button compact" id="setOpenTemplates" type="button">Caption Template Library</button>
           </div>
           <p class="caption-hint" style="padding:0 12px 12px">Preset engine (STT model, runtime AUTO/CPU/GPU) tetap dikonfigurasi per-project dari workspace masing-masing.</p>
         </section>

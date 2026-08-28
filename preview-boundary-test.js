@@ -833,11 +833,13 @@ test("dashboard: operational activity and insights use only persisted local evid
   assert.doesNotMatch(insights, /prediction|predict|Math\.random/i, "insights do not claim unverified performance predictions");
 });
 
-test("phase6: UI integrasi jujur — NOT CONNECTED, tanpa OAuth simulasi", () => {
-  const fn = script.slice(script.indexOf("async function loadIntegrations"), script.indexOf("function updatePublishAvailability"));
-  assert.match(fn, /NOT CONNECTED/, "real state rendered from endpoint");
-  assert.doesNotMatch(fn, /status\s*=\s*["']CONNECTED["']/, "never fakes a connection");
-  assert.match(server, /\.add\("GET", "\/api\/integrations"/, "server detection endpoint kept");
+test("phase6: integrasi UI lama dihapus; /api/integrations & kejujuran preserved", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.ok(!html.includes('data-view-panel="integrations"'), "legacy integrations panel removed");
+  assert.ok(!script.includes("function loadIntegrations"), "integrations UI wiring removed");
+  assert.match(server, /\.add\("GET", "\/api\/integrations/, "server detection endpoint kept");
+  const fn = server.slice(server.indexOf("function handleIntegrations"), server.indexOf("async function handleSttModels"));
+  assert.match(fn, /process\.env\[k\]/, "connected only from real credentials");
 });
 
 test("phase6: calendar UI & scheduling layer removed (V2 axis Results/Export)", () => {
@@ -1061,15 +1063,17 @@ test("intel-int: focus & hookStrategy mengalir dari UI ke ketiga jalur analisis"
 
 if (!process.exitCode) console.log('Preview boundary done: ' + results.filter(r=>r.ok).length + '/' + results.length + ' PASS');
 
-// -- Social PHASE 6: Hub connect flow (OAuth resmi, tanpa token ke UI) --------
-test("social-hub: Connect->authorize URL, polling status, Disconnect POST", () => {
-  const fn = script.slice(script.indexOf("// PHASE 6 — Social Hub:"), script.indexOf("function updatePublishAvailability"));
-  assert.match(fn, /\/api\/social\/connect\//, "connect fetches authorize URL");
-  assert.match(fn, /window\.open\(d\.url, "_blank"\)/, "system browser flow");
-  assert.match(fn, /pollSocialConnected/, "waits for real authorization");
-  assert.match(fn, /\/api\/social\/account\//, "account identity fetched");
-  assert.match(fn, /\/api\/social\/disconnect\//, "disconnect wired");
-  assert.doesNotMatch(fn, /access_token|refresh_token/, "tokens never reach renderer");
+// -- Social: OAuth BACKEND contract preserved; UI lama (loadIntegrations) dihapus ---------
+test("social: server OAuth contract intact — routes, providers, token safety (UI dilepas)", () => {
+  assert.match(server, /\.add\("GET", "\/api\/social\/connect\/:provider"/, "connect route kept");
+  assert.match(server, /\.add\("POST", "\/api\/social\/disconnect\/:provider"/, "disconnect route kept");
+  assert.match(server, /\.add\("GET", "\/api\/social\/account\/:provider"/, "account route kept");
+  assert.match(server, /\.add\("GET", "\/api\/oauth\/callback\/:provider"/, "callback route kept");
+  const manager = fs.readFileSync("social/manager.js", "utf8");
+  assert.match(manager, /youtube|tiktok|facebook/, "provider registry intact");
+  const tm = fs.readFileSync("social/token-manager.js", "utf8");
+  assert.match(tm, /_dangerousRawRead:\s*undefined/, "tokens never exposed to renderer");
+  assert.ok(!script.includes("function loadIntegrations"), "legacy integrations UI removed");
 });
 
 if (!process.exitCode) console.log("Preview boundary done: " + results.filter(r=>r.ok).length + "/" + results.length + " PASS");
